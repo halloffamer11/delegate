@@ -7,7 +7,7 @@
 - **The orchestrator is detected, never assumed.** From the environment or a `--orchestrator` flag; anything unrecognised falls back to the default path.
 - The courier and the statusline become optional extras that read the same run directory, not part of the core.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 11 One harness registry; 12 The skill calls the `delegate` command, not ~/.claude paths.
 

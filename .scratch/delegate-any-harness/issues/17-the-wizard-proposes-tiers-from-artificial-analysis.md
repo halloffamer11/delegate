@@ -2,7 +2,7 @@
 
 **What to build:** semi-automated Tier picking. For a new or unplaced Lane the wizard proposes a Tier from its AA figures (bands Orin sets once), marked as a proposal on the Tier page; nothing is written until Orin confirms. ADR 0001 and the consultation say the human sets Tier and the board assists; a proposal Orin confirms stays inside that rule.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

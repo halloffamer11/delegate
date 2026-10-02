@@ -2,7 +2,7 @@
 
 **What to build:** `usage.which()` (`scripts/usage.py:200`) has a dead `if False` branch and accepts directories and empty PATH entries, while rank and statusline use `shutil.which`. A probe can say "failed" where ranking says "absent". The statusline tests (`tests/test_report.py:302`) never stub PATH, so 9-10 of 107 checks fail on any host without all four CLIs; with stubs all pass.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

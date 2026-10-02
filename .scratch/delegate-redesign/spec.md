@@ -5,7 +5,7 @@ Amended 2026-09-10 (q1a): **`trust` is removed from the design entirely** — no
 
 Supersedes the Option 1 / Option 2 framing in `2026-09-08-delegate-assessment.md`. Neither option was taken.
 
-Provenance: research in `docs/superpowers/research/2026-09-08-lane-cost.md` and `2026-09-08-lane-benchmarks.md`; selection-rule prototype in `agents/skills/delegate/prototype-lane-selection.html` (throwaway, policy P4); ADS clone used for reading: github.com/amElnagdy/delegate-skills at b781ee2.
+Provenance: research in `.scratch/delegate-redesign/research/2026-09-08-lane-cost.md` and `2026-09-08-lane-benchmarks.md`; selection-rule prototype in `agents/skills/delegate/prototype-lane-selection.html` (throwaway, policy P4); ADS clone used for reading: github.com/amElnagdy/delegate-skills at b781ee2.
 
 ## 1. Terms
 

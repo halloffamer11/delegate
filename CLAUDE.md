@@ -21,13 +21,13 @@ history. The repo is public.
 
 ## Where state lives
 
-- Redesign: spec `docs/superpowers/specs/2026-09-08-delegate-redesign.md`, tickets
+- Redesign: spec `.scratch/delegate-redesign/spec.md`, tickets
   `.scratch/delegate-redesign/issues/`.
-- Dashboard: spec `docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`,
+- Dashboard: spec `.scratch/delegate-dashboard-plugin/spec.md`,
   tickets `.scratch/delegate-dashboard-plugin/issues/`.
 - Browser setup and parity: `.scratch/delegate-browser/issues/`.
 - Any-harness refactor (Kiro, registry, review fixes): spec
-  `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`, tickets
+  `.scratch/delegate-any-harness/spec.md`, tickets
   `.scratch/delegate-any-harness/issues/`.
 - Modular (complete): `.scratch/delegate-modular/CLAUDE.md`.
 - A ticket's `**Status:**` line names each open box that waits on Orin.
@@ -49,8 +49,8 @@ history. The repo is public.
 
 ### Issue tracker
 
-Local markdown: tickets in `.scratch/<effort>/issues/`, specs in
-`docs/superpowers/specs/`. See `docs/agents/issue-tracker.md`.
+Local markdown: each effort in `.scratch/<effort>/`, with its `spec.md` and
+`issues/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

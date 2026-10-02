@@ -13,7 +13,7 @@ Target layout:
 
 `monitor/` leaves the skill. A Ratatui crate is a separate product, not skill material under any reading of the spec; it moves to `tools/delegate-mon/`.
 
-The scripts import each other as siblings (`import catalog`, `import bench`), so they move together and the imports keep working. Every path that names them from outside does not: `SKILL.md`, `delegate/CLAUDE.md`, the hooks in `~/.claude/hooks/`, the global `~/.claude/CLAUDE.md` Delegation section, the two monitor documents under `docs/superpowers/`, and any brief template that writes `~/.claude/skills/delegate/delegate.py`. Each becomes `~/.claude/skills/delegate/scripts/<file>`.
+The scripts import each other as siblings (`import catalog`, `import bench`), so they move together and the imports keep working. Every path that names them from outside does not: `SKILL.md`, `delegate/CLAUDE.md`, the hooks in `~/.claude/hooks/`, the global `~/.claude/CLAUDE.md` Delegation section, the two monitor documents (now `.scratch/delegate-monitor/`), and any brief template that writes `~/.claude/skills/delegate/delegate.py`. Each becomes `~/.claude/skills/delegate/scripts/<file>`.
 
 `delegate/CLAUDE.md` also loses its transient content. The "Redesign status" and "Monitoring TUI" sections are dated project state that belongs in this ticket directory and will rot where they sit. What stays is the file-by-file implementation map and the worker constraints.
 
@@ -51,7 +51,7 @@ Every box was substantively done but left unticked. Checked rather than assumed:
 `preamble.md` and `preamble-leash.md`; `tools/delegate-mon/` exists outside the
 skill; `agents/skills/delegate/CLAUDE.md` carries no dated status section.
 
-The root-script grep is clean apart from `docs/superpowers/plans/2026-09-02-delegate-monitor.md`,
+The root-script grep is clean apart from `.scratch/delegate-monitor/plan.md`,
 which names `delegate/events.py`, `dispatch.sh` and `usage.py` at the old paths.
 That is the completed execution record this ticket says to leave as written, so it
 is not a dead reference to fix.

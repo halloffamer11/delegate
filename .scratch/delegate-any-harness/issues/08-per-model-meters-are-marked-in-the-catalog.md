@@ -2,7 +2,7 @@
 
 **What to build:** the statusline special-cases the Meter name `"claude-fable"` to decide a per-model Meter shares the claude 5h Window (`scripts/report.py:640`). A renamed Fable Meter, or a Sonnet per-model Meter whose cached row lacks `remaining_weekly_model`, draws the wrong row.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

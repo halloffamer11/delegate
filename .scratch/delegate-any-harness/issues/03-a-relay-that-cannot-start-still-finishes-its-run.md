@@ -2,7 +2,7 @@
 
 **What to build:** `scripts/delegate.py:478` starts `node` after `ledger_start`. A missing `node`, or any exception there, leaves no `dispatch.finish`, no return.json and a phantom running glyph in the statusline until the timeout. `ads.sh check` checks only that relay files exist.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

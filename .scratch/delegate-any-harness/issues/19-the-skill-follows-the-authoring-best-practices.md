@@ -2,7 +2,7 @@
 
 **What to build:** a rewrite of `SKILL.md` and `references/` against Anthropic's skill authoring best practices. Dispatch becomes low freedom (one exact `delegate` command); Class judgment stays high freedom (`classes.md`); catalog-edit and wizard detail move to references one level deep; `references/architecture.md` (26 KB, one 8,163-character line) gets short lines and a table of contents; ticket numbers leave the skill text; the description says in the third person what it does and when.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 09 Decide whether the model may invoke /delegate; 10 Evals for the delegate skill; 12 The skill calls the `delegate` command, not ~/.claude paths.
 

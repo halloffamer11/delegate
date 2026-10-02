@@ -2,7 +2,7 @@
 
 **What to build:** a Kiro module in the registry: discovery from `--list-models --format json`, a Meter whose Remaining is unknown until a usage source exists (an unknown Remaining never vetoes), effort mapping if Kiro's `--effort` applies headless, and the wizard offering Kiro Lanes for Tiers.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 11 One harness registry; 14 A Kiro relay in the delegate-skills fork.
 

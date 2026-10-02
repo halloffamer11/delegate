@@ -2,7 +2,7 @@
 
 **What to build:** `SKILL.md`, the four `/delegate-<harness>` wrappers, `council` and the courier call `python3 ~/.claude/skills/delegate/scripts/...`. Make `bin/delegate` the contract (`delegate rank|run|status|setup`, JSON out) so any harness that can run a shell can use the skill. Generate the per-harness wrappers from the registry instead of four near-identical files.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 11 One harness registry.
 

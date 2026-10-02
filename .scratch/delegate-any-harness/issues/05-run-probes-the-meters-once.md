@@ -2,7 +2,7 @@
 
 **What to build:** `run()` forces a full vendor probe to rank, then `dispatch()` forces a second one (`scripts/delegate.py:865`). That is two `claude -p /usage` calls per job, and that probe can spend the quota it measures.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

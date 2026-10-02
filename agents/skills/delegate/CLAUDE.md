@@ -11,7 +11,7 @@ External worker routing lives in this directory. Read `SKILL.md` first.
   reopen one.
 - Open work: `.scratch/delegate-redesign/issues/` and, for browser dispatch,
   `.scratch/delegate-browser/issues/`. The design is
-  `docs/superpowers/specs/2026-09-08-delegate-redesign.md`.
+  `.scratch/delegate-redesign/spec.md`.
 
 ## Rules
 

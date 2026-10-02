@@ -27,7 +27,7 @@ with main merged).
   branch's tree (it was test data of the prototype branches).
 - The root `Makefile` keeps the `delegate-dashboard` target.
 - The root `CLAUDE.md` and the spec
-  `docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md` say the UI now ships
+  `.scratch/delegate-dashboard-plugin/spec.md` say the UI now ships
   from main; the older "UI stays on the branch" rule is recorded as superseded by Orin's
   word of 2026-09-20.
 

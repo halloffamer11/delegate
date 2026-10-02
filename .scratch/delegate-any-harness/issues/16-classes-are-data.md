@@ -2,7 +2,7 @@
 
 **What to build:** custom Classes. Today `catalog.py:62` closes the set at five and the 2026-09-15 refactoring consultation chose to keep it closed; the multi-domain proposal (M7) sketched opening it. A Class becomes an entry in `routing.json` (floor, ceiling) with its guide section in `classes.md` (global or the project overlay), validated together. This reopens a session decision, not ADR 0001.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

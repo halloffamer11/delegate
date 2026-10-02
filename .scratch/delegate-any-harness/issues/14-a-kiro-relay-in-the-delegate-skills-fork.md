@@ -2,7 +2,7 @@
 
 **What to build:** a `skills/kiro-delegate/` relay in `halloffamer11/delegate-skills` with the same `delegate-relay.result.v1` contract as the other 17, offered upstream. Kiro headless, per kiro.dev docs read 2026-10-02: `kiro-cli chat --no-interactive --agent <a> --trust-tools=<categories> --output-format stream-json`, `KIRO_API_KEY` required (Pro tier and up); models list with `kiro-cli chat --list-models --format json`. Not found in the docs: a headless model flag (model comes from the agent config or `chat.defaultModel`) and any usage or credits command. The relay copies the shared symbols the parity test checks.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

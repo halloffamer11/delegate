@@ -2,7 +2,7 @@
 
 **What to build:** the delegate skill has no evals (`council` has `evals.md`). The best-practices guide asks for at least three scenarios and a baseline before a rewrite, so tickets 12 and 19 can show they did not make routing worse. Scenarios to start from: classify and brief a worker-shaped task; dispatch on the ranked Lane and report the return; handle a failed or timed-out run without inventing a result.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

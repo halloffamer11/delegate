@@ -2,7 +2,7 @@
 
 **What to build:** `delegate.py dispatch --lane X@claude --effort low` passes validation and records `effort=low` in dispatch.json, but the native agent's effort is fixed in its file, so the worker runs at the lane's effort (`scripts/delegate.py:763`).
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 

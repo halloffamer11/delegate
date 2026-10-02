@@ -2,7 +2,7 @@
 
 **What to build:** `compute_cost` treats a `null` price as $0 and marks the run measured (`scripts/report.py:251`). The wizard creates every new Lane with a `null` price, so new Lanes under-report spend.
 
-Spec: `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`
+Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
