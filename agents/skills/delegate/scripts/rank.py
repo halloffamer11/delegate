@@ -475,6 +475,8 @@ def main(argv=None):
     parser.add_argument("--config-dir", default=None, help="config directory containing lanes.json and routing.json")
     parser.add_argument("--meters", default=None, help="path to usage document JSON file")
     parser.add_argument("--harnesses", default=None, help="comma-separated list of present harnesses")
+    parser.add_argument("--harness", default=None,
+                        help="the user's harness constraint: rank this harness's Lanes only")
     parser.add_argument("--json", action="store_true", help="output as JSON")
 
     args = parser.parse_args(argv)
@@ -491,6 +493,15 @@ def main(argv=None):
     except CatalogError as e:
         sys.stderr.write(f"rank: {e}\n")
         sys.exit(1)
+
+    if args.harness is not None:
+        error = catalog.harness_constraint_error(args.harness) if args.harnesses is None else (
+            None if args.harness in args.harnesses.split(",") else
+            f"harness '{args.harness}' is not installed; installed: {args.harnesses}")
+        if error:
+            sys.stderr.write(f"rank: {error}\n")
+            sys.exit(2)
+        cat = catalog.restrict_to_harness(cat, args.harness)
 
     meters_doc = load_usage(cat, args.meters, refresh=not tiers_mode)
 

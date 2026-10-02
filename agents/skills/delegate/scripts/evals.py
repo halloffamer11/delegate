@@ -43,7 +43,9 @@ if HERE not in sys.path:
 import catalog  # noqa: E402
 import rank  # noqa: E402
 
-DELEGATE_PY = os.path.join(HERE, "delegate.py")
+# The evals drive delegate the way a harness does: through the `delegate`
+# command, which is the contract.
+DELEGATE = [sys.executable, os.path.join(SKILL_DIR, "..", "..", "..", "bin", "delegate")]
 ADS_SH = os.path.join(HERE, "ads.sh")
 SAMPLES_DIR = os.path.join(SKILL_DIR, "assets", "samples")
 SCHEMA_PATH = os.path.join(SKILL_DIR, "assets", "schemas", "return.json")
@@ -268,7 +270,7 @@ def ping_one(sandbox, harness):
         return "fail", str(e), None
     if lane is None:
         return "skip", why, None
-    cmd = [sys.executable, DELEGATE_PY, "dispatch", "--lane", lane, "--class", PING_CLASS,
+    cmd = DELEGATE + ["dispatch", "--lane", lane, "--class", PING_CLASS,
            "--brief", sandbox.brief, "--cwd", sandbox.cwd] + sandbox.common_args()
     if sandbox.offline:
         cmd.append("--no-probe")
@@ -328,9 +330,9 @@ def orchestrate_one(sandbox, orchestrator, reference):
     before = sandbox.run_dirs()
     if sandbox.offline:
         # The stub orchestrator does what the skill tells any orchestrator to
-        # do: one `delegate.py run` from a shell. It runs with the env the real
+        # do: one `delegate run` from a shell. It runs with the env the real
         # harness would have, so nothing about the caller leaks in.
-        cmd = [sys.executable, DELEGATE_PY, "run", PING_CLASS, "--brief", sandbox.brief,
+        cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief,
                "--cwd", sandbox.cwd, "--meters", sandbox.meters, "--no-probe"] + sandbox.common_args()
         proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
     else:
@@ -361,7 +363,7 @@ def eval_orchestrate(sandbox, orchestrators):
     except catalog.CatalogError as e:
         return {o: ("fail", str(e)) for o in orchestrators}
     if sandbox.offline:
-        cmd = [sys.executable, DELEGATE_PY, "run", PING_CLASS, "--brief", sandbox.brief,
+        cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief,
                "--cwd", sandbox.cwd, "--meters", sandbox.meters, "--no-probe"] + sandbox.common_args()
         proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
         reference = run_dir_from(proc.stdout)

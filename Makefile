@@ -45,6 +45,10 @@ install: delegate-codex-home
 		if [ -e $$t/$$s ] && [ ! -L $$t/$$s ]; then echo "ERROR: $$t/$$s is a real directory — move it aside first"; exit 1; fi; \
 	done; done
 	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && for s in $(SKILLS); do ln -sfn $(CURDIR)/agents/skills/$$s $$t/$$s; done; done
+	@# A link into this checkout whose skill is gone (the delegate-<harness> wrappers) is stale: drop it.
+	@for t in $(HARNESS_SKILL_DIRS); do for l in $$t/*; do \
+		if [ -L "$$l" ] && [ ! -e "$$l" ]; then case "$$(readlink "$$l")" in $(CURDIR)/agents/skills/*) echo "rm stale $$l"; rm "$$l";; esac; fi; \
+	done; done
 	mkdir -p $(HOME)/.claude/agents $(HOME)/.local/bin
 	ln -sfn $(CURDIR)/agents/agents/courier.md $(HOME)/.claude/agents/courier.md
 	ln -sfn $(CURDIR)/bin/delegate $(HOME)/.local/bin/delegate

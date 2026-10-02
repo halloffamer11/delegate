@@ -959,6 +959,26 @@ def main():
         record("27. --no-leash scout prompt lacks leash, dispatch.json leash=False", ok27, f"rc={res27.returncode}")
 
         # -------------------------------------------------------------
+        # 27b. run --harness: the user's constraint runs that harness's Pick, and
+        #      a harness that is not installed starts nothing (any-harness 12).
+        # -------------------------------------------------------------
+        b27b = make_brief("b27b.md", f"fake-relay: status=completed final={done_final}\nBrief 27b.")
+        meters27b = os.path.join(HERE, "fixture", "meters.json")
+        res27b = run_run(t_env, ["impl", "--brief", b27b, "--cwd", cwd, "--meters", meters27b,
+                                 "--harness", "grok"])
+        dir27b = parse_run_dir_from_stdout(res27b.stdout)
+        lane27b = json.load(open(os.path.join(dir27b, "dispatch.json")))["lane"] if dir27b else None
+        record("27b. run --harness grok runs a grok Lane", res27b.returncode == 0 and lane27b == "grok46-high@grok",
+               f"rc={res27b.returncode} lane={lane27b} out={res27b.stdout[-300:]} err={res27b.stderr[-300:]}")
+        runs_before27c = set(os.listdir(t_env["runs_dir"]))
+        res27c = run_run(t_env, ["impl", "--brief", b27b, "--cwd", cwd, "--meters", meters27b,
+                                 "--harnesses", "codex,agy", "--harness", "grok"])
+        record("27c. run --harness refuses a harness that is not installed and starts nothing",
+               res27c.returncode == 2 and "harness 'grok' is not installed" in res27c.stderr
+               and set(os.listdir(t_env["runs_dir"])) == runs_before27c,
+               f"rc={res27c.returncode} err={res27c.stderr}")
+
+        # -------------------------------------------------------------
         # 28. A tool cancelled at the permission gate is blocked, not partial
         #     (ticket 14). Fixture: grok46-high@grok, 2026-09-09, read-only
         #     under --permission-mode plan. The relay said completed and the

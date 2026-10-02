@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""delegate — the two delegate settings screens, from any directory.
+"""delegate — the command every harness drives delegate through.
 
-    delegate global [args]    the global catalog, through the setup wizard
-    delegate project [args]   this Git project's settings, in the dashboard
+    delegate rank <class> [--harness H] [--json] ...   rank the Lanes for a Class
+    delegate run <class> --brief B --cwd D [--harness H] ...   rank, then run the Pick
+    delegate dispatch --lane L --brief B --cwd D ...    run one named Lane
+    delegate status [--json] ...    remaining usage per Meter
+    delegate log|runs|cost ...      record and read adjudicated runs
+    delegate catalog ...            show, check or edit the catalog
+    delegate setup [args]           the setup wizard (the same as global)
+    delegate global [args]          edit the global catalog (the setup wizard)
+    delegate project [args]         edit this Git project's settings (the dashboard)
 
-Both run out of the checkout this file belongs to, found from its own resolved
-path rather than a fixed checkout, so the Mac checkout, a Herdr worktree and
-omarchy each run their own (ticket 34). The Makefile stays the one place that
-lists the wizard's arguments: `global` passes anything further as WIZARD_ARGS.
+The command is the contract: the skill, council and the courier call it, and
+never a path under any harness's home, so any harness that can run a shell
+can use delegate. Every subcommand runs out of the checkout this file belongs
+to, found from its own resolved path rather than a fixed checkout, so the Mac
+checkout, a Herdr worktree and omarchy each run their own (ticket 34). The
+Makefile stays the one place that lists the wizard's arguments: `global`
+passes anything further as WIZARD_ARGS.
 """
 import os
 import shlex
@@ -15,6 +25,12 @@ import subprocess
 import sys
 
 USAGE = (
+    "delegate rank <class> [--harness H] [--json]   rank the Lanes for a Class\n"
+    "delegate run <class> --brief B --cwd D [--harness H]   rank, then run the Pick\n"
+    "delegate dispatch --lane L --brief B --cwd D   run one named Lane\n"
+    "delegate status [--json]   remaining usage per Meter\n"
+    "delegate log|runs|cost ...   record and read adjudicated runs\n"
+    "delegate catalog ...   show, check or edit the catalog\n"
     "delegate global [args]   edit the global catalog (the setup wizard)\n"
     "delegate project [args]  edit this Git project's settings (the dashboard)"
 )
@@ -22,6 +38,19 @@ USAGE = (
 # This file is <checkout>/bin/delegate, and `make install` links it into
 # ~/.local/bin, so the path has to be resolved before it is walked up.
 CHECKOUT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+SCRIPTS = os.path.join(CHECKOUT, "agents", "skills", "delegate", "scripts")
+
+# Each subcommand, as the script and the leading arguments it runs.
+SCRIPT_COMMANDS = {
+    "rank": ("rank.py", []),
+    "run": ("delegate.py", ["run"]),
+    "dispatch": ("delegate.py", ["dispatch"]),
+    "status": ("report.py", ["limits"]),
+    "log": ("report.py", ["log"]),
+    "runs": ("report.py", ["runs"]),
+    "cost": ("report.py", ["cost"]),
+    "catalog": ("catalog.py", []),
+}
 
 
 def git_root(start):
@@ -52,7 +81,16 @@ def main(argv):
         print(USAGE)
         return 0
 
-    if command == "global":
+    if command == "status" and "--json" in rest:
+        # the usage document itself: every Meter's Remaining, Pace and resets
+        rest = [arg for arg in rest if arg != "--json"]
+        return subprocess.call([sys.executable, os.path.join(SCRIPTS, "usage.py"), *rest])
+
+    if command in SCRIPT_COMMANDS:
+        script, lead = SCRIPT_COMMANDS[command]
+        return subprocess.call([sys.executable, os.path.join(SCRIPTS, script), *lead, *rest])
+
+    if command in ("global", "setup"):
         return subprocess.call([
             "make", "-C", CHECKOUT, "delegate-wizard",
             # one make variable, re-split by the recipe's shell, so a path with

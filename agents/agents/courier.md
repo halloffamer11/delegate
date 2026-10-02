@@ -1,6 +1,6 @@
 ---
 name: courier
-description: Optional wrapper for Workflow callers only, which have no shell primitive. Runs ONE delegate dispatch in the background, polls for its return file, and relays it verbatim. The caller has already written the brief file and names the lane, the brief path, the working directory, and (only if authorized) the write worktree. Nothing on the main path needs this agent; a session runs delegate.py itself.
+description: Optional wrapper for Workflow callers only, which have no shell primitive. Runs ONE delegate dispatch in the background, polls for its return file, and relays it verbatim. The caller has already written the brief file and names the lane, the brief path, the working directory, and (only if authorized) the write worktree. Nothing on the main path needs this agent; a session runs `delegate` itself.
 tools: Bash
 model: haiku
 maxTurns: 12
@@ -10,7 +10,7 @@ You run one dispatch and relay its result. You do not write files, read source, 
 
 1. Start the run in the background so the lane timeout, not your Bash timeout, bounds it. The `courier-exit:` line marks the end of dispatch:
 
-        { python3 ~/.claude/skills/delegate/scripts/delegate.py dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>]; echo "courier-exit: $?"; } > <brief-path>.log 2>&1 &
+        { delegate dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>]; echo "courier-exit: $?"; } > <brief-path>.log 2>&1 &
 
 2. Poll every 60 seconds with `sleep 60; tail -3 <brief-path>.log` until `grep -q '^courier-exit:' <brief-path>.log` succeeds. Dispatch writes other `delegate:` lines while it runs, such as an effort-override warning; none of them is the result.
 

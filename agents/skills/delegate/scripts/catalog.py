@@ -58,6 +58,30 @@ def installed_harnesses(names=None):
     return {h for h in (HARNESSES if names is None else names) if cli_installed(h)}
 
 
+def harness_constraint_error(harness):
+    """Why a user's harness constraint cannot be applied, or None.
+
+    The constraint (`/delegate agy <task>`, or a standing "use agy for all
+    delegated work") restricts ranking to one harness's Lanes. Only the user
+    states one; a harness that is unknown or whose CLI is not on PATH is
+    refused, naming the installed ones.
+    """
+    if harness in HARNESSES and cli_installed(harness):
+        return None
+    installed = ", ".join(sorted(installed_harnesses())) or "none"
+    why = "is not a harness" if harness not in HARNESSES else "is not installed"
+    return f"harness '{harness}' {why}; installed: {installed}"
+
+
+def restrict_to_harness(cat, harness):
+    """A copy of the catalog holding only this harness's Lanes, so ranking,
+    the Gate, overflow and the Margin all run inside the constraint."""
+    out = dict(cat)
+    out["lanes"] = {name: lane for name, lane in (cat.get("lanes") or {}).items()
+                    if lane.get("harness") == harness}
+    return out
+
+
 EFFORTS = harnesses.EFFORTS
 # The efforts each harness offers, and so the only efforts a lane on it may
 # carry (ticket 19). Each adapter records its source.

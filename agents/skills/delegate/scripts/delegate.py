@@ -886,7 +886,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
 
-def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None):
     if class_ not in CLASSES:
         sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(CLASSES)}\n")
         sys.exit(2)
@@ -896,6 +896,16 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
     except CatalogError as e:
         sys.stderr.write(f"delegate: {e}\n")
         sys.exit(2)
+
+    if harness is not None:
+        present_list = None if harnesses is None else [h.strip() for h in harnesses.split(",")]
+        error = (catalog.harness_constraint_error(harness) if present_list is None else
+                 None if harness in present_list else
+                 f"harness '{harness}' is not installed; installed: {', '.join(present_list)}")
+        if error:
+            sys.stderr.write(f"delegate: {error}\n")
+            sys.exit(2)
+        cat = catalog.restrict_to_harness(cat, harness)
 
     cls_config = cat.get("routing", {}).get("classes", {}).get(class_, {})
     floor = cls_config.get("floor")
@@ -978,6 +988,8 @@ def main(argv=None):
     p_run.add_argument("--config-dir", default=None, help="directory containing lanes.json and routing.json")
     p_run.add_argument("--meters", default=None, help="path to usage document JSON file")
     p_run.add_argument("--harnesses", default=None, help="comma-separated list of present harnesses")
+    p_run.add_argument("--harness", default=None,
+                       help="the user's harness constraint: rank and run this harness's Lanes only")
     p_run.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
     p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
@@ -1015,6 +1027,7 @@ def main(argv=None):
             runs_dir=args.runs_dir,
             no_probe=args.no_probe,
             no_leash=args.no_leash,
+            harness=args.harness,
         )
 
 

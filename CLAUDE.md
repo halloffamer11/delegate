@@ -13,10 +13,11 @@ history. The repo is public.
 
 ## Layout
 
-- `agents/skills/`: the `delegate` skill, the typed-only `delegate-<harness>` skills,
-  and `council`, which calls delegate's scripts.
+- `agents/skills/`: the `delegate` skill and `council`, which calls the `delegate`
+  command.
 - `agents/agents/courier.md`: the one shipped agent.
-- `bin/delegate`: the `delegate global|project` command.
+- `bin/delegate`: the `delegate` command, the contract every harness calls
+  (`rank`, `run`, `dispatch`, `status`, `catalog`, `global`, `project`, ...).
 - `tools/delegate-dashboard/` (Herdr plugin) and `tools/delegate-mon/` (Rust monitor).
 
 ## Where state lives

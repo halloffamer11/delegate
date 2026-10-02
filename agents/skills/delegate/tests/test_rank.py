@@ -1445,4 +1445,33 @@ with tempfile.TemporaryDirectory() as td:
         res27.stdout[:600] + res27.stderr,
     )
 
+# case 28: a user's harness constraint ranks that harness's Lanes only, with the
+# Range, Gate and Pace unchanged inside it, and refuses an uninstalled harness.
+_samples28 = os.path.join(HERE, "..", "assets", "samples")
+_meters28 = os.path.join(HERE, "fixture", "meters.json")
+res28 = subprocess.run(
+    [sys.executable, RANK_PY, "impl", "--config-dir", _samples28, "--meters", _meters28,
+     "--harnesses", ALL_HARNESSES_ARG, "--harness", "codex", "--json"],
+    capture_output=True, text=True)
+try:
+    doc28 = json.loads(res28.stdout)
+except ValueError:
+    doc28 = {}
+record(
+    "case 28a --harness codex ranks codex Lanes only, and picks inside the Range",
+    res28.returncode == 0 and doc28.get("pick") == "terra-high@codex"
+    and {r["harness"] for r in doc28.get("rows", [])} == {"codex"},
+    res28.stdout[:400] + res28.stderr,
+)
+res28b = subprocess.run(
+    [sys.executable, RANK_PY, "impl", "--config-dir", _samples28, "--meters", _meters28,
+     "--harnesses", "codex,agy", "--harness", "grok"],
+    capture_output=True, text=True)
+record(
+    "case 28b a harness that is not installed is refused with the installed list",
+    res28b.returncode == 2 and "harness 'grok' is not installed" in res28b.stderr
+    and "codex,agy" in res28b.stderr,
+    res28b.stderr,
+)
+
 sys.exit(1 if fails else 0)

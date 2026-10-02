@@ -89,7 +89,7 @@ down one Tier; Tier 1 requires Carry to switch off.
 - `assets/codex-home/config.toml`: the template for delegate's own `CODEX_HOME`. `make delegate-codex-home` expands `@HOME@`, writes it to `~/.local/share/delegate/codex-home/`, and symlinks `~/.codex/auth.json` beside it. It holds one MCP server and `approvals_reviewer = "auto_review"`, which is required: `codex exec` runs at `approval_policy = "never"`, which would otherwise auto-reject the approval an MCP tool call raises.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays. Each script first moves to a fresh temporary directory with no Git root above it, so the invoking checkout's own `.delegate/routing.json` never reaches a test.
-- Sibling skills `../delegate-claude`, `../delegate-codex`, `../delegate-agy`, `../delegate-grok`: typed-only wrappers, about twenty lines each; `/delegate-claude` spawns natively.
+- `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate rank|run|dispatch|status|log|runs|cost|catalog|setup`). A user's harness constraint is `--harness <h>` on `rank` and `run`; it replaced the four `delegate-<harness>` wrapper skills.
 
 ## Read-only per harness
 
