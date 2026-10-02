@@ -1652,5 +1652,24 @@ class StagedEditTest(ProjectFixture):
             self.assertIn(key, context)
 
 
+class OpenManifestTest(unittest.TestCase):
+    """open.py reads the manifest on every supported Python (3.9 has no tomllib)."""
+
+    def test_manifest_entrypoint_is_read(self):
+        import open as open_mod
+        self.assertEqual(open_mod.manifest_entrypoint(), ("delegate.project-dashboard", "dashboard"))
+
+    def test_the_fallback_reader_agrees_with_the_manifest(self):
+        import open as open_mod
+        ids = open_mod._read_manifest_ids(open_mod.MANIFEST_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(ids["id"], "delegate.project-dashboard")
+        self.assertEqual([pane["id"] for pane in ids["panes"]], ["dashboard"])
+        if open_mod.tomllib is not None:
+            with open_mod.MANIFEST_PATH.open("rb") as manifest_file:
+                full = open_mod.tomllib.load(manifest_file)
+            self.assertEqual(ids["id"], full["id"])
+            self.assertEqual([p["id"] for p in ids["panes"]], [p["id"] for p in full["panes"]])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

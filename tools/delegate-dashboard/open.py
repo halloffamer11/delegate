@@ -13,7 +13,10 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-import tomllib
+try:
+    import tomllib
+except ImportError:  # Python before 3.11; delegate supports 3.9
+    tomllib = None
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parent
@@ -26,11 +29,36 @@ class OpenError(RuntimeError):
     """An actionable error while opening the Herdr pane."""
 
 
+def _read_manifest_ids(text: str) -> dict[str, Any]:
+    """The plugin id and each pane's id, for a Python without tomllib.
+
+    Reads only `key = "string"` lines and `[[panes]]` headers, which is all
+    manifest_entrypoint looks at; anything else is skipped.
+    """
+    manifest: dict[str, Any] = {}
+    table: dict[str, Any] = manifest
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line == "[[panes]]":
+            table = {}
+            manifest.setdefault("panes", []).append(table)
+        elif line.startswith("["):
+            table = {}
+        elif "=" in line and not line.startswith("#"):
+            key, value = (part.strip() for part in line.split("=", 1))
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                table[key] = value[1:-1]
+    return manifest
+
+
 def manifest_entrypoint() -> tuple[str, str]:
     try:
-        with MANIFEST_PATH.open("rb") as manifest_file:
-            manifest = tomllib.load(manifest_file)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        if tomllib is not None:
+            with MANIFEST_PATH.open("rb") as manifest_file:
+                manifest = tomllib.load(manifest_file)
+        else:
+            manifest = _read_manifest_ids(MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:  # tomllib.TOMLDecodeError is a ValueError
         raise OpenError(f"could not read {MANIFEST_PATH}: {exc}") from exc
 
     plugin_id = manifest.get("id")

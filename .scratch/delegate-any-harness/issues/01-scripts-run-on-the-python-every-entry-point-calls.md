@@ -21,10 +21,16 @@ the tests (`test_bench_page.py`, `test_discover.py`), which the ticket's 3.10/3.
 missed because it compiled scripts only. Nothing else needed 3.10+: the dashboard's
 `X | None` annotations sit behind `from __future__ import annotations`.
 
+Codex's review of PR #2 found one runtime gap that compiling misses:
+`tools/delegate-dashboard/open.py` imported `tomllib` (3.11+), so it failed on 3.9 even
+for `--help`. It now uses `tomllib` when present and otherwise reads the two ids it
+needs from the manifest itself (`_read_manifest_ids`).
+
 The README states the minimum. `make test` takes `PYTHON=` and stops first with
 `make test: delegate needs Python 3.9 or newer; … is 3.8.20` on an older one.
 
 Verified: every script, test and `tools/delegate-dashboard/*.py` passes
-`python3.9 -m py_compile` (3.9.23); `make test PYTHON=python3.9` gives the same result
+`python3.9 -m py_compile` (3.9.23), and every script and dashboard module imports on
+3.9; `test_dashboard.py` `OpenManifestTest` reads the manifest through `open.py`; `make test PYTHON=python3.9` gives the same result
 as 3.13 (all ok except `test_report.py`, ticket 07); `make test PYTHON=python3.8` stops
 with the message above.
