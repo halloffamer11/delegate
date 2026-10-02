@@ -1,6 +1,6 @@
 ---
 name: delegate-codex
-description: Typed-only. Run one brief on Codex through the delegate dispatcher, with ranking constrained by prose.
+description: Runs one brief on Codex through the delegate dispatcher, with ranking constrained by the user's plain words. Runs only when the user types /delegate-codex; never use it on your own initiative.
 disable-model-invocation: true
 argument-hint: "[plain-language constraints]"
 ---

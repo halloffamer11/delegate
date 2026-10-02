@@ -1,6 +1,6 @@
 ---
 name: council
-description: Convene a multi-model council — sealed memos from independent harnesses, adjudicated by the routing lead — for a critical decision. Explicitly invoked only.
+description: Convene a multi-model council — sealed memos from independent harnesses, adjudicated by the routing lead — for a critical decision. Runs only when the user explicitly invokes /council; never use it on your own initiative.
 disable-model-invocation: true
 ---
 
@@ -34,7 +34,8 @@ One brief, received identically by every panelist:
 
 ## 3. Collect sealed memos
 Invoke each panelist under the delegate skill's rules (read-only, headless,
-temp-file prompts, hard timeout). Same brief to all; no panelist sees
+temp-file prompts, hard timeout). The user's /council is the explicit request
+delegate needs for these runs; a council never delegates anything beyond them. Same brief to all; no panelist sees
 another's memo in the sealed round. Required memo schema:
 recommendation · key assumptions · failure modes · confidence ·
 what would change my mind.

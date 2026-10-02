@@ -1,12 +1,12 @@
 ---
 name: delegate
-description: Route worker-shaped work (implementation with a spec, verification, review, scouting, mechanical transforms) to an external worker on one lane, picked by tier and remaining subscription usage. Use before any Agent, Workflow, or teammate spawn, and to answer questions about remaining usage. Not for work that needs this session's live context.
+description: Sends one worker-shaped job (implementation with a spec, verification, review, scouting, a mechanical transform) to an external or native worker on one lane, picked by tier and remaining subscription usage, and reports remaining usage. Runs only when the user explicitly asks for delegation (for example by typing /delegate); never use it on your own initiative.
 disable-model-invocation: true
 ---
 
 # Delegate
 
-The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on a **lane**: one (harness, model, effort) tuple that drains one subscription **meter**. `/delegate` is the model-invocable entry point that reads meters and ranks lanes. The typed-only wrappers `/delegate-claude`, `/delegate-codex`, `/delegate-agy`, `/delegate-grok` run one harness with prose-constrained ranking.
+The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on a **lane**: one (harness, model, effort) tuple that drains one subscription **meter**. `/delegate` reads meters and ranks lanes, and it runs only when the user explicitly asks for delegation: never delegate work on your own initiative, and never start it because a task looks worker-shaped. The typed-only wrappers `/delegate-claude`, `/delegate-codex`, `/delegate-agy`, `/delegate-grok` run one harness with prose-constrained ranking.
 
 ## Terms
 

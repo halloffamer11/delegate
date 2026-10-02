@@ -1,6 +1,6 @@
 ---
 name: delegate-agy
-description: Typed-only. Run one brief on Antigravity through the delegate dispatcher, with ranking constrained by prose.
+description: Runs one brief on Antigravity through the delegate dispatcher, with ranking constrained by the user's plain words. Runs only when the user types /delegate-agy; never use it on your own initiative.
 disable-model-invocation: true
 argument-hint: "[plain-language constraints]"
 ---
