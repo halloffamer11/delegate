@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
 CHECKOUT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-COMMAND = os.path.join(CHECKOUT, "stow", "delegate", ".local", "bin", "delegate")
+COMMAND = os.path.join(CHECKOUT, "bin", "delegate")
 
 fails = 0
 
@@ -44,10 +44,10 @@ def executable(path, text):
 
 def make_checkout(td):
     """A copy of the layout the command walks up through: the command itself at
-    its stow path, a stub dashboard where the real one sits, and a stub `make`
+    its `bin/` path, a stub dashboard where the real one sits, and a stub `make`
     on PATH. Each stub writes its argv and its working directory as JSON."""
     checkout = os.path.join(td, "checkout")
-    bindir = os.path.join(checkout, "stow", "delegate", ".local", "bin")
+    bindir = os.path.join(checkout, "bin")
     tools = os.path.join(checkout, "tools", "delegate-dashboard")
     stubs = os.path.join(td, "stubs")
     for path in (bindir, tools, stubs):
@@ -161,7 +161,7 @@ with tempfile.TemporaryDirectory() as td:
     )
 
 # -------------------------------------------------------------
-# 6. Through a symlink, as stow links it, the command resolves the real
+# 6. Through a symlink, as `make install` links it, the command resolves the real
 #    checkout — not the directory the link sits in.
 with tempfile.TemporaryDirectory() as td:
     checkout, command, env, record_to = make_checkout(td)
@@ -172,14 +172,14 @@ with tempfile.TemporaryDirectory() as td:
     res = run(link, ["global"], env, td)
     called = ran(record_to)
     record(
-        "6 through a stow symlink it still finds its own checkout",
+        "6 through a symlink it still finds its own checkout",
         res.returncode == 7 and called is not None
         and called["argv"][:3] == ["-C", os.path.realpath(checkout), "delegate-wizard"],
         repr(called),
     )
 
 # -------------------------------------------------------------
-# 7. The shipped file is executable, so stow links a runnable command.
+# 7. The shipped file is executable, so the link is a runnable command.
 record(
     "7 the shipped command is executable and is Python 3",
     os.access(COMMAND, os.X_OK)

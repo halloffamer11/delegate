@@ -1,7 +1,6 @@
-# Dotfiles
+# Delegate
 
-Machine configuration and agent tooling. Today the terms below belong to delegate,
-which is the routing of worker jobs to external or native models by capability and
+Delegate is the routing of worker jobs to external or native models by capability and
 remaining subscription usage.
 
 ## Delegate: who runs a job

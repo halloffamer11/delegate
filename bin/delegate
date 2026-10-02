@@ -5,7 +5,7 @@
     delegate project [args]   this Git project's settings, in the dashboard
 
 Both run out of the checkout this file belongs to, found from its own resolved
-path rather than a fixed `~/dotfiles`, so the Mac checkout, a Herdr worktree and
+path rather than a fixed checkout, so the Mac checkout, a Herdr worktree and
 omarchy each run their own (ticket 34). The Makefile stays the one place that
 lists the wizard's arguments: `global` passes anything further as WIZARD_ARGS.
 """
@@ -19,10 +19,9 @@ USAGE = (
     "delegate project [args]  edit this Git project's settings (the dashboard)"
 )
 
-# This file is <checkout>/stow/delegate/.local/bin/delegate, and stow links it
-# into ~/.local/bin, so the path has to be resolved before it is walked up.
-CHECKOUT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.realpath(__file__))))))
+# This file is <checkout>/bin/delegate, and `make install` links it into
+# ~/.local/bin, so the path has to be resolved before it is walked up.
+CHECKOUT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 
 def git_root(start):
