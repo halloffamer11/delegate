@@ -8,6 +8,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Status:** ready-for-agent, raised by Orin 2026-10-02
 
+- [ ] Kiro CLI is installed on the Mac so the relay can be tested for real: `kiro-cli` declared in dotfiles (the Brewfile if Homebrew carries it, otherwise its official installer as a Makefile step), `kiro-cli --version` and `kiro-cli chat --list-models --format json` work, and `KIRO_API_KEY` is set machine-locally, never committed (Orin's box for the key; raised by Orin in review 2026-10-02).
 - [ ] `relay.mjs` maps `--read-only` to the narrowest trusted tool set and adds the git-fingerprint tripwire if that is weak.
 - [ ] `test/relay-parity.mjs` and a fake-CLI suite pass in the fork.
 - [ ] `ads.sh` pins the new commit; the upstream PR link is recorded here.
