@@ -46,6 +46,16 @@ def write_dispatch(path, doc):
 
 with tempfile.TemporaryDirectory() as tmp:
     now = time.time()
+    # Which harness CLIs are on PATH decides the statusline's and the popup's
+    # rows, so every report run sees a PATH of exactly the four stub CLIs, never
+    # the host's. A test that wants a missing CLI sets PATH itself.
+    stub_bin = os.path.join(tmp, "stub-bin")
+    os.makedirs(stub_bin)
+    for cli in ("claude", "codex", "agy", "grok"):
+        with open(os.path.join(stub_bin, cli), "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(stub_bin, cli), 0o755)
+    os.environ["PATH"] = stub_bin
     cache = os.path.join(tmp, "usage.json")
     config_dir = os.path.join(tmp, "config")
     shutil.copytree(SAMPLES, config_dir)
@@ -249,6 +259,39 @@ with tempfile.TemporaryDirectory() as tmp:
     check("runs roll-up reports measured total and unmeasured count",
           f"{money(usd)} measured across {len(measured)} runs, {n_unm} unmeasured" in out, out)
 
+    # A Lane with a null input price (as the wizard creates every new Lane) is
+    # unpriced: never $0 measured, kept out of the measured total, and counted.
+    unpriced_cfg = os.path.join(tmp, "unpriced-config")
+    shutil.copytree(SAMPLES, unpriced_cfg)
+    lanes_path = os.path.join(unpriced_cfg, "lanes.json")
+    lanes_doc = json.load(open(lanes_path))
+    lanes_doc["lanes"]["luna-low@codex"]["price"]["in"] = None
+    with open(lanes_path, "w") as f:
+        json.dump(lanes_doc, f, indent=2)
+    unpriced_run = os.path.join(tmp, "run-unpriced")
+    write_dispatch(unpriced_run, {
+        "lane": "luna-low@codex",
+        "usage": {"input_tokens": 500000, "output_tokens": 1000},
+        "secs": 20, "status": "done",
+    })
+    rc, out, err = run(["log", "--work", "Unpriced job", "--run", unpriced_run, "--verdict", "clean",
+                        "--config-dir", unpriced_cfg], env)
+    check("log --run on an unpriced lane exits 0", rc == 0, err)
+    check("logged line ends with unpriced", out.strip().endswith("unpriced"), out)
+    up_rec = [json.loads(l) for l in open(env["DELEGATE_RUNS"])][-1]
+    upc = up_rec.get("cost") or {}
+    check("unpriced cost is not measured and keeps its tokens",
+          upc.get("measured") is False and upc.get("unpriced") is True
+          and upc.get("input_tokens") == 500000 and "usd_total" not in upc, str(upc))
+    rc, out, _ = run(["cost", unpriced_run, "--config-dir", unpriced_cfg], env)
+    check("cost names the unpriced lane", out.startswith("unpriced: unpriced lane luna-low@codex: no in price"), out)
+    rc, out, _ = run(["runs"] + cfg, env)
+    up_row = next((l for l in out.splitlines() if "Unpriced job" in l), "")
+    check("runs shows unpriced, not $0.00",
+          up_row and cells(up_row)[3] == "unpriced" and "$0.00" not in up_row, out)
+    check("roll-up keeps the unpriced run out of the measured total and counts it",
+          f"{money(usd)} measured across {len(measured)} runs, 1 unpriced, {n_unm} unmeasured" in out, out)
+
     missing = os.path.join(tmp, "no-catalog")
     os.makedirs(missing)
     rc, out, err = run(["limits", "--max-age-min", "600", "--config-dir", missing], env)
@@ -322,6 +365,42 @@ with tempfile.TemporaryDirectory() as tmp:
 
     rc, out_norun, _ = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
     check("statusline --no-running drops running glyph", "①" not in out_norun.splitlines()[0].split("wk")[-1], out_norun)
+
+    # A model Meter is marked in the catalog, not known by its name (ticket 08):
+    # renamed, with its probe row renamed too, it draws the same row; and its
+    # row leaves 5h blank even when the cached row has no per-model figure.
+    def renamed_meter(new, drop_model_figure):
+        rcfg = os.path.join(tmp, f"renamed-{new}-{int(drop_model_figure)}")
+        shutil.copytree(config_dir, rcfg)
+        lanes_path = os.path.join(rcfg, "lanes.json")
+        doc = json.load(open(lanes_path))
+        doc["meters"] = {(new if k == "claude-fable" else k): v for k, v in doc["meters"].items()}
+        for lane in doc["lanes"].values():
+            if lane.get("meter") == "claude-fable":
+                lane["meter"] = new
+        with open(lanes_path, "w") as f:
+            json.dump(doc, f, indent=2)
+        cache_doc = json.load(open(sl_cache))
+        for row in cache_doc["lanes"]:
+            if row["lane"] == "claude-fable":
+                row["lane"], row["meter"] = new, new.split("-", 1)[1]
+                if drop_model_figure:
+                    row.pop("remaining_weekly_model")
+        rcache = os.path.join(rcfg, "usage.json")
+        with open(rcache, "w") as f:
+            json.dump(cache_doc, f)
+        rc, out, _ = run(["statusline", "--no-color", "--no-running", "--config-dir", rcfg],
+                         dict(sl_env, DELEGATE_CACHE=rcache))
+        return [l for l in out.splitlines() if l.strip()]
+
+    renamed = renamed_meter("claude-amber", False)
+    norun_lines = [l for l in out_norun.splitlines() if l.strip()]
+    check("a renamed model Meter draws the same row",
+          renamed == [l.replace("fable", "amber") for l in norun_lines], f"{renamed} vs {norun_lines}")
+    bare = renamed_meter("claude-amber", True)
+    amber = next((l for l in bare if " amber " in l), "")
+    check("a model Meter whose cached row has no per-model figure still leaves 5h blank",
+          "amber                   wk" in amber and "46%·4d" in amber, amber)
 
     color_env = dict(sl_env)
     color_env["NO_COLOR"] = ""

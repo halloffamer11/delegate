@@ -18,15 +18,15 @@ Two ledgers exist and they are not the same file:
                 knows this, so only the lead writes it.
 Run ledger path: $DELEGATE_RUNS else ~/.cache/delegate/runs.jsonl.
 """
-import argparse, json, os, re, shutil, sys, time
+import argparse, json, os, re, sys, time
 from collections import Counter
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
+    from catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 except ImportError:
-    from .catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
+    from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
 try:
     from rank import rank, tier_leaders
@@ -226,7 +226,13 @@ def _first_present(obj, keys):
 
 
 def compute_cost(usage, lane_name, catalog):
-    """Token dollars for one dispatch. Unmeasured when the relay sent no counts."""
+    """Token dollars for one dispatch. Unmeasured when the relay sent no counts.
+
+    A Lane with no input or output price is unpriced, not free: the wizard
+    creates every new Lane with null prices, and reading them as $0 would
+    under-report spend. Its tokens are kept and it is never measured. A null
+    cache price is only unpublished (codex has no cache-write price) and adds 0.
+    """
     if not isinstance(usage, dict):
         return {"measured": False, "reason": "relay reported no token usage"}
     input_raw = _first_present(usage, INPUT_KEYS)
@@ -243,6 +249,17 @@ def compute_cost(usage, lane_name, catalog):
         "cache_read": _first_present(usage, CACHE_READ_KEYS) or 0,
         "cache_write": _first_present(usage, CACHE_WRITE_KEYS) or 0,
     }
+    missing = [k for k in ("in", "out") if price.get(k) is None]
+    if missing:
+        return {
+            "measured": False,
+            "unpriced": True,
+            "reason": f"unpriced lane {lane_name}: no {' or '.join(missing)} price",
+            "input_tokens": tokens["in"],
+            "output_tokens": tokens["out"],
+            "cache_read_tokens": tokens["cache_read"],
+            "cache_write_tokens": tokens["cache_write"],
+        }
     usd = {}
     unpublished = []
     for key, n in tokens.items():
@@ -296,7 +313,8 @@ def cmd_cost(a):
     lane = dispatch.get("lane")
     cost = compute_cost(dispatch.get("usage"), lane, catalog)
     if not cost.get("measured"):
-        print(f"unmeasured: {cost.get('reason', '')}")
+        word = "unpriced" if cost.get("unpriced") else "unmeasured"
+        print(f"{word}: {cost.get('reason', '')}")
         return
     price = catalog["lanes"].get(lane, {}).get("price") or {}
     rows = [
@@ -346,7 +364,7 @@ def cmd_log(a):
     append_run(rec)
     extra = ""
     if "cost" in rec:
-        extra = f" {money(rec['cost']['usd_total'])}" if rec["cost"].get("measured") else " unmeasured"
+        extra = " " + cost_cell(rec)
     print(f"logged: {a.work} → {lane} {secs_cell(secs)} {a.verdict}{extra}")
 
 
@@ -362,6 +380,8 @@ def cost_cell(rec):
     c = rec.get("cost")
     if not c:
         return "—"
+    if c.get("unpriced"):
+        return "unpriced"
     if not c.get("measured"):
         return "unmeasured"
     total = c.get("usd_total") or 0
@@ -392,9 +412,13 @@ def cmd_runs(a):
     costed = [r for r in recs if r.get("cost")]
     if costed:
         measured = [r for r in costed if r["cost"].get("measured")]
-        n_unm = sum(1 for r in costed if not r["cost"].get("measured"))
+        n_unpriced = sum(1 for r in costed if r["cost"].get("unpriced"))
+        n_unm = sum(1 for r in costed if not r["cost"].get("measured")) - n_unpriced
         usd = sum(r["cost"].get("usd_total") or 0 for r in measured)
-        line += f"; {money(usd)} measured across {len(measured)} runs, {n_unm} unmeasured"
+        line += f"; {money(usd)} measured across {len(measured)} runs"
+        if n_unpriced:
+            line += f", {n_unpriced} unpriced"
+        line += f", {n_unm} unmeasured"
     print(line)
 
 
@@ -556,7 +580,7 @@ def cmd_statusline(a):
         return
 
     now = time.time()
-    present = {h for h in HARNESSES if shutil.which(h)}
+    present = installed_harnesses()
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
     gate_threshold = routing.get("gate", 0.10)
@@ -637,7 +661,10 @@ def cmd_statusline(a):
         remw = u_row.get("remaining_weekly")
         resetw = u_row.get("reset_weekly")
         model_remw = u_row.get("remaining_weekly_model")
-        shares5 = (model_remw is not None) or (m_key == "claude-fable")
+        # A model Meter has a weekly Window of its own and shares its harness's
+        # 5h Window, so its row leaves 5h blank. The catalog says so; a probe row
+        # with a per-model weekly figure says so too.
+        shares5 = bool(m_def.get("model_meter")) or model_remw is not None
         if model_remw is not None:
             remw = model_remw
 

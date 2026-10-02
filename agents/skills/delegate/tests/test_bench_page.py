@@ -484,11 +484,12 @@ try:
            f"heads={heads} fable={fable[:300]!r}")
     # the rank's job, without the rank: a bar per figure scaled to the column's
     # largest, so the fixture's 98.0 fills the column and the 60.0 is 61% of it
-    widths = re.findall(r'style="width:(\d+)%"', fable)
+    WIDTH_RE = r'style="width:(\d+)%"'
+    widths = re.findall(WIDTH_RE, fable)
     luna = table[table.find("gpt-5.6-luna"):table.find("</tr>", table.find("gpt-5.6-luna"))]
     record("a bar under each figure carries its share of the column, so models compare down a column",
-           widths == ["100"] * 5 and re.findall(r'style="width:(\d+)%"', luna)[0] == "61",
-           f"fable={widths} luna={re.findall(r'style=\"width:(\\d+)%\"', luna)}")
+           widths == ["100"] * 5 and re.findall(WIDTH_RE, luna)[0] == "61",
+           f"fable={widths} luna={re.findall(WIDTH_RE, luna)}")
 except Exception as e:
     record("a figure measured at an effort no lane runs is shown grey and unattributed; "
            "one at the lane's effort names the lane; no column claims a lane effort",

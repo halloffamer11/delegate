@@ -109,7 +109,6 @@ import copy
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 
@@ -118,7 +117,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
-from catalog import CatalogError, EFFORTS, HARNESSES, HARNESS_EFFORTS, load_catalog
+from catalog import CatalogError, EFFORTS, HARNESS_EFFORTS, load_catalog
 
 # Harness evaluation order: harnesses with discover commands first, then claude
 DISCOVER_HARNESSES = ("codex", "agy", "grok", "claude")
@@ -488,7 +487,7 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                 if h == "claude" or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
             }
         else:
-            present = {h for h in DISCOVER_HARNESSES if shutil.which(h)}
+            present = catalog.installed_harnesses(DISCOVER_HARNESSES)
     else:
         present = set(present)
 
@@ -1076,7 +1075,7 @@ def handle_efforts(target_model, cat=None, present=None, fixture_dir=None, runne
                 if h == "claude" or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
             }
         else:
-            present = {h for h in DISCOVER_HARNESSES if shutil.which(h)}
+            present = catalog.installed_harnesses(DISCOVER_HARNESSES)
     else:
         present = set(present)
 

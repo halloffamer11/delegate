@@ -37,6 +37,22 @@ import tempfile
 CONFIG_DIR = "~/.config/delegate"
 
 HARNESSES = ("claude", "codex", "agy", "grok")
+
+
+def cli_installed(harness):
+    """Whether this harness's CLI is on PATH. Every caller asks here.
+
+    The CLI is named after the harness today. Ticket 11 moves this behind the
+    harness adapter, where a CLI may be named otherwise (Kiro's `kiro-cli`).
+    """
+    return shutil.which(harness) is not None
+
+
+def installed_harnesses(harnesses=None):
+    """The harnesses, of HARNESSES or the ones given, whose CLI is on PATH."""
+    return {h for h in (HARNESSES if harnesses is None else harnesses) if cli_installed(h)}
+
+
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # The efforts each harness offers, and so the only efforts a lane on it may
 # carry (ticket 19). Sources, each checked 2026-09-12:
@@ -302,7 +318,7 @@ def validate_lanes(doc, source="lanes.json"):
     if not isinstance(meters, dict) or len(meters) == 0:
         raise CatalogError(f"{source}: key 'meters': meters must be a non-empty object")
 
-    allowed_meter_fields = {"harness", "plan", "price_month", "probe", "note"}
+    allowed_meter_fields = {"harness", "plan", "price_month", "probe", "note", "model_meter"}
     required_meter_fields = ("harness", "plan", "price_month", "probe")
 
     for meter_name, meter in meters.items():
@@ -330,6 +346,8 @@ def validate_lanes(doc, source="lanes.json"):
             raise CatalogError(f"{source}: meter '{meter_name}': probe must be a non-empty string")
         if "note" in meter and not isinstance(meter["note"], str):
             raise CatalogError(f"{source}: meter '{meter_name}': note must be a string")
+        if "model_meter" in meter and not isinstance(meter["model_meter"], bool):
+            raise CatalogError(f"{source}: meter '{meter_name}': model_meter must be true or false")
 
     lanes = doc["lanes"]
     if not isinstance(lanes, dict) or len(lanes) == 0:
@@ -1424,7 +1442,7 @@ def _rank_mod():
 def _present_harnesses(present=None):
     if present is not None:
         return set(present)
-    return {h for h in HARNESSES if shutil.which(h)}
+    return installed_harnesses()
 
 
 def _cached_meters(meters=None):

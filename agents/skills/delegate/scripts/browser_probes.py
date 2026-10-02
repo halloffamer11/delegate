@@ -262,7 +262,7 @@ def main(argv=None):
 
     if args.dry_run:
         for harness in harnesses:
-            if not shutil.which(harness):
+            if not catalog.cli_installed(harness):
                 for probe in probes:
                     print(f"| {harness} | — | {probe} | FAIL | cli absent |")
                 continue
@@ -293,7 +293,7 @@ def main(argv=None):
 
     def worker(harness):
         h_rows = []
-        if not shutil.which(harness):
+        if not catalog.cli_installed(harness):
             for probe in probes:
                 h_rows.append((harness, "—", probe, "FAIL", "cli absent"))
             return harness, h_rows

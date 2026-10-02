@@ -20,6 +20,7 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 FIXTURES_DIR = os.path.join(HERE, "fixtures", "discover")
 DISCOVER_PY = os.path.join(DELEGATE_DIR, "discover.py")
 CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
+PRICE_KEY = '"price": {'
 
 sys.path.insert(0, DELEGATE_DIR)
 import bench
@@ -464,7 +465,7 @@ astra_efforts_ok = (
 record(
     "discover.py --efforts gpt-6-astra produces 6 stanzas with ultra disabled and exactly 1 price block",
     astra_efforts_ok,
-    f"rc={res_astra.returncode}, price_blocks={out_astra.count('\"price\": {')}, stanzas={astra_has_all_stanzas}",
+    f"rc={res_astra.returncode}, price_blocks={out_astra.count(PRICE_KEY)}, stanzas={astra_has_all_stanzas}",
 )
 
 
@@ -500,7 +501,7 @@ luna_efforts_ok = (
 record(
     "discover.py --efforts gpt-5.6-luna produces 5 stanzas with no ultra and exactly 1 price block",
     luna_efforts_ok,
-    f"rc={res_luna.returncode}, price_blocks={out_luna.count('\"price\": {')}, stanzas={luna_has_all_stanzas}",
+    f"rc={res_luna.returncode}, price_blocks={out_luna.count(PRICE_KEY)}, stanzas={luna_has_all_stanzas}",
 )
 
 

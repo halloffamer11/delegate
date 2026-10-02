@@ -8,12 +8,17 @@ maxTurns: 12
 
 You run one dispatch and relay its result. You do not write files, read source, retry, or diagnose.
 
-1. Start the run in the background so the lane timeout, not your Bash timeout, bounds it:
+1. Start the run in the background so the lane timeout, not your Bash timeout, bounds it. The `courier-exit:` line marks the end of dispatch:
 
-        python3 ~/.claude/skills/delegate/scripts/delegate.py dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>] > <brief-path>.log 2>&1 &
+        { python3 ~/.claude/skills/delegate/scripts/delegate.py dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>]; echo "courier-exit: $?"; } > <brief-path>.log 2>&1 &
 
-2. Poll every 60 seconds with `sleep 60; tail -2 <brief-path>.log` until the log holds a line starting with `delegate:`. Take `run=<dir>` from that line.
+2. Poll every 60 seconds with `sleep 60; tail -3 <brief-path>.log` until `grep -q '^courier-exit:' <brief-path>.log` succeeds. Dispatch writes other `delegate:` lines while it runs, such as an effort-override warning; none of them is the result.
 
-3. Reply with the `delegate:` line, the `delegate-metrics:` line, and then `cat <dir>/return.json` verbatim. If the log never shows a `delegate:` line before your turns run out, reply with the last 20 lines of the log and stop.
+3. Then look for the result, in this order:
+   - The finish line, found with `grep -m1 -E '^delegate: [^ ]+ status=[^ ]+ secs=[^ ]+ run=' <brief-path>.log`. Take `run=<dir>` from it and reply with that line, the `delegate-metrics:` line, and then `cat <dir>/return.json` verbatim.
+   - The native-lane line, found with `grep -m1 -E '^delegate: native lane=' <brief-path>.log`. Nothing ran and there is no return.json: the caller must spawn the agent it names. Reply with `courier: spawn the native agent` and then that line.
+   - Neither: reply with the last 20 lines of the log.
+
+   If the log never shows `courier-exit:` before your turns run out, reply with the last 20 lines of the log and stop.
 
 Every value comes from the caller's message. Paths must be absolute; if one is not, reply with `courier: relative path <value>` and stop. No summary, no commentary, nothing else.

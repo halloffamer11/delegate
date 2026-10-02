@@ -47,6 +47,7 @@ from catalog import EFFORTS, agy_family
 EFFORT_ORDER = ("none",) + EFFORTS
 
 NO_LANE = "no lane"
+NOT_CARRIED = "<span class='quiet'>no</span>"
 
 # Provenance the page must not let look like a verified figure. `uncertain`
 # rows are excluded from the pre-screen's rule; `self-reported` rows are not,
@@ -692,7 +693,7 @@ def _price_section(lanes_doc):
                    f'<td>{_esc(row["meter"])}</td>'
                    f'<td>{_esc(", ".join(row["efforts"]))}</td>'
                    f"<td>{cell('in')}</td><td>{cell('out')}</td>"
-                   f'<td>{"carried" if row["carried"] else "<span class=\'quiet\'>no</span>"}</td>'
+                   f'<td>{"carried" if row["carried"] else NOT_CARRIED}</td>'
                    "</tr>")
     out += ["</tbody></table></div>", "</details>", "</section>"]
     return out

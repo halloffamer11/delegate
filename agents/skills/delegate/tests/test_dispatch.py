@@ -4,10 +4,12 @@ Run: python3 tests/test_dispatch.py
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,6 +24,7 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
+COURIER_MD = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents", "courier.md"))
 # Relay output copied from real runs, trimmed of paths and signatures. Each
 # directory is a run directory as the relay leaves it, before map_result.
 RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
@@ -626,6 +629,91 @@ def main():
         record("12. pre-run errors exit 2 and no run dir", ok12, f"12a={ok12a} 12b={ok12b} 12c={ok12c} ads_err={res12_ads.stderr}")
 
         # -------------------------------------------------------------
+        # 12d. node absent from PATH: ads.sh check refuses before the ledger
+        # records a start; and if node goes missing after the start, the run
+        # still finishes, with a blocked return.json that says why.
+        # -------------------------------------------------------------
+        no_node_bin = os.path.join(tmpdir, "no_node_bin")
+        os.makedirs(no_node_bin, exist_ok=True)
+        for name in os.listdir(t_env["fake_bin"]):
+            if name != "node":
+                os.symlink(os.path.join(t_env["fake_bin"], name), os.path.join(no_node_bin, name))
+        no_node_env = {"PATH": no_node_bin}
+
+        def ledger_lines():
+            with open(ledger_path, "r", encoding="utf-8") as f:
+                return [json.loads(l) for l in f if l.strip()]
+
+        b12d = make_brief("b12d.md", f"fake-relay: status=completed final={done_final}\nBrief 12d.")
+        runs_before12d = set(os.listdir(t_env["runs_dir"]))
+        ledger_before12d = len(ledger_lines())
+        res12d = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
+                              extra_env=no_node_env)
+        ok12d_check = (
+            res12d.returncode == 2 and "node is not on PATH" in res12d.stderr and
+            set(os.listdir(t_env["runs_dir"])) == runs_before12d and
+            len(ledger_lines()) == ledger_before12d
+        )
+        record("12d. ads.sh check reports a missing node before the ledger records a start", ok12d_check,
+               f"rc={res12d.returncode} err={res12d.stderr}")
+
+        # node passes the check, then is gone when the relay starts
+        drop_node = (
+            f"import os, sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; "
+            "real = delegate.run_relay\n"
+            "def no_node(**kw):\n"
+            f"    os.environ['PATH'] = {no_node_bin!r}\n"
+            "    return real(**kw)\n"
+            "delegate.run_relay = no_node; sys.exit(delegate.main())"
+        )
+        res12e = subprocess.run(
+            [sys.executable, "-c", drop_node, "dispatch", "--config-dir", t_env["config_dir"],
+             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
+             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
+            capture_output=True, text=True, env=t_env["env"])
+        dir12e = parse_run_dir_from_stdout(res12e.stdout)
+        new12e = ledger_lines()[ledger_before12d:]
+        ret12e = json.load(open(os.path.join(dir12e, "return.json"))) if dir12e else {}
+        disp12e = json.load(open(os.path.join(dir12e, "dispatch.json"))) if dir12e else {}
+        ok12e = (
+            res12e.returncode == 1 and dir12e is not None and
+            [e.get("kind") for e in new12e] == ["dispatch.start", "dispatch.finish"] and
+            new12e[0].get("thread_id") == new12e[1].get("thread_id") and
+            new12e[1].get("status") == "blocked" and new12e[1].get("rc") == 1 and
+            ret12e.get("status") == "blocked" and "node is not on PATH" in ret12e.get("deliverable", "") and
+            disp12e.get("status") == "blocked" and "node" in (disp12e.get("reason") or "")
+        )
+        record("12e. an exception after the ledger start still writes a finish and a return.json", ok12e,
+               f"rc={res12e.returncode} out={res12e.stdout} err={res12e.stderr[-400:]} ledger={new12e} ret={ret12e}")
+
+        # 12f. return.json cannot be written either (here it is a directory):
+        # the ledger still gets its finish, so the run is never left running.
+        blocked_return = (
+            f"import os, sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate\n"
+            "def no_relay(**kw):\n"
+            "    os.mkdir(os.path.join(kw['run_dir'], 'return.json'))\n"
+            "    raise FileNotFoundError(2, 'No such file or directory', 'node')\n"
+            "delegate.run_relay = no_relay; sys.exit(delegate.main())"
+        )
+        ledger_before12f = len(ledger_lines())
+        res12f = subprocess.run(
+            [sys.executable, "-c", blocked_return, "dispatch", "--config-dir", t_env["config_dir"],
+             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
+             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
+            capture_output=True, text=True, env=t_env["env"])
+        new12f = ledger_lines()[ledger_before12f:]
+        ok12f = (
+            res12f.returncode == 1 and
+            [e.get("kind") for e in new12f] == ["dispatch.start", "dispatch.finish"] and
+            new12f[1].get("status") == "blocked" and
+            "could not write return.json" in res12f.stderr and
+            "Traceback" not in res12f.stderr
+        )
+        record("12f. a return.json that cannot be written still leaves a ledger finish", ok12f,
+               f"rc={res12f.returncode} err={res12f.stderr[-400:]} ledger={new12f}")
+
+
+        # -------------------------------------------------------------
         # 13. readOnlyViolation true -> open_questions carries tripwire line
         # -------------------------------------------------------------
         b13 = make_brief("b13.md", f"fake-relay: status=completed final={done_final} violation=true\nBrief 13.")
@@ -969,6 +1057,119 @@ def main():
         record("29. dispatch native lane prints native line, writes prompt.md, no relay", ok29, f"rc={res29.returncode} stdout={res29.stdout}")
 
         # -------------------------------------------------------------
+        # 29a. --effort on a native lane: a matching one passes quietly; a
+        # differing one warns like agy, and dispatch.json records the effort
+        # the agent file runs at. Relayed (orchestrator codex), it still applies.
+        def native_effort(effort, orchestrator=None):
+            before = set(os.listdir(t_env["runs_dir"]))
+            res = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29,
+                                       "--cwd", cwd, "--effort", effort], orchestrator=orchestrator)
+            new = list(set(os.listdir(t_env["runs_dir"])) - before)
+            disp = {}
+            if len(new) == 1:
+                disp = json.load(open(os.path.join(t_env["runs_dir"], new[0], "dispatch.json")))
+            return res, disp
+
+        res29a_same, disp29a_same = native_effort("high")
+        res29a_diff, disp29a_diff = native_effort("low")
+        res29a_relay, disp29a_relay = native_effort("low", orchestrator="codex")
+        native_warn = "delegate: effort override ignored on opus-high@claude; a native lane runs at its agent file's effort, high"
+        ok29a = (
+            res29a_same.returncode == 0 and "override ignored" not in res29a_same.stderr and
+            disp29a_same.get("effort") == "high" and
+            res29a_diff.returncode == 0 and native_warn in res29a_diff.stderr and
+            disp29a_diff.get("effort") == "high" and
+            res29a_diff.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high ") and
+            "override ignored" not in res29a_relay.stderr and disp29a_relay.get("effort") == "low"
+        )
+        record("29a. --effort on a native lane: matching passes, differing warns and records the lane's effort", ok29a,
+               f"same={res29a_same.stderr!r} {disp29a_same.get('effort')} diff={res29a_diff.stderr!r} "
+               f"{disp29a_diff.get('effort')} relay={res29a_relay.stderr!r} {disp29a_relay.get('effort')}")
+
+        # 29c. a native lane needs neither node nor ADS: it prints its agent line.
+        res29c = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29, "--cwd", cwd],
+                              extra_env={'PATH': no_node_bin, 'ADS_FAKE_GIT_SHA': '0' * 40})
+        ok29c = (res29c.returncode == 0 and
+                 res29c.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high "))
+        record("29c. a native lane runs with node absent and ADS out of date", ok29c,
+               f"rc={res29c.returncode} out={res29c.stdout} err={res29c.stderr}")
+
+        # -------------------------------------------------------------
+        # 29b. the courier's two greps, read from courier.md, run on the log
+        # its background command writes: the agy override warning (24) comes
+        # first and is not the result; the native line (29) is not a result.
+        courier_md = open(COURIER_MD).read()
+        greps = re.findall(r"grep -m1 -E '([^']+)'", courier_md)
+        finish_re, native_re = (greps + [None, None])[:2]
+
+        def courier_log(args):
+            # The courier's step-1 command shape: both streams, then the exit marker.
+            cmd = ("{ \"$0\" \"$@\"; echo \"courier-exit: $?\"; } 2>&1")
+            argv = ["sh", "-c", cmd, sys.executable, DELEGATE_PY, "dispatch",
+                    "--config-dir", t_env["config_dir"], "--ads-dir", t_env["ads_dir"],
+                    "--runs-dir", t_env["runs_dir"], "--no-probe"] + args
+            return subprocess.run(argv, capture_output=True, text=True, env=t_env["env"], cwd=cwd).stdout
+
+        def first(pattern, log):
+            hits = [l for l in log.splitlines() if re.search(pattern, l)]
+            return hits[0] if hits else None
+
+        b29b = make_brief("b29b.md", f"fake-relay: status=completed final={done_final}\nBrief 29b.")
+        log_agy = courier_log(["--lane", "flash-high@agy", "--class", "impl", "--brief", b29b, "--cwd", cwd, "--effort", "low"])
+        log_native = courier_log(["--lane", "opus-high@claude", "--class", "impl", "--brief", b29b, "--cwd", cwd])
+        agy_lines = log_agy.splitlines()
+        finish_agy = first(finish_re, log_agy) if finish_re else None
+        ok29b = (
+            finish_re is not None and native_re is not None and
+            "courier-exit: 0" in log_agy and "courier-exit: 0" in log_native and
+            # the warning is the first delegate: line, and the courier skips it
+            agy_lines[0].startswith("delegate: effort override ignored") and
+            finish_agy is not None and finish_agy.startswith("delegate: flash-high@agy status=done ") and
+            os.path.isfile(os.path.join(finish_agy.split("run=")[1], "return.json")) and
+            first(native_re, log_agy) is None and
+            # the native line is never taken for a result
+            first(finish_re, log_native) is None and
+            (first(native_re, log_native) or "").startswith("delegate: native lane=opus-high@claude agent=lane-opus-high ")
+        )
+        record("29b. courier keys on the finish line, not the override warning or the native line", ok29b,
+               f"greps={greps} agy={log_agy!r} native={log_native!r}")
+
+        # 29d. the courier's poll condition, read from courier.md: while the
+        # relay runs, the log already holds a delegate: line (the override
+        # warning) but the poll must keep waiting; once dispatch exits, it stops.
+        poll_re = (re.findall(r"until `grep -q '([^']+)'", courier_md) + [None])[0]
+        hold29d = os.path.join(tmpdir, "release-29d")
+        log29d = os.path.join(tmpdir, "b29d.md.log")
+        b29d = make_brief("b29d.md", f"fake-relay: status=completed final={done_final} hold={hold29d}\nBrief 29d.")
+
+        def poll_done():
+            return subprocess.run(["grep", "-q", poll_re, log29d]).returncode == 0
+
+        with open(log29d, "w") as log_f:
+            proc29d = subprocess.Popen(
+                ["sh", "-c", "{ \"$0\" \"$@\"; echo \"courier-exit: $?\"; } 2>&1", sys.executable, DELEGATE_PY,
+                 "dispatch", "--config-dir", t_env["config_dir"], "--ads-dir", t_env["ads_dir"],
+                 "--runs-dir", t_env["runs_dir"], "--no-probe", "--lane", "flash-high@agy", "--class", "impl",
+                 "--brief", b29d, "--cwd", cwd, "--effort", "low"],
+                stdout=log_f, stderr=subprocess.STDOUT, env=t_env["env"], cwd=cwd)
+        mid_log = ""
+        for _ in range(200):
+            mid_log = open(log29d).read()
+            if "delegate: effort override ignored" in mid_log:
+                break
+            time.sleep(0.05)
+        waiting_mid_run = poll_re is not None and proc29d.poll() is None and not poll_done()
+        open(hold29d, "w").close()
+        proc29d.wait(timeout=60)
+        end_log = open(log29d).read()
+        ok29d = (
+            waiting_mid_run and mid_log.startswith("delegate: effort override ignored") and
+            poll_done() and first(finish_re, end_log) is not None
+        )
+        record("29d. the courier keeps polling past an early delegate: line until dispatch exits", ok29d,
+               f"poll_re={poll_re!r} mid={mid_log!r} end={end_log!r}")
+
+        # -------------------------------------------------------------
         # 30. run native lane prints rank and native line, no relay
         native_meters = write_meters_doc(os.path.join(tmpdir, "native_meters.json"), [
             meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
@@ -1110,6 +1311,50 @@ def main():
         finally:
             usage.acquire = orig_acquire
         record("34b meters on still probes unless --no-probe", ok34b, repr(acquire_on))
+
+        # 34c. one `run` acquires the Meters once before the relay: the rank's
+        # acquisition serves the dispatch. `dispatch` alone still probes first.
+        # Meters are on here (34b). Each usage.acquire call is logged with its
+        # refresh flag; the relay's stdout marks when the relay ran.
+        probe_log = os.path.join(tmpdir, "probes34c.log")
+        count_probes = (
+            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate, usage\n"
+            "def counted(*a, **k):\n"
+            f"    open({probe_log!r}, 'a').write(('refresh' if k.get('refresh') else 'cached') + '\\n')\n"
+            "    return {}\n"
+            "usage.acquire = counted\n"
+            "real_relay = delegate.run_relay\n"
+            "def marked_relay(**kw):\n"
+            f"    open({probe_log!r}, 'a').write('relay\\n')\n"
+            "    return real_relay(**kw)\n"
+            "delegate.run_relay = marked_relay\n"
+            "sys.exit(delegate.main())"
+        )
+
+        def probes_for(cmd, args):
+            if os.path.exists(probe_log):
+                os.remove(probe_log)
+            res = subprocess.run(
+                [sys.executable, "-c", count_probes, cmd, "--config-dir", t_env["config_dir"],
+                 "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"]] + args,
+                capture_output=True, text=True, env=t_env["env"])
+            seen = open(probe_log).read().split() if os.path.exists(probe_log) else []
+            return res, seen
+
+        b34c = make_brief("b34c.md", f"fake-relay: status=completed final={done_final}\nBrief 34c.")
+        res34c_run, seen_run = probes_for("run", ["mechanical", "--brief", b34c, "--cwd", cwd,
+                                                  "--harnesses", "agy,codex,grok"])
+        res34c_disp, seen_disp = probes_for("dispatch", ["--lane", "flash-high@agy", "--class", "mechanical",
+                                                         "--brief", b34c, "--cwd", cwd])
+        before_relay = lambda seen: seen[:seen.index("relay")] if "relay" in seen else None
+        ok34c = (
+            res34c_run.returncode == 0 and before_relay(seen_run) is not None and
+            len(before_relay(seen_run)) == 1 and
+            res34c_disp.returncode == 0 and before_relay(seen_disp) == ["refresh"]
+        )
+        record("34c. run acquires the Meters once before the relay; dispatch alone still probes", ok34c,
+               f"run={seen_run} rc={res34c_run.returncode} out={res34c_run.stdout[-300:]} err={res34c_run.stderr[-300:]} "
+               f"dispatch={seen_disp} rc={res34c_disp.returncode}")
 
         # -------------------------------------------------------------
         # 35. run prints the overflow header and picks in the admitted Tier

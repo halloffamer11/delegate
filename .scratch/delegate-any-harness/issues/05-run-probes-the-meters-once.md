@@ -6,7 +6,26 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02
+**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-review-fixes-t6aitx`). All boxes done.
 
-- [ ] `run` ranks and dispatches on one probe; `dispatch` called alone still probes.
-- [ ] A test counts probe invocations for one `run`.
+- [x] `run` ranks and dispatches on one probe; `dispatch` called alone still probes.
+- [x] A test counts probe invocations for one `run`.
+
+## Landed, 2026-10-02
+
+`run` passes `probed=True` to `dispatch` when `rank.load_usage` has just acquired the
+Meters (no `--meters` document, metering on), and dispatch then skips its pre-relay
+probe. The post-relay probe is unchanged, so a `run` now acquires once before the relay
+and once after, where it acquired twice before. `dispatch` called alone still forces a
+probe before the relay.
+
+The rank's acquisition is `usage.acquire()` without `refresh`, so a fresh cache serves
+it and no vendor is probed at all; before this, dispatch's forced probe always ran.
+
+Seen while here, not changed: `run --no-probe` still acquires for ranking unless
+`--meters` is passed.
+
+Verified: `test_dispatch.py` 34c logs each `usage.acquire` and the relay start for one
+`run` (one acquisition before the relay) and one `dispatch` (one forced probe before
+it). On the old code the run logged `cached, refresh, relay, refresh`. Passes on 3.9 and
+3.13.

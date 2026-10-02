@@ -2826,4 +2826,31 @@ with tempfile.TemporaryDirectory() as td:
         f"rc={res_off.returncode} stderr={res_off.stderr!r} out={res_off.stdout[:200]!r}",
     )
 
+# One answer to "is this harness's CLI installed" (ticket 07): usage's probes
+# ask catalog, so a directory or an empty PATH entry never reads as installed.
+import usage
+with tempfile.TemporaryDirectory() as which_tmp:
+    bin_dir = os.path.join(which_tmp, "bin")
+    os.makedirs(os.path.join(bin_dir, "codex"))          # a directory, not a CLI
+    with open(os.path.join(bin_dir, "agy"), "w") as f:   # an executable CLI
+        f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(os.path.join(bin_dir, "agy"), 0o755)
+    saved_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join(["", bin_dir])
+    try:
+        answers = {h: (catalog.cli_installed(h), usage.which(h)) for h in catalog.HARNESSES}
+        present = catalog.installed_harnesses()
+        absent_row = usage.probe_codex()
+    finally:
+        os.environ["PATH"] = saved_path
+    record(
+        "18. usage and catalog agree on which harness CLIs are installed",
+        usage.which is catalog.cli_installed
+        and answers == {"claude": (False, False), "codex": (False, False),
+                        "agy": (True, True), "grok": (False, False)}
+        and present == {"agy"}
+        and [r.get("note") for r in absent_row] == ["absent"],
+        f"answers={answers} present={present} codex_row={absent_row}",
+    )
+
 sys.exit(1 if fails else 0)

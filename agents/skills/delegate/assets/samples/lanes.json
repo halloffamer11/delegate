@@ -5,7 +5,8 @@
       "harness": "claude",
       "plan": "Max 5x",
       "price_month": 100,
-      "probe": "usage.py"
+      "probe": "usage.py",
+      "model_meter": true
     },
     "claude-general": {
       "harness": "claude",

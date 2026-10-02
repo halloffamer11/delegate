@@ -116,6 +116,11 @@ How much of its meter one job on a lane uses, compared with other lanes. It feed
 **Window**:
 One quota period of a meter: 5-hour or weekly.
 
+**Model meter**:
+A meter for one model's own weekly Window that shares its harness's 5-hour
+Window, such as Claude's Fable meter. The catalog marks it with
+`"model_meter": true`; the statusline reads that, never the meter's name.
+
 **Remaining**:
 The fraction of a Meter still unspent: the lower of its Window fractions, and the
 one Window's fraction when a Meter has only one. Remaining is unknown only when no
