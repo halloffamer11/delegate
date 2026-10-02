@@ -24,4 +24,7 @@ Dispatch's own output is unchanged.
 Verified: `test_dispatch.py` 29b reads both greps out of `courier.md`, runs dispatch in
 the courier's command shape for `flash-high@agy --effort low` (the warning is the log's
 first line) and for `opus-high@claude`, and checks the courier takes the finish line in
-the first and reports the native line in the second. Passes on 3.9 and 3.13.
+the first and reports the native line in the second. 29d (added after Codex's review)
+reads the poll condition, `grep -q '^courier-exit:'`, out of `courier.md`, holds the
+fake relay mid-run, and checks the poll keeps waiting while the warning is already in
+the log and stops once dispatch exits; the old first-`delegate:`-line rule fails it. Passes on 3.9 and 3.13.

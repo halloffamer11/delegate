@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -685,6 +686,7 @@ def main():
         record("12e. an exception after the ledger start still writes a finish and a return.json", ok12e,
                f"rc={res12e.returncode} out={res12e.stdout} err={res12e.stderr[-400:]} ledger={new12e} ret={ret12e}")
 
+
         # -------------------------------------------------------------
         # 13. readOnlyViolation true -> open_questions carries tripwire line
         # -------------------------------------------------------------
@@ -1097,6 +1099,41 @@ def main():
         )
         record("29b. courier keys on the finish line, not the override warning or the native line", ok29b,
                f"greps={greps} agy={log_agy!r} native={log_native!r}")
+
+        # 29d. the courier's poll condition, read from courier.md: while the
+        # relay runs, the log already holds a delegate: line (the override
+        # warning) but the poll must keep waiting; once dispatch exits, it stops.
+        poll_re = (re.findall(r"until `grep -q '([^']+)'", courier_md) + [None])[0]
+        hold29d = os.path.join(tmpdir, "release-29d")
+        log29d = os.path.join(tmpdir, "b29d.md.log")
+        b29d = make_brief("b29d.md", f"fake-relay: status=completed final={done_final} hold={hold29d}\nBrief 29d.")
+
+        def poll_done():
+            return subprocess.run(["grep", "-q", poll_re, log29d]).returncode == 0
+
+        with open(log29d, "w") as log_f:
+            proc29d = subprocess.Popen(
+                ["sh", "-c", "{ \"$0\" \"$@\"; echo \"courier-exit: $?\"; } 2>&1", sys.executable, DELEGATE_PY,
+                 "dispatch", "--config-dir", t_env["config_dir"], "--ads-dir", t_env["ads_dir"],
+                 "--runs-dir", t_env["runs_dir"], "--no-probe", "--lane", "flash-high@agy", "--class", "impl",
+                 "--brief", b29d, "--cwd", cwd, "--effort", "low"],
+                stdout=log_f, stderr=subprocess.STDOUT, env=t_env["env"], cwd=cwd)
+        mid_log = ""
+        for _ in range(200):
+            mid_log = open(log29d).read()
+            if "delegate: effort override ignored" in mid_log:
+                break
+            time.sleep(0.05)
+        waiting_mid_run = poll_re is not None and proc29d.poll() is None and not poll_done()
+        open(hold29d, "w").close()
+        proc29d.wait(timeout=60)
+        end_log = open(log29d).read()
+        ok29d = (
+            waiting_mid_run and mid_log.startswith("delegate: effort override ignored") and
+            poll_done() and first(finish_re, end_log) is not None
+        )
+        record("29d. the courier keeps polling past an early delegate: line until dispatch exits", ok29d,
+               f"poll_re={poll_re!r} mid={mid_log!r} end={end_log!r}")
 
         # -------------------------------------------------------------
         # 30. run native lane prints rank and native line, no relay

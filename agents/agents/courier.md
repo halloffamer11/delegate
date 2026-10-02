@@ -12,7 +12,7 @@ You run one dispatch and relay its result. You do not write files, read source, 
 
         { python3 ~/.claude/skills/delegate/scripts/delegate.py dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>]; echo "courier-exit: $?"; } > <brief-path>.log 2>&1 &
 
-2. Poll every 60 seconds with `sleep 60; tail -3 <brief-path>.log` until the log holds a line starting with `courier-exit:`. Dispatch writes other `delegate:` lines while it runs, such as an effort-override warning; none of them is the result.
+2. Poll every 60 seconds with `sleep 60; tail -3 <brief-path>.log` until `grep -q '^courier-exit:' <brief-path>.log` succeeds. Dispatch writes other `delegate:` lines while it runs, such as an effort-override warning; none of them is the result.
 
 3. Then look for the result, in this order:
    - The finish line, found with `grep -m1 -E '^delegate: [^ ]+ status=[^ ]+ secs=[^ ]+ run=' <brief-path>.log`. Take `run=<dir>` from it and reply with that line, the `delegate-metrics:` line, and then `cat <dir>/return.json` verbatim.

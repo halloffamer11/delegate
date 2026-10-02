@@ -80,7 +80,15 @@ if (match) {
   const vMatch = directive.match(/\bviolation=(true|false)/);
   if (vMatch) violation = (vMatch[1] === "true");
 
-  const errMatch = directive.match(/\berror="([^"]+)"/) || directive.match(/\berror=([^\n\r]+?)(?=(\s+(?:status|final|exit|violation)=|$))/);
+  // hold=<path>: wait (up to 20 s) until that file exists, so a test can
+  // look at dispatch's output while the relay is still running.
+  const hMatch = directive.match(/\bhold=(\S+)/);
+  if (hMatch) {
+    const tick = new Int32Array(new SharedArrayBuffer(4));
+    for (let i = 0; i < 400 && !fs.existsSync(hMatch[1]); i++) Atomics.wait(tick, 0, 0, 50);
+  }
+
+  const errMatch = directive.match(/\berror="([^"]+)"/) || directive.match(/\berror=([^\n\r]+?)(?=(\s+(?:status|final|exit|violation|hold)=|$))/);
   if (errMatch) errorText = errMatch[1].trim();
 }
 
