@@ -197,7 +197,10 @@ def load_cached(cache_path=None):
     except (OSError, ValueError):
         return {}
 
-def which(b): return subprocess.run(["command", "-v", b], shell=False, capture_output=True, text=True).returncode == 0 if False else any(os.access(os.path.join(p, b), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep))
+# Whether a harness's CLI is installed is catalog's one answer, so a probe says
+# "absent" exactly when ranking does.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from catalog import cli_installed as which  # noqa: E402
 
 def run(cmd, timeout=60, stdin_data=None, cwd=None):
     try:

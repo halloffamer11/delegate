@@ -46,6 +46,16 @@ def write_dispatch(path, doc):
 
 with tempfile.TemporaryDirectory() as tmp:
     now = time.time()
+    # Which harness CLIs are on PATH decides the statusline's and the popup's
+    # rows, so every report run sees a PATH of exactly the four stub CLIs, never
+    # the host's. A test that wants a missing CLI sets PATH itself.
+    stub_bin = os.path.join(tmp, "stub-bin")
+    os.makedirs(stub_bin)
+    for cli in ("claude", "codex", "agy", "grok"):
+        with open(os.path.join(stub_bin, cli), "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(stub_bin, cli), 0o755)
+    os.environ["PATH"] = stub_bin
     cache = os.path.join(tmp, "usage.json")
     config_dir = os.path.join(tmp, "config")
     shutil.copytree(SAMPLES, config_dir)

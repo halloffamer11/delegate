@@ -44,7 +44,6 @@ from datetime import datetime, timezone
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -53,6 +52,7 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS, meters_enabled
+import catalog
 import events
 import rank
 import usage
@@ -240,7 +240,7 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         sys.stderr.write(f"delegate: invalid effort '{effort}'; must be one of {', '.join(EFFORTS)}\n")
         sys.exit(2)
 
-    if shutil.which(harness) is None:
+    if not catalog.cli_installed(harness):
         sys.stderr.write(
             f"delegate: {harness} CLI is not on PATH; install it or pick a lane on another harness\n"
         )
@@ -938,7 +938,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
     if harnesses is not None:
         present = set(h.strip() for h in harnesses.split(",") if h.strip())
     else:
-        present = {h for h in HARNESSES if shutil.which(h)}
+        present = catalog.installed_harnesses()
 
     rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
     has_pick = rank.print_rank_output(class_, cat, rows, tier=tier)

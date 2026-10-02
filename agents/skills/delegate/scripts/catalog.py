@@ -37,6 +37,22 @@ import tempfile
 CONFIG_DIR = "~/.config/delegate"
 
 HARNESSES = ("claude", "codex", "agy", "grok")
+
+
+def cli_installed(harness):
+    """Whether this harness's CLI is on PATH. Every caller asks here.
+
+    The CLI is named after the harness today. Ticket 11 moves this behind the
+    harness adapter, where a CLI may be named otherwise (Kiro's `kiro-cli`).
+    """
+    return shutil.which(harness) is not None
+
+
+def installed_harnesses(harnesses=None):
+    """The harnesses, of HARNESSES or the ones given, whose CLI is on PATH."""
+    return {h for h in (HARNESSES if harnesses is None else harnesses) if cli_installed(h)}
+
+
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # The efforts each harness offers, and so the only efforts a lane on it may
 # carry (ticket 19). Sources, each checked 2026-09-12:
@@ -1424,7 +1440,7 @@ def _rank_mod():
 def _present_harnesses(present=None):
     if present is not None:
         return set(present)
-    return {h for h in HARNESSES if shutil.which(h)}
+    return installed_harnesses()
 
 
 def _cached_meters(meters=None):

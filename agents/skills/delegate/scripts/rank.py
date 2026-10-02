@@ -67,7 +67,6 @@ CLI forms:
 import argparse
 import json
 import os
-import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,7 +74,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
-from catalog import CatalogError, CLASSES, HARNESSES, load_catalog
+from catalog import CatalogError, CLASSES, load_catalog
 import usage
 
 
@@ -498,7 +497,7 @@ def main(argv=None):
     if args.harnesses is not None:
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
     else:
-        present = {h for h in HARNESSES if shutil.which(h)}
+        present = catalog.installed_harnesses()
 
     if tiers_mode:
         previews = tier_leaders(cat, meters_doc, present)

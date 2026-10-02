@@ -29,7 +29,6 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from pathlib import Path
-import shutil
 import sys
 from typing import Any, Iterable
 
@@ -217,7 +216,7 @@ class DashboardModel:
         self.present = (
             frozenset(present)
             if present is not None
-            else frozenset(harness for harness in catalog.HARNESSES if shutil.which(harness))
+            else frozenset(catalog.installed_harnesses())
         )
         self.state: dict[str, Any] = {}
         self._revision = 0

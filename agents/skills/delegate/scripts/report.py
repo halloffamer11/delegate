@@ -18,15 +18,15 @@ Two ledgers exist and they are not the same file:
                 knows this, so only the lead writes it.
 Run ledger path: $DELEGATE_RUNS else ~/.cache/delegate/runs.jsonl.
 """
-import argparse, json, os, re, shutil, sys, time
+import argparse, json, os, re, sys, time
 from collections import Counter
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
+    from catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 except ImportError:
-    from .catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
+    from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
 try:
     from rank import rank, tier_leaders
@@ -580,7 +580,7 @@ def cmd_statusline(a):
         return
 
     now = time.time()
-    present = {h for h in HARNESSES if shutil.which(h)}
+    present = installed_harnesses()
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
     gate_threshold = routing.get("gate", 0.10)
