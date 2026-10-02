@@ -366,6 +366,42 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_norun, _ = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
     check("statusline --no-running drops running glyph", "①" not in out_norun.splitlines()[0].split("wk")[-1], out_norun)
 
+    # A model Meter is marked in the catalog, not known by its name (ticket 08):
+    # renamed, with its probe row renamed too, it draws the same row; and its
+    # row leaves 5h blank even when the cached row has no per-model figure.
+    def renamed_meter(new, drop_model_figure):
+        rcfg = os.path.join(tmp, f"renamed-{new}-{int(drop_model_figure)}")
+        shutil.copytree(config_dir, rcfg)
+        lanes_path = os.path.join(rcfg, "lanes.json")
+        doc = json.load(open(lanes_path))
+        doc["meters"] = {(new if k == "claude-fable" else k): v for k, v in doc["meters"].items()}
+        for lane in doc["lanes"].values():
+            if lane.get("meter") == "claude-fable":
+                lane["meter"] = new
+        with open(lanes_path, "w") as f:
+            json.dump(doc, f, indent=2)
+        cache_doc = json.load(open(sl_cache))
+        for row in cache_doc["lanes"]:
+            if row["lane"] == "claude-fable":
+                row["lane"], row["meter"] = new, new.split("-", 1)[1]
+                if drop_model_figure:
+                    row.pop("remaining_weekly_model")
+        rcache = os.path.join(rcfg, "usage.json")
+        with open(rcache, "w") as f:
+            json.dump(cache_doc, f)
+        rc, out, _ = run(["statusline", "--no-color", "--no-running", "--config-dir", rcfg],
+                         dict(sl_env, DELEGATE_CACHE=rcache))
+        return [l for l in out.splitlines() if l.strip()]
+
+    renamed = renamed_meter("claude-amber", False)
+    norun_lines = [l for l in out_norun.splitlines() if l.strip()]
+    check("a renamed model Meter draws the same row",
+          renamed == [l.replace("fable", "amber") for l in norun_lines], f"{renamed} vs {norun_lines}")
+    bare = renamed_meter("claude-amber", True)
+    amber = next((l for l in bare if " amber " in l), "")
+    check("a model Meter whose cached row has no per-model figure still leaves 5h blank",
+          "amber                   wk" in amber and "46%·4d" in amber, amber)
+
     color_env = dict(sl_env)
     color_env["NO_COLOR"] = ""
     rc, out_color, _ = run(["statusline"] + cfg, color_env)

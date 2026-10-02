@@ -318,7 +318,7 @@ def validate_lanes(doc, source="lanes.json"):
     if not isinstance(meters, dict) or len(meters) == 0:
         raise CatalogError(f"{source}: key 'meters': meters must be a non-empty object")
 
-    allowed_meter_fields = {"harness", "plan", "price_month", "probe", "note"}
+    allowed_meter_fields = {"harness", "plan", "price_month", "probe", "note", "model_meter"}
     required_meter_fields = ("harness", "plan", "price_month", "probe")
 
     for meter_name, meter in meters.items():
@@ -346,6 +346,8 @@ def validate_lanes(doc, source="lanes.json"):
             raise CatalogError(f"{source}: meter '{meter_name}': probe must be a non-empty string")
         if "note" in meter and not isinstance(meter["note"], str):
             raise CatalogError(f"{source}: meter '{meter_name}': note must be a string")
+        if "model_meter" in meter and not isinstance(meter["model_meter"], bool):
+            raise CatalogError(f"{source}: meter '{meter_name}': model_meter must be true or false")
 
     lanes = doc["lanes"]
     if not isinstance(lanes, dict) or len(lanes) == 0:

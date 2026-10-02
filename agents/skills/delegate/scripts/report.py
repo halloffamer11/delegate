@@ -661,7 +661,10 @@ def cmd_statusline(a):
         remw = u_row.get("remaining_weekly")
         resetw = u_row.get("reset_weekly")
         model_remw = u_row.get("remaining_weekly_model")
-        shares5 = (model_remw is not None) or (m_key == "claude-fable")
+        # A model Meter has a weekly Window of its own and shares its harness's
+        # 5h Window, so its row leaves 5h blank. The catalog says so; a probe row
+        # with a per-model weekly figure says so too.
+        shares5 = bool(m_def.get("model_meter")) or model_remw is not None
         if model_remw is not None:
             remw = model_remw
 
