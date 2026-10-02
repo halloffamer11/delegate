@@ -4,7 +4,7 @@
 
 Spec: `.scratch/delegate-any-harness/spec.md`
 
-**Blocked by:** 09 Delegate runs only when the user asks for it; 10 Evals for the delegate skill; 12 The skill calls the `delegate` command, not ~/.claude paths.
+**Blocked by:** 09 Delegate runs only when the user asks for it; 10 Evals for the delegate skill; 12 One /delegate skill on the `delegate` command, with a harness constraint.
 
 **Status:** ready-for-agent, raised by Orin 2026-10-02
 

@@ -9,7 +9,7 @@
 
 Spec: `.scratch/delegate-any-harness/spec.md`
 
-**Blocked by:** 11 One harness registry; 12 The skill calls the `delegate` command, not ~/.claude paths.
+**Blocked by:** 11 One harness registry; 12 One /delegate skill on the `delegate` command, with a harness constraint.
 
 **Status:** ready-for-agent, raised by Orin 2026-10-02; rescoped the same day from "orchestrated from Codex" after Orin's review: "Make the orchestration harness agnostic. Don't just build one for Codex."
 

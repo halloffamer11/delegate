@@ -109,7 +109,8 @@ default. The courier and statusline become optional extras over the same run dir
 
 **3/ CLI is the contract; SKILL.md is thin and portable.** `delegate rank|run|status|setup` on PATH
 (the `bin/delegate` already exists) with JSON output. SKILL.md and the wrappers call `delegate ...`,
-never `~/.claude/skills/...`. The four typed wrappers become one generated template per registry entry.
+never `~/.claude/skills/...`. The four typed wrappers fold into `/delegate`: a user-stated harness constraint
+(`/delegate agy <task>`) restricts ranking to that harness's Lanes.
 
 **4/ Kiro CLI as a worker.** Headless is `kiro-cli chat --no-interactive --agent <a> --trust-tools=<cats>
 --output-format stream-json`, which needs `KIRO_API_KEY` (Pro tier and up) per
