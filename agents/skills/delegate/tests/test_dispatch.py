@@ -4,6 +4,7 @@ Run: python3 tests/test_dispatch.py
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
+COURIER_MD = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents", "courier.md"))
 # Relay output copied from real runs, trimmed of paths and signatures. Each
 # directory is a run directory as the relay leaves it, before map_result.
 RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
@@ -967,6 +969,46 @@ def main():
                 not os.path.exists(os.path.join(dir29, "relay.stdout"))
             )
         record("29. dispatch native lane prints native line, writes prompt.md, no relay", ok29, f"rc={res29.returncode} stdout={res29.stdout}")
+
+        # -------------------------------------------------------------
+        # 29b. the courier's two greps, read from courier.md, run on the log
+        # its background command writes: the agy override warning (24) comes
+        # first and is not the result; the native line (29) is not a result.
+        courier_md = open(COURIER_MD).read()
+        greps = re.findall(r"grep -m1 -E '([^']+)'", courier_md)
+        finish_re, native_re = (greps + [None, None])[:2]
+
+        def courier_log(args):
+            # The courier's step-1 command shape: both streams, then the exit marker.
+            cmd = ("{ \"$0\" \"$@\"; echo \"courier-exit: $?\"; } 2>&1")
+            argv = ["sh", "-c", cmd, sys.executable, DELEGATE_PY, "dispatch",
+                    "--config-dir", t_env["config_dir"], "--ads-dir", t_env["ads_dir"],
+                    "--runs-dir", t_env["runs_dir"], "--no-probe"] + args
+            return subprocess.run(argv, capture_output=True, text=True, env=t_env["env"], cwd=cwd).stdout
+
+        def first(pattern, log):
+            hits = [l for l in log.splitlines() if re.search(pattern, l)]
+            return hits[0] if hits else None
+
+        b29b = make_brief("b29b.md", f"fake-relay: status=completed final={done_final}\nBrief 29b.")
+        log_agy = courier_log(["--lane", "flash-high@agy", "--class", "impl", "--brief", b29b, "--cwd", cwd, "--effort", "low"])
+        log_native = courier_log(["--lane", "opus-high@claude", "--class", "impl", "--brief", b29b, "--cwd", cwd])
+        agy_lines = log_agy.splitlines()
+        finish_agy = first(finish_re, log_agy) if finish_re else None
+        ok29b = (
+            finish_re is not None and native_re is not None and
+            "courier-exit: 0" in log_agy and "courier-exit: 0" in log_native and
+            # the warning is the first delegate: line, and the courier skips it
+            agy_lines[0].startswith("delegate: effort override ignored") and
+            finish_agy is not None and finish_agy.startswith("delegate: flash-high@agy status=done ") and
+            os.path.isfile(os.path.join(finish_agy.split("run=")[1], "return.json")) and
+            first(native_re, log_agy) is None and
+            # the native line is never taken for a result
+            first(finish_re, log_native) is None and
+            (first(native_re, log_native) or "").startswith("delegate: native lane=opus-high@claude agent=lane-opus-high ")
+        )
+        record("29b. courier keys on the finish line, not the override warning or the native line", ok29b,
+               f"greps={greps} agy={log_agy!r} native={log_native!r}")
 
         # -------------------------------------------------------------
         # 30. run native lane prints rank and native line, no relay

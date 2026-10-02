@@ -6,8 +6,22 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02
+**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-review-fixes-t6aitx`). All boxes done; a live Workflow run through the courier is still Orin's to try.
 
-- [ ] The courier keys on a line only dispatch's finish writes (a distinct prefix or `run=` with a status), never on the first `delegate:` line.
-- [ ] A native-lane line is reported as "spawn the native agent", not as a result.
-- [ ] A test covers an agy run with an effort override and a native lane.
+- [x] The courier keys on a line only dispatch's finish writes (a distinct prefix or `run=` with a status), never on the first `delegate:` line.
+- [x] A native-lane line is reported as "spawn the native agent", not as a result.
+- [x] A test covers an agy run with an effort override and a native lane.
+
+## Landed, 2026-10-02
+
+The courier's background command now ends with `echo "courier-exit: $?"`, and it polls
+for that marker instead of the first `delegate:` line. It then greps, in order, for the
+finish line (`^delegate: [^ ]+ status=[^ ]+ secs=[^ ]+ run=`, written only by
+`print_and_exit`) and the native-lane line, which it reports as
+`courier: spawn the native agent` with the line. Neither: the last 20 log lines.
+Dispatch's own output is unchanged.
+
+Verified: `test_dispatch.py` 29b reads both greps out of `courier.md`, runs dispatch in
+the courier's command shape for `flash-high@agy --effort low` (the warning is the log's
+first line) and for `opus-high@claude`, and checks the courier takes the finish line in
+the first and reports the native line in the second. Passes on 3.9 and 3.13.
