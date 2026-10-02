@@ -692,10 +692,16 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
     }
 
 
-def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, prompt_path, child_cwd, write, run_dir):
-    """Steps 5-7 of dispatch: probe, run the relay, probe, map its result."""
+def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, prompt_path, child_cwd, write, run_dir, probed=False):
+    """Steps 5-7 of dispatch: probe, run the relay, probe, map its result.
+
+    ``probed`` means the caller acquired the Meters just now to rank, so the
+    before-probe would only repeat it (and `claude -p /usage` can spend the
+    quota it measures).
+    """
     # Step 5: Probe meters (before)
-    probe_meters(no_probe, routing)
+    if not probed:
+        probe_meters(no_probe, routing)
 
     # Step 6: Run the relay
     relay_exit, secs = run_relay(
@@ -794,7 +800,7 @@ def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exi
         sys.exit(1)
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False):
     # Step 1: Resolve
     resolved = resolve(
         lane_name=lane,
@@ -873,7 +879,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         relay_exit, secs, mapped = relay_and_map(
             no_probe=no_probe, routing=resolved.get("routing"), ads_d=ads_d, harness=harness,
             model=model, eff=eff, lane_timeout=lane_timeout, prompt_path=prompt_path,
-            child_cwd=child_cwd, write=write, run_dir=run_dir,
+            child_cwd=child_cwd, write=write, run_dir=run_dir, probed=probed,
         )
     except (Exception, KeyboardInterrupt) as e:
         relay_exit, secs = None, int(time.time() - t0)
@@ -925,6 +931,9 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
             sys.exit(2)
 
     meters_doc = rank.load_usage(cat, meters, refresh=True)
+    # rank.load_usage just acquired the Meters unless a document was passed or
+    # metering is off; dispatch then ranks and runs on that one acquisition.
+    probed = meters is None and meters_enabled(cat.get("routing", {}))
 
     if harnesses is not None:
         present = set(h.strip() for h in harnesses.split(",") if h.strip())
@@ -956,6 +965,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         runs_dir=runs_dir,
         no_probe=no_probe,
         no_leash=no_leash,
+        probed=probed,
     )
 
 

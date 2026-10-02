@@ -1241,6 +1241,50 @@ def main():
             usage.acquire = orig_acquire
         record("34b meters on still probes unless --no-probe", ok34b, repr(acquire_on))
 
+        # 34c. one `run` acquires the Meters once before the relay: the rank's
+        # acquisition serves the dispatch. `dispatch` alone still probes first.
+        # Meters are on here (34b). Each usage.acquire call is logged with its
+        # refresh flag; the relay's stdout marks when the relay ran.
+        probe_log = os.path.join(tmpdir, "probes34c.log")
+        count_probes = (
+            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate, usage\n"
+            "def counted(*a, **k):\n"
+            f"    open({probe_log!r}, 'a').write(('refresh' if k.get('refresh') else 'cached') + '\\n')\n"
+            "    return {}\n"
+            "usage.acquire = counted\n"
+            "real_relay = delegate.run_relay\n"
+            "def marked_relay(**kw):\n"
+            f"    open({probe_log!r}, 'a').write('relay\\n')\n"
+            "    return real_relay(**kw)\n"
+            "delegate.run_relay = marked_relay\n"
+            "sys.exit(delegate.main())"
+        )
+
+        def probes_for(cmd, args):
+            if os.path.exists(probe_log):
+                os.remove(probe_log)
+            res = subprocess.run(
+                [sys.executable, "-c", count_probes, cmd, "--config-dir", t_env["config_dir"],
+                 "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"]] + args,
+                capture_output=True, text=True, env=t_env["env"])
+            seen = open(probe_log).read().split() if os.path.exists(probe_log) else []
+            return res, seen
+
+        b34c = make_brief("b34c.md", f"fake-relay: status=completed final={done_final}\nBrief 34c.")
+        res34c_run, seen_run = probes_for("run", ["mechanical", "--brief", b34c, "--cwd", cwd,
+                                                  "--harnesses", "agy,codex,grok"])
+        res34c_disp, seen_disp = probes_for("dispatch", ["--lane", "flash-high@agy", "--class", "mechanical",
+                                                         "--brief", b34c, "--cwd", cwd])
+        before_relay = lambda seen: seen[:seen.index("relay")] if "relay" in seen else None
+        ok34c = (
+            res34c_run.returncode == 0 and before_relay(seen_run) is not None and
+            len(before_relay(seen_run)) == 1 and
+            res34c_disp.returncode == 0 and before_relay(seen_disp) == ["refresh"]
+        )
+        record("34c. run acquires the Meters once before the relay; dispatch alone still probes", ok34c,
+               f"run={seen_run} rc={res34c_run.returncode} out={res34c_run.stdout[-300:]} err={res34c_run.stderr[-300:]} "
+               f"dispatch={seen_disp} rc={res34c_disp.returncode}")
+
         # -------------------------------------------------------------
         # 35. run prints the overflow header and picks in the admitted Tier
         # (ticket 29). flash-high@agy moves to tier 4 for this case: its Meter
