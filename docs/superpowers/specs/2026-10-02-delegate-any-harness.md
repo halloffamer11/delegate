@@ -98,17 +98,14 @@ run_args(job)     -> argv/env for the relay, read-only mapping, browser extras
 parse_events()    optional (grok gate-cancel today)
 ```
 
-**2/ Orchestrator adapter.** It answers three questions: can this harness run a native lane in-process?
-where do its agent files live, and in what format? how does the skill tell the session to spawn one?
-
-| Orchestrator | Native lanes |
-|---|---|
-| Claude | `~/.claude/agents/*.md` + Agent tool (today's behaviour) |
-| Codex | none: every lane is relayed, including claude lanes |
-| Kiro | custom agents in `~/.kiro/agents` can run as subagents; until proven headless, treat as none |
-
-`ORCHESTRATOR` becomes detected (env or flag) instead of a constant. Courier and statusline become
-Claude-only extras, not core.
+**2/ Orchestration is harness-agnostic.** No script names an orchestrator. Every harness that can
+run a shell and read files orchestrates the same way: `delegate run` relays the job and the caller reads
+the run directory. That default needs no knowledge of the caller, so an unknown or new harness works
+with no change. Running a Lane in-process (native Lanes) is an optional capability declared as data in
+an orchestrator profile: whether the harness supports it, where its agent files live, their template,
+and the spawn instruction the skill prints. Claude Code is the first profile, not a code path. The
+orchestrator is detected from the environment or `--orchestrator`; anything unrecognised gets the
+default. The courier and statusline become optional extras over the same run directory.
 
 **3/ CLI is the contract; SKILL.md is thin and portable.** `delegate rank|run|status|setup` on PATH
 (the `bin/delegate` already exists) with JSON output. SKILL.md and the wrappers call `delegate ...`,
@@ -159,5 +156,5 @@ Python-only path, so execution stays in one layer.
 
 `.scratch/delegate-any-harness/issues/`. Order: review fixes (01-08) and the
 invocation decision (09), evals (10), the harness registry (11), the CLI-first skill
-(12), the orchestrator adapter (13), Kiro (14-15), the features (16-18), and the
+(12), harness-agnostic orchestration (13), Kiro (14-15), the features (16-18), and the
 skill rewrite last (19).
