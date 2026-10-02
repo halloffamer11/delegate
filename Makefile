@@ -2,7 +2,8 @@
 #
 # Usage:
 #   make install             # link the skills, the courier agent and the `delegate` command; write the codex home
-#   make test                # every script test and the dashboard test (stdlib only, no network)
+#   make test                # every script test and the dashboard test (stdlib only, no network);
+#                            # PYTHON=python3.X picks the interpreter, 3.9 or newer
 #   make delegate-codex-home # delegate's own CODEX_HOME: the disposable browser and nothing else
 #   make delegate-wizard     # the catalog wizard on this machine's catalog with the accepted benchmark rows;
 #                            # WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
@@ -29,6 +30,9 @@ SKILLS := $(notdir $(wildcard $(CURDIR)/agents/skills/*))
 # benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
 DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
 DELEGATE_DASHBOARD_PLACEMENT ?= split
+# The interpreter `make test` runs. Every entry point calls plain `python3`, so the
+# oldest one in use sets the minimum: 3.9, macOS's /usr/bin/python3.
+PYTHON ?= python3
 
 .PHONY: install test delegate-codex-home delegate-wizard delegate-dashboard
 
@@ -43,10 +47,11 @@ install: delegate-codex-home
 	ln -sfn $(CURDIR)/bin/delegate $(HOME)/.local/bin/delegate
 
 test:
+	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else "make test: delegate needs Python 3.9 or newer; $(PYTHON) is " + sys.version.split()[0])'
 	@cd $(CURDIR)/agents/skills/delegate && for f in tests/test_*.py; do \
-		python3 $$f >/dev/null 2>&1 && echo "ok   $$f" || { echo "FAIL $$f"; fail=1; }; \
+		$(PYTHON) $$f >/dev/null 2>&1 && echo "ok   $$f" || { echo "FAIL $$f"; fail=1; }; \
 	done; exit $${fail:-0}
-	python3 $(CURDIR)/tools/delegate-dashboard/test_dashboard.py >/dev/null 2>&1 && echo "ok   tools/delegate-dashboard/test_dashboard.py"
+	$(PYTHON) $(CURDIR)/tools/delegate-dashboard/test_dashboard.py >/dev/null 2>&1 && echo "ok   tools/delegate-dashboard/test_dashboard.py"
 
 delegate-codex-home:
 	mkdir -p $(HOME)/.local/share/delegate/codex-home $(HOME)/.cache/playwright-mcp

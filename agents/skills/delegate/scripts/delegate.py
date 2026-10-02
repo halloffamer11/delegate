@@ -169,18 +169,18 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         if harness and harness in HARNESSES:
             avail = [l for l, d in lanes.items() if d.get("harness") == harness]
             if avail:
-                sys.stderr.write(f"delegate: unknown lane '{shown}'; available lanes for {harness}: {", ".join(sorted(avail))}\n")
+                sys.stderr.write(f"delegate: unknown lane '{shown}'; available lanes for {harness}: {', '.join(sorted(avail))}\n")
             else:
-                sys.stderr.write(f"delegate: unknown lane '{shown}'; available lanes: {", ".join(sorted(lanes.keys()))}\n")
+                sys.stderr.write(f"delegate: unknown lane '{shown}'; available lanes: {', '.join(sorted(lanes.keys()))}\n")
         else:
-            sys.stderr.write(f"delegate: unknown lane '{shown}'; available lanes: {", ".join(sorted(lanes.keys()))}\n")
+            sys.stderr.write(f"delegate: unknown lane '{shown}'; available lanes: {', '.join(sorted(lanes.keys()))}\n")
         sys.exit(2)
 
     lane_data = lanes[lane_name]
     harness = lane_data["harness"]
 
     if class_name is not None and class_name not in CLASSES:
-        sys.stderr.write(f"delegate: invalid class '{class_name}'; must be one of {", ".join(CLASSES)}\n")
+        sys.stderr.write(f"delegate: invalid class '{class_name}'; must be one of {', '.join(CLASSES)}\n")
         sys.exit(2)
 
     if not os.path.isabs(brief_path):
@@ -229,7 +229,7 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
     else:
         effort = effort_arg if effort_arg is not None else lane_data["effort"]
     if effort not in EFFORTS:
-        sys.stderr.write(f"delegate: invalid effort '{effort}'; must be one of {", ".join(EFFORTS)}\n")
+        sys.stderr.write(f"delegate: invalid effort '{effort}'; must be one of {', '.join(EFFORTS)}\n")
         sys.exit(2)
 
     if shutil.which(harness) is None:
