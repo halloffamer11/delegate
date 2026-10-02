@@ -11,9 +11,9 @@ baseline every later change to the skill keeps passing.
   2. routing      Gate veto, Pace order and a Margin steal on fixture Meters.
                   Offline and deterministic; it lives in tests/test_evals.py
                   and runs in `make test`.
-  3. orchestrate  The same ping job, sent through the skill from each harness
-                  that can orchestrate, produces an equivalent run directory
-                  and return.json.
+  3. orchestrate  The same ping job, sent through the skill from each
+                  orchestrator profile with a headless launch, produces an
+                  equivalent run directory and return.json.
 
 Each prints one line per harness, `pass`, `skip` or `fail`, and exits 1 when
 any line is a fail.
@@ -41,6 +41,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog  # noqa: E402
+import orchestrators  # noqa: E402
 import rank  # noqa: E402
 
 # The evals drive delegate the way a harness does: through the `delegate`
@@ -60,28 +61,11 @@ Reply with the single word pong. Read no files and run no commands.
 The deliverable is exactly `pong`.
 """
 
-# How each harness that can orchestrate is started headless with one prompt,
-# which takes the place of "{prompt}" in its argv. These are the documented
-# headless forms; they are not checked by the offline eval, which stands a
-# stub in for each CLI, and Orin's live run is what proves them. A harness
-# not listed here is reported as skipped by `orchestrate`.
-ORCHESTRATOR_COMMANDS = {
-    # `/delegate` must be typed: the skill is user-invoked only, and in -p mode
-    # the leading slash command is the user's own invocation.
-    "claude": {
-        "argv": ["claude", "-p", "{prompt}", "--allowedTools", "Bash,Read"],
-        "prompt": "/delegate {cls} job, brief {brief}, working directory {cwd}. "
-                  "When it finishes, print the run directory.",
-    },
-    # Codex needs no sandbox here: delegate itself starts other CLIs, which
-    # need the network and their own homes.
-    "codex": {
-        "argv": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "{prompt}"],
-        "prompt": "I am explicitly asking you to use the delegate skill. Delegate the job in "
-                  "{brief} as class {cls}, working directory {cwd}. When it finishes, print "
-                  "the run directory.",
-    },
-}
+# How each orchestrator is started headless is its profile's `launch`
+# (assets/orchestrators/, or a machine's own profile): an argv with "{prompt}"
+# where the prompt goes, and the prompt. The offline eval stands a stub in for
+# each CLI, so Orin's live run is what proves them. An orchestrator with no
+# launch is reported as skipped by `orchestrate`.
 
 # The files every relayed run directory holds when it finishes. Others (final.txt,
 # events.jsonl, brief.txt) depend on the harness and are not compared.
@@ -221,6 +205,20 @@ class Sandbox:
     def installed(self, harness):
         return shutil.which(harness, path=self.env.get("PATH")) is not None
 
+    def orchestrator_env(self, profile):
+        """The env an orchestrator's shell gives delegate: no other
+        orchestrator's markers. Offline, the stub sets this profile's own, as
+        the real harness would; live, the harness sets them itself."""
+        env = dict(self.env)
+        env.pop("DELEGATE_ORCHESTRATOR", None)
+        for other in orchestrators.load().values():
+            for var in other["detect_env"]:
+                env.pop(var, None)
+        if self.offline:
+            for var in profile["detect_env"]:
+                env[var] = "1"
+        return env
+
     def run_dirs(self):
         return {os.path.join(self.runs_dir, d) for d in os.listdir(self.runs_dir)}
 
@@ -271,13 +269,12 @@ def ping_one(sandbox, harness):
     if lane is None:
         return "skip", why, None
     cmd = DELEGATE + ["dispatch", "--lane", lane, "--class", PING_CLASS,
-           "--brief", sandbox.brief, "--cwd", sandbox.cwd] + sandbox.common_args()
+           "--brief", sandbox.brief, "--cwd", sandbox.cwd,
+           # A ping proves the relay, so no Lane runs natively, whoever runs the eval.
+           "--orchestrator", "none"] + sandbox.common_args()
     if sandbox.offline:
         cmd.append("--no-probe")
     proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
-    native = re.search(r"^delegate: native lane=\S+ agent=(\S+)", proc.stdout, re.M)
-    if native:
-        return "skip", f"{lane} is a native lane; spawn {native.group(1)} from the orchestrator", None
     run_dir = run_dir_from(proc.stdout)
     if run_dir is None:
         tail = (proc.stderr or proc.stdout).strip().splitlines()[-1:] or ["no output"]
@@ -319,31 +316,42 @@ def equivalent(reference_dir, run_dir):
     return None
 
 
-def orchestrate_one(sandbox, orchestrator, reference):
+def orchestrate_one(sandbox, orchestrator, reference, profiles):
     """(verdict, detail) for one orchestrator sending the ping through the skill."""
-    spec = ORCHESTRATOR_COMMANDS.get(orchestrator)
-    if spec is None:
-        return "skip", f"no headless command known for {orchestrator}"
-    if not sandbox.offline and not sandbox.installed(orchestrator):
-        return "skip", f"{orchestrator} CLI not installed"
+    profile = profiles.get(orchestrator)
+    if profile is None:
+        return "skip", f"no orchestrator profile for {orchestrator}"
+    spec = profile.get("launch")
+    if not spec:
+        return "skip", f"the {orchestrator} profile has no headless launch"
+    binary = spec["argv"][0]
+    if not sandbox.offline and not sandbox.installed(binary):
+        return "skip", f"{binary} CLI not installed"
     prompt = spec["prompt"].format(cls=PING_CLASS, brief=sandbox.brief, cwd=sandbox.cwd)
+    env = sandbox.orchestrator_env(profile)
     before = sandbox.run_dirs()
     if sandbox.offline:
         # The stub orchestrator does what the skill tells any orchestrator to
-        # do: one `delegate run` from a shell. It runs with the env the real
-        # harness would have, so nothing about the caller leaks in.
+        # do: one `delegate run` from a shell, with the env its harness sets.
         cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief,
                "--cwd", sandbox.cwd, "--meters", sandbox.meters, "--no-probe"] + sandbox.common_args()
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     else:
         argv = [prompt if a == "{prompt}" else a for a in spec["argv"]]
         proc = subprocess.run(argv, capture_output=True, text=True,
-                              env=sandbox.env, cwd=sandbox.cwd, timeout=1800)
+                              env=env, cwd=sandbox.cwd, timeout=1800)
     new = sorted(sandbox.run_dirs() - before)
     if not new:
         tail = (proc.stderr or proc.stdout).strip().splitlines()[-1:] or ["no output"]
         return "fail", f"no run directory (exit {proc.returncode}): {tail[0]}"
     run_dir = new[-1]
+    native = re.search(r"^delegate: native lane=(\S+) agent=(\S+)", proc.stdout, re.M)
+    if native and sandbox.offline:
+        # The stub cannot spawn a subagent; the run directory and its prompt
+        # are what the orchestrator's agent would read.
+        if not os.path.isfile(os.path.join(run_dir, "prompt.md")):
+            return "fail", f"{run_dir}: native run wrote no prompt.md"
+        return "pass", f"native lane {native.group(1)}: spawn {native.group(2)} ({run_dir})"
     problem = check_ping_run(run_dir)
     if problem:
         return "fail", problem
@@ -354,20 +362,23 @@ def orchestrate_one(sandbox, orchestrator, reference):
     return "pass", f"equivalent run ({run_dir})"
 
 
-def eval_orchestrate(sandbox, orchestrators):
+def eval_orchestrate(sandbox, names):
     # The reference is a plain dispatch of the Lane the class ranks first; an
     # orchestrator's run is compared with it.
     reference = None
     try:
+        profiles = orchestrators.load()
         catalog.load_catalog(cwd=sandbox.cwd, config_dir=sandbox.config_dir)
     except catalog.CatalogError as e:
-        return {o: ("fail", str(e)) for o in orchestrators}
+        return {o: ("fail", str(e)) for o in names}
+    except orchestrators.ProfileError as e:
+        return {o: ("fail", str(e)) for o in names}
     if sandbox.offline:
-        cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief,
+        cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief, "--orchestrator", "none",
                "--cwd", sandbox.cwd, "--meters", sandbox.meters, "--no-probe"] + sandbox.common_args()
         proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
         reference = run_dir_from(proc.stdout)
-    return {o: orchestrate_one(sandbox, o, reference) for o in orchestrators}
+    return {o: orchestrate_one(sandbox, o, reference, profiles) for o in names}
 
 
 def print_results(name, results):
@@ -392,8 +403,8 @@ def main(argv=None):
     try:
         if args.eval == "ping":
             return print_results("ping", eval_ping(sandbox, harnesses))
-        orchestrators = args.harness or list(catalog.HARNESSES)
-        return print_results("orchestrate", eval_orchestrate(sandbox, orchestrators))
+        names = args.harness or [n for n, p in orchestrators.load().items() if p.get("launch")]
+        return print_results("orchestrate", eval_orchestrate(sandbox, names))
     finally:
         sandbox.close()
 

@@ -232,12 +232,14 @@ def run_probe_for_harness(harness, probe_name, lane):
 def native_agent(cat, lane):
     """Returns the agent to spawn when the lane is native, else None.
 
-    A native lane's harness is the orchestrator's, so delegate.py prints a spawn
-    line and starts no relay. A script cannot spawn that agent: the session
-    probes the lane itself with the same brief."""
-    import delegate
-    if cat.get("lanes", {}).get(lane, {}).get("harness") == delegate.ORCHESTRATOR:
-        return "lane-" + lane.split("@", 1)[0]
+    A lane is native when the orchestrator this run detects runs its harness
+    in-process (orchestrators.py), so delegate prints a spawn line and starts
+    no relay. A script cannot spawn that agent: the session probes the lane
+    itself with the same brief."""
+    import orchestrators
+    profile = orchestrators.resolve()
+    if orchestrators.is_native(profile, cat.get("lanes", {}).get(lane, {}).get("harness")):
+        return orchestrators.agent_name(profile, lane)
     return None
 
 

@@ -1,0 +1,11 @@
+{
+  "note": "Codex as the orchestrator. It runs no Lane in-process, so every Lane is relayed: the default path, which needs nothing here but the headless command eval 3 starts it with.",
+  "harness": "codex",
+  "detect_env": [],
+  "native": null,
+  "launch": {
+    "note": "Headless, for eval 3. No sandbox: delegate itself starts other CLIs, which need the network and their own homes.",
+    "argv": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "{prompt}"],
+    "prompt": "I am explicitly asking you to use the delegate skill. Delegate the job in {brief} as class {cls}, working directory {cwd}. When it finishes, print the run directory."
+  }
+}

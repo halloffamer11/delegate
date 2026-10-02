@@ -38,6 +38,11 @@ try:
 except ImportError:
     from . import usage
 
+try:
+    import orchestrators
+except ImportError:
+    from . import orchestrators
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
 CACHE = usage.get_cache_path()
@@ -129,10 +134,13 @@ def model_cell(lane_row, by_meter):
 
 
 def ignored(lane_row, by_meter):
-    """A meter no lane can spend, on a harness that is not this session, is ignored
-    on purpose — agy's Claude/GPT group after Opus was dropped. Derived, not listed:
-    add a lane on that meter to the catalog and it returns to the table."""
-    return not by_meter.get(lane_row["lane"]) and lane_row["harness"] != "claude"
+    """A meter no lane can spend, on a harness no orchestrator runs in-process, is
+    ignored on purpose — agy's Claude/GPT group after Opus was dropped. A harness
+    an orchestrator profile runs natively keeps its Meters: the session itself
+    spends them. Derived, not listed: add a lane on that meter to the catalog and
+    it returns to the table."""
+    return (not by_meter.get(lane_row["lane"])
+            and lane_row["harness"] not in orchestrators.native_harnesses())
 
 
 def usage_doc(refresh=False, max_age_min=None, routing=None):

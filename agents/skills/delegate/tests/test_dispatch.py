@@ -125,6 +125,12 @@ exec /usr/bin/git "$@"
     base_env["DELEGATE_CACHE"] = cache_path
     base_env["ADS_DIR"] = ads_dir
     base_env["DELEGATE_CODEX_HOME"] = codex_home_dir
+    # The cases were written with Claude Code orchestrating, so that is the
+    # profile they run under unless one names another. The host's own markers
+    # and profiles never reach them.
+    base_env.pop("CLAUDECODE", None)
+    base_env["DELEGATE_ORCHESTRATOR"] = "claude"
+    base_env["DELEGATE_ORCHESTRATORS_DIR"] = os.path.join(root_dir, "orchestrators")
 
     return {
         "config_dir": config_dir,
@@ -191,27 +197,17 @@ def run_dispatch(t_env, args, extra_env=None, orchestrator=None):
     env = dict(t_env["env"])
     if extra_env:
         env.update(extra_env)
+    cmd = [
+        sys.executable,
+        DELEGATE_PY,
+        "dispatch",
+        "--config-dir", t_env["config_dir"],
+        "--ads-dir", t_env["ads_dir"],
+        "--runs-dir", t_env["runs_dir"],
+        "--no-probe",
+    ] + args
     if orchestrator is not None:
-        cmd = [
-            sys.executable,
-            "-c",
-            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; delegate.ORCHESTRATOR = {orchestrator!r}; sys.exit(delegate.main())",
-            "dispatch",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
-    else:
-        cmd = [
-            sys.executable,
-            DELEGATE_PY,
-            "dispatch",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
+        cmd += ["--orchestrator", orchestrator]
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
@@ -219,27 +215,17 @@ def run_run(t_env, args, extra_env=None, orchestrator=None):
     env = dict(t_env["env"])
     if extra_env:
         env.update(extra_env)
+    cmd = [
+        sys.executable,
+        DELEGATE_PY,
+        "run",
+        "--config-dir", t_env["config_dir"],
+        "--ads-dir", t_env["ads_dir"],
+        "--runs-dir", t_env["runs_dir"],
+        "--no-probe",
+    ] + args
     if orchestrator is not None:
-        cmd = [
-            sys.executable,
-            "-c",
-            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; delegate.ORCHESTRATOR = {orchestrator!r}; sys.exit(delegate.main())",
-            "run",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
-    else:
-        cmd = [
-            sys.executable,
-            DELEGATE_PY,
-            "run",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
+        cmd += ["--orchestrator", orchestrator]
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
@@ -1059,14 +1045,18 @@ def main():
         res29 = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29, "--cwd", cwd])
         runs_after29 = set(os.listdir(t_env["runs_dir"]))
         new_runs29 = list(runs_after29 - runs_before29)
+        lines29 = res29.stdout.strip().splitlines()
+        # the native line, then the profile's one-line spawn instruction
         ok29 = (
             res29.returncode == 0 and
-            len(new_runs29) == 1 and
-            res29.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high prompt=")
+            len(new_runs29) == 1 and len(lines29) == 2 and
+            lines29[0].startswith("delegate: native lane=opus-high@claude agent=lane-opus-high prompt=") and
+            lines29[1].startswith("delegate: spawn: spawn lane-opus-high with the Agent tool") and
+            lines29[0].split("prompt=")[-1] in lines29[1]
         )
         if ok29:
             dir29 = os.path.join(t_env["runs_dir"], new_runs29[0])
-            prompt_in_stdout = res29.stdout.strip().split("prompt=")[-1]
+            prompt_in_stdout = lines29[0].split("prompt=")[-1]
             expected_prompt = os.path.abspath(os.path.join(dir29, "prompt.md"))
             ok29 = (
                 prompt_in_stdout == expected_prompt and
@@ -1119,7 +1109,7 @@ def main():
         # its background command writes: the agy override warning (24) comes
         # first and is not the result; the native line (29) is not a result.
         courier_md = open(COURIER_MD).read()
-        greps = re.findall(r"grep -m1 -E '([^']+)'", courier_md)
+        greps = re.findall(r"grep -m[12] -E '([^']+)'", courier_md)
         finish_re, native_re = (greps + [None, None])[:2]
 
         def courier_log(args):
@@ -1204,7 +1194,7 @@ def main():
         runs_after30 = set(os.listdir(t_env["runs_dir"]))
         new_runs30 = list(runs_after30 - runs_before30)
         lines30 = [ln for ln in res30.stdout.strip().splitlines() if ln.strip()]
-        last_line30 = lines30[-1] if lines30 else ""
+        last_line30 = next((ln for ln in lines30 if ln.startswith("delegate: native")), "")
         ok30 = (
             res30.returncode == 0 and
             len(new_runs30) == 1 and
@@ -1241,6 +1231,26 @@ def main():
             dir31 = os.path.join(t_env["runs_dir"], new_runs31[0])
             ok31 = os.path.exists(os.path.join(dir31, "argv.json")) and os.path.exists(os.path.join(dir31, "relay.stdout"))
         record("31. ORCHESTRATOR=codex sends claude lane through fake relay", ok31, f"rc={res31.returncode} stdout={res31.stdout}")
+
+        # 31b-31e. the orchestrator is never assumed: none, an unknown name or
+        # nothing detected relays a claude Lane; CLAUDECODE alone detects Claude Code
+        def relayed(res):
+            return (res.returncode == 0 and "delegate-metrics:" in res.stdout
+                    and "delegate: native" not in res.stdout)
+        no_orch_env = {"DELEGATE_ORCHESTRATOR": ""}
+        for tag, orch, extra in (("31b. --orchestrator none", "none", None),
+                                 ("31c. an unknown orchestrator", "kiro", None),
+                                 ("31d. nothing detected", None, no_orch_env)):
+            b = make_brief(f"b{tag[:3]}.md", f"fake-relay: status=completed final={done_final}\nBrief {tag}.")
+            res = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b, "--cwd", cwd],
+                               extra_env=extra, orchestrator=orch)
+            record(f"{tag} relays a claude lane", relayed(res), f"rc={res.returncode} stdout={res.stdout} stderr={res.stderr}")
+        b31e = make_brief("b31e.md", "Brief 31e.")
+        res31e = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b31e, "--cwd", cwd],
+                              extra_env={"DELEGATE_ORCHESTRATOR": "", "CLAUDECODE": "1"})
+        record("31e. CLAUDECODE alone runs a claude lane natively",
+               res31e.returncode == 0 and res31e.stdout.startswith("delegate: native lane=opus-high@claude"),
+               f"rc={res31e.returncode} stdout={res31e.stdout} stderr={res31e.stderr}")
 
         # -------------------------------------------------------------
         # 32. prompt.md preamble permits disposable browser and forbids other network writes

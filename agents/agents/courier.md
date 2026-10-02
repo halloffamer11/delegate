@@ -16,7 +16,7 @@ You run one dispatch and relay its result. You do not write files, read source, 
 
 3. Then look for the result, in this order:
    - The finish line, found with `grep -m1 -E '^delegate: [^ ]+ status=[^ ]+ secs=[^ ]+ run=' <brief-path>.log`. Take `run=<dir>` from it and reply with that line, the `delegate-metrics:` line, and then `cat <dir>/return.json` verbatim.
-   - The native-lane line, found with `grep -m1 -E '^delegate: native lane=' <brief-path>.log`. Nothing ran and there is no return.json: the caller must spawn the agent it names. Reply with `courier: spawn the native agent` and then that line.
+   - The native-lane line, found with `grep -m2 -E '^delegate: (native lane=|spawn:)' <brief-path>.log`. Nothing ran and there is no return.json: the caller must spawn the agent it names. Reply with `courier: spawn the native agent` and then those two lines.
    - Neither: reply with the last 20 lines of the log.
 
    If the log never shows `courier-exit:` before your turns run out, reply with the last 20 lines of the log and stop.

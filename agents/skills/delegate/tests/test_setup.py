@@ -22,6 +22,9 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
+import orchestrators  # noqa: E402
+# The shipped Claude Code profile: the one that runs claude Lanes in-process.
+CLAUDE_PROFILE = orchestrators.load([orchestrators.SHIPPED_DIR])["claude"]
 
 fails = 0
 lanes_sample = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
@@ -754,7 +757,7 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
     import io
     import setup
     import setup_tui
-    real_scan, real_run, real_agents = setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR
+    real_scan, real_run, real_agents = setup.scan, setup_tui.run_curses, setup.native_targets
     real_config = catalog.CONFIG_DIR
     real_in, real_out = sys.stdin, sys.stdout
     aa = os.path.join(REFRESH_DIR, "aa-accepted.json")
@@ -792,14 +795,15 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
             with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
                 f.write("superseded\n")
         out = Terminal()
-        setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR = scan, run_curses, agents
+        setup.scan, setup_tui.run_curses, setup.native_targets = (
+            scan, run_curses, lambda _config: [(CLAUDE_PROFILE, agents)])
         catalog.CONFIG_DIR = config
         sys.stdin, sys.stdout = Terminal(), out
         try:
             code = setup.main(["--config-dir", config, "--fixture-dir", REFRESH_DIR,
                                "--effort-rows", aa, "--no-bench"])
         finally:
-            setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR = real_scan, real_run, real_agents
+            setup.scan, setup_tui.run_curses, setup.native_targets = real_scan, real_run, real_agents
             catalog.CONFIG_DIR = real_config
             sys.stdin, sys.stdout = real_in, real_out
         written = sorted(os.listdir(agents))
@@ -851,7 +855,7 @@ def case_native_agent_files_follow_the_claude_lanes():
         "effort: high\n"
         "---\n"
         "\n"
-        + setup.NATIVE_AGENT_BODY + "\n"
+        + CLAUDE_PROFILE["native"]["template"][-2] + "\n"
     )
     with tempfile.TemporaryDirectory() as td:
         agents = os.path.join(td, "agents")
@@ -859,7 +863,7 @@ def case_native_agent_files_follow_the_claude_lanes():
         for effort in ("low", "medium", "high", "xhigh", "max"):
             with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
                 f.write("superseded\n")
-        lines = setup.save_native_agents(plan, refreshed, agents)
+        lines = setup.save_native_agents(plan, refreshed, agents, CLAUDE_PROFILE)
         written = sorted(os.listdir(agents))
         with open(os.path.join(agents, "lane-opus55-high.md"), encoding="utf-8") as f:
             text = f.read()
@@ -876,8 +880,9 @@ def case_a_catalog_elsewhere_gets_no_agent_file():
     import setup
     _frozen, refreshed, plan = refresh_fixture()
     with tempfile.TemporaryDirectory() as td:
-        lines = setup.save_native_agents(plan, refreshed, setup.native_agents_dir(td))
-        ok = (setup.native_agents_dir(td) is None
+        lines = setup.save_native_agents(plan, refreshed, setup.native_agents_dir(td, CLAUDE_PROFILE),
+                                         CLAUDE_PROFILE)
+        ok = (setup.native_agents_dir(td, CLAUDE_PROFILE) is None
               and len(lines) == 1 and "agent file" in lines[0])
         return ok, f"lines={lines}"
 
@@ -887,7 +892,7 @@ def case_the_live_catalog_gets_the_agent_files():
     and its agent files go to ~/.claude/agents, never the repo (Orin,
     2026-09-29). Nothing is written: this only asks where."""
     import setup
-    found = setup.native_agents_dir(catalog.CONFIG_DIR)
+    found = setup.native_agents_dir(catalog.CONFIG_DIR, CLAUDE_PROFILE)
     ok = found == os.path.expanduser("~/.claude/agents")
     return ok, f"{catalog.CONFIG_DIR} -> {found}"
 
@@ -915,8 +920,8 @@ def case_the_real_layout_saves_the_agent_files():
                 f.write("superseded\n")
         os.environ["HOME"] = td
         try:
-            found = setup.native_agents_dir("~/.config/delegate")
-            lines = setup.save_native_agents(plan, refreshed, found)
+            found = setup.native_agents_dir("~/.config/delegate", CLAUDE_PROFILE)
+            lines = setup.save_native_agents(plan, refreshed, found, CLAUDE_PROFILE)
         finally:
             if real_home is None:
                 del os.environ["HOME"]

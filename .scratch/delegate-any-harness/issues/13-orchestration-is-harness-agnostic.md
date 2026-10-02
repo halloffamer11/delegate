@@ -11,9 +11,9 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 11 One harness registry; 12 One /delegate skill on the `delegate` command, with a harness constraint.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02; rescoped the same day from "orchestrated from Codex" after Orin's review: "Make the orchestration harness agnostic. Don't just build one for Codex."
+**Status:** ready-for-human, raised by Orin 2026-10-02; rescoped the same day from "orchestrated from Codex" after Orin's review: "Make the orchestration harness agnostic. Don't just build one for Codex." Built 2026-10-02: profiles in `assets/orchestrators/` (claude, codex), `scripts/orchestrators.py`, `--orchestrator` on `run`/`dispatch`, `tests/test_orchestrators.py`, dispatch cases 31b-31e, and the offline orchestrate eval runs each profile with its own env. Waits on Orin: the live runs in the last box. Kiro's profile comes with ticket 15.
 
-- [ ] No script names an orchestrator; `ORCHESTRATOR` and the `@claude` native check are gone from the code.
-- [ ] With no profile or an unknown orchestrator, `delegate run` relays every Lane, claude Lanes included, and a test proves it.
-- [ ] Native Lanes come only from a profile file, and `setup.py` writes agent files only for a profile that declares them; adding a profile needs no code change.
+- [x] No script names an orchestrator; `ORCHESTRATOR` and the `@claude` native check are gone from the code.
+- [x] With no profile or an unknown orchestrator, `delegate run` relays every Lane, claude Lanes included, and a test proves it.
+- [x] Native Lanes come only from a profile file, and `setup.py` writes agent files only for a profile that declares them; adding a profile needs no code change.
 - [ ] The same eval scenarios from ticket 10 pass when orchestrated from Claude Code and from two other harnesses (Codex and Kiro), each reviewed from its run directory (Orin's box for the live runs).

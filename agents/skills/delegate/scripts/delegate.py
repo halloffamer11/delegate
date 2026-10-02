@@ -55,12 +55,13 @@ from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HAR
 import catalog
 import events
 import harnesses
+import orchestrators
 import rank
 import usage
 
-# The harness whose lanes run natively, as subagents of the session; a future
-# Codex orchestrator changes it (ticket 22, out of scope).
-ORCHESTRATOR = "claude"
+# No orchestrator is assumed. A Lane runs in-process only when the orchestrator
+# profile for this run says its harness can (orchestrators.py); otherwise, and
+# for every unknown orchestrator, it is relayed.
 
 
 def parse_timeout_s(timeout_str):
@@ -128,7 +129,7 @@ def _lane_model_listing(lanes, harness=None):
     return ", ".join(items)
 
 
-def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, config_dir, ads_dir, model_slug=None, harness_filter=None):
+def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, config_dir, ads_dir, model_slug=None, harness_filter=None, profile=None):
     try:
         cat = load_catalog(cwd=cwd_dir, config_dir=config_dir)
     except CatalogError as e:
@@ -227,7 +228,7 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
             f"delegate: effort override ignored on {lane_name}; {harness} carries effort in the model name\n"
         )
         effort = lane_data["effort"]
-    elif harness == ORCHESTRATOR and effort_arg is not None and effort_arg != lane_data["effort"]:
+    elif orchestrators.is_native(profile, harness) and effort_arg is not None and effort_arg != lane_data["effort"]:
         # A native lane runs as its lane-*.md agent, whose file fixes the effort,
         # so an override would be recorded and never used.
         sys.stderr.write(
@@ -249,7 +250,7 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
 
     # Only a relayed lane goes through ADS and node. A native lane runs as the
     # orchestrator's own agent, so a machine without node (or ADS) still runs it.
-    if harness != ORCHESTRATOR:
+    if not orchestrators.is_native(profile, harness):
         ads_sh = os.path.join(HERE, "ads.sh")
         env = dict(os.environ)
         if ads_dir:
@@ -360,7 +361,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     return prompt_bytes, prompt_path
 
 
-def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes, leash=True):
+def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes, leash=True, orchestrator=None):
     runs_dir_param = runs_dir_param or os.environ.get("DELEGATE_RUNS_DIR")
     runs_dir = os.path.abspath(os.path.expanduser(runs_dir_param)) if runs_dir_param else os.path.expanduser("~/.cache/delegate/runs")
     os.makedirs(runs_dir, exist_ok=True)
@@ -384,6 +385,9 @@ def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, clas
         "timeout": timeout,
         "class": class_name,
         "leash": leash,
+        # the orchestrator profile this run was resolved under; null is the
+        # default path, where every Lane is relayed
+        "orchestrator": orchestrator,
         "cwd": cwd,
         "write": write,
         "brief": brief_path,
@@ -777,7 +781,8 @@ def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exi
         sys.exit(1)
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None):
+    profile = load_profile(orchestrator)
     # Step 1: Resolve
     resolved = resolve(
         lane_name=lane,
@@ -790,6 +795,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         ads_dir=ads_dir,
         model_slug=model,
         harness_filter=harness,
+        profile=profile,
     )
     lane = resolved["lane"]
     harness = resolved["harness"]
@@ -825,12 +831,14 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         brief_path=brief,
         prompt_bytes=prompt_bytes,
         leash=effective_leash,
+        orchestrator=profile["name"] if profile else None,
     )
 
-    if harness == ORCHESTRATOR:
-        model_effort = lane.split("@")[0]
+    if orchestrators.is_native(profile, harness):
         abs_prompt = os.path.abspath(prompt_path)
-        print(f"delegate: native lane={lane} agent=lane-{model_effort} prompt={abs_prompt}")
+        agent = orchestrators.agent_name(profile, lane)
+        print(f"delegate: native lane={lane} agent={agent} prompt={abs_prompt}")
+        print(f"delegate: spawn: {orchestrators.spawn_line(profile, lane, abs_prompt)}")
         sys.exit(0)
 
     return_path = os.path.join(run_dir, "return.json")
@@ -886,7 +894,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
 
-def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None):
     if class_ not in CLASSES:
         sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(CLASSES)}\n")
         sys.exit(2)
@@ -938,7 +946,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
 
     pick_lane = rows[0]["lane"]
     lane_harness = cat["lanes"][pick_lane]["harness"]
-    if lane_harness != ORCHESTRATOR:
+    if not orchestrators.is_native(load_profile(orchestrator), lane_harness):
         print(f"delegate: dispatching {pick_lane}")
     dispatch(
         lane=pick_lane,
@@ -953,7 +961,23 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         no_probe=no_probe,
         no_leash=no_leash,
         probed=probed,
+        orchestrator=orchestrator,
     )
+
+
+def load_profile(name):
+    """The orchestrator profile for this run, or None for the default path. A
+    broken profile file stops the run: guessing would decide native or relay
+    wrongly."""
+    try:
+        return orchestrators.resolve(name)
+    except orchestrators.ProfileError as e:
+        sys.stderr.write(f"delegate: orchestrator profile: {e}\n")
+        sys.exit(2)
+
+
+ORCHESTRATOR_HELP = ("the orchestrating harness's profile (assets/orchestrators/); default "
+                     "$DELEGATE_ORCHESTRATOR, else detected; 'none' relays every Lane")
 
 
 def main(argv=None):
@@ -977,6 +1001,7 @@ def main(argv=None):
     p_dispatch.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
     p_dispatch.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
     p_dispatch.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
+    p_dispatch.add_argument("--orchestrator", default=None, help=ORCHESTRATOR_HELP)
 
     p_run = sub.add_parser("run", help="rank and dispatch in one step")
     p_run.add_argument("class_", metavar="class", help="work class")
@@ -994,6 +1019,7 @@ def main(argv=None):
     p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
     p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
     p_run.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
+    p_run.add_argument("--orchestrator", default=None, help=ORCHESTRATOR_HELP)
 
     args = parser.parse_args(argv)
     if args.cmd == "dispatch":
@@ -1011,6 +1037,7 @@ def main(argv=None):
             harness=args.harness,
             model=args.model,
             no_leash=args.no_leash,
+            orchestrator=args.orchestrator,
         )
     elif args.cmd == "run":
         run(
@@ -1028,6 +1055,7 @@ def main(argv=None):
             no_probe=args.no_probe,
             no_leash=args.no_leash,
             harness=args.harness,
+            orchestrator=args.orchestrator,
         )
 
 

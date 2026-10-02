@@ -9,7 +9,7 @@ remaining subscription usage.
 A CLI that runs models: `claude`, `codex`, `agy`, or `grok`.
 
 **Orchestrator harness**:
-The harness that runs the session that plans, dispatches, and checks results. Today it is always Claude Code.
+The harness that runs the session that plans, dispatches, and checks results. Any harness that can run a shell and read files can be one; delegate detects it (or takes `--orchestrator`) and never assumes it.
 _Avoid_: lead harness, parent
 
 **Model**:

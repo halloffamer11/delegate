@@ -14,6 +14,7 @@ import bench_page
 import catalog
 import discover
 import effort
+import orchestrators
 import setup_tui
 from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
 
@@ -24,15 +25,13 @@ AA_MAX_AGE = 24 * 60 * 60
 # The rows a fixture run reads instead of fetching, beside the harness fixtures.
 AA_FIXTURE = "aa-accepted.json"
 
-# A claude lane runs as a subagent, so the lane is not live until the agent file
-# beside it is (ticket 22). The catalog is machine-local, so its agent files are
-# too: they go straight into ~/.claude/agents, beside the stowed agents, and never
-# into the repo (Orin, 2026-09-29). Expanded at call time, like catalog.CONFIG_DIR.
-NATIVE_AGENTS_DIR = "~/.claude/agents"
-NATIVE_AGENT_BODY = (
-    "You are a delegate worker. Read the prompt file named in your task and follow it "
-    "exactly. Your final message is the return block that the prompt asks for."
-)
+# A native Lane runs in-process in its orchestrator, so the Lane is not live
+# until its agent file is (ticket 22). Which orchestrators run Lanes natively,
+# where their agent files live and what they hold is profile data
+# (orchestrators.py); setup writes files only for a profile that declares them.
+# The catalog is machine-local, so its agent files are too: they go straight
+# into the profile's agents directory, and never into the repo (Orin,
+# 2026-09-29).
 
 
 class SetupAbort(Exception):
@@ -431,73 +430,79 @@ def published_model_names(rows):
     })
 
 
-def native_agent_text(lane_name, lane):
-    """The agent file for one native claude lane, in the form the files beside
-    it take. A model that takes no effort level carries no `effort` line."""
-    lines = [
-        "---",
-        f"name: lane-{lane_name.split('@', 1)[0]}",
-        f'description: "Delegate native lane {lane_name}. Use only when /delegate prints a '
-        'native line that names this agent, or when Orin names this lane."',
-        f"model: {lane['model']}",
-    ]
-    if discover.model_takes_effort("claude", lane["model"]):
-        lines.append(f"effort: {lane['effort']}")
-    lines += ["---", "", NATIVE_AGENT_BODY, ""]
-    return "\n".join(lines)
+def native_agent_text(lane_name, lane, profile):
+    """The agent file for one native Lane, from its orchestrator profile's
+    template. A model that takes no effort level carries no `effort` line."""
+    effort = lane["effort"] if discover.model_takes_effort(lane.get("harness"), lane["model"]) else None
+    return orchestrators.agent_text(profile, lane_name, lane["model"], effort)
 
 
-def native_agents_dir(config_dir):
-    """Where a native claude lane's agent file goes, or None.
+def native_agents_dir(config_dir, profile):
+    """Where a native Lane's agent file goes for this profile, or None.
 
     The agent files and the catalog have to stay in step, so they are written
     only when the catalog being written is this machine's live one,
     `catalog.CONFIG_DIR`. A catalog somewhere else — a test, a throwaway copy —
-    gets none, because ~/.claude/agents is not that catalog's.
+    gets none, because the profile's agents directory is not that catalog's.
     """
     here = os.path.realpath(os.path.expanduser(config_dir or ""))
     live = os.path.realpath(os.path.expanduser(catalog.CONFIG_DIR))
-    return os.path.expanduser(NATIVE_AGENTS_DIR) if here == live else None
+    return os.path.expanduser(profile["native"]["agents_dir"]) if here == live else None
 
 
-def save_native_agents(refresh, lanes_doc, agents_dir):
-    """Write the agent file of each new claude lane, remove each superseded
-    one, and return the lines to print.
+def native_targets(config_dir):
+    """[(profile, agents directory or None)] for each profile with native Lanes."""
+    return [(profile, native_agents_dir(config_dir, profile))
+            for profile in orchestrators.native_profiles()]
 
-    A claude lane runs as a subagent, so a new lane is not live until its file
-    is, and the wizard writes it before it exits (ticket 33). A link left at a
-    lane's path — the stow link of a lane file the repo used to carry — is
+
+def save_native_agents(refresh, lanes_doc, agents_dir, profile):
+    """Write the agent file of each new Lane on the profile's harness, remove
+    each superseded one, and return the lines to print.
+
+    A native Lane runs in-process, so a new Lane is not live until its file is,
+    and the wizard writes it before it exits (ticket 33). A link left at a
+    Lane's path — the stow link of a lane file the repo used to carry — is
     removed first, so the write never lands in the repo through it.
     """
     if not refresh:
         return []
+    harness = profile["harness"]
     lanes = lanes_doc.get("lanes") or {}
     if agents_dir is None:
         waiting = [name for name in refresh.get("new") or ()
-                   if (lanes.get(name) or {}).get("harness") == "claude"]
+                   if (lanes.get(name) or {}).get("harness") == harness]
         if not waiting:
             return []
-        return [f"note: {len(waiting)} new claude lanes need an agent file; this catalog is "
+        return [f"note: {len(waiting)} new {harness} lanes need an agent file; this catalog is "
                 "not the live one, so none was written"]
     lines = []
     for name in refresh.get("new") or ():
         lane = lanes.get(name)
-        if not isinstance(lane, dict) or lane.get("harness") != "claude":
+        if not isinstance(lane, dict) or lane.get("harness") != harness:
             continue
         os.makedirs(agents_dir, exist_ok=True)
-        path = os.path.join(agents_dir, f"lane-{name.split('@', 1)[0]}.md")
+        path = orchestrators.agent_path(profile, name, agents_dir)
         if os.path.islink(path):
             os.remove(path)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(native_agent_text(name, lane))
+            f.write(native_agent_text(name, lane, profile))
         lines.append(f"wrote {path}")
     for name in refresh.get("removed") or ():
-        if not name.endswith("@claude") or name in lanes:
+        if not name.endswith("@" + harness) or name in lanes:
             continue
-        path = os.path.join(agents_dir, f"lane-{name.split('@', 1)[0]}.md")
+        path = orchestrators.agent_path(profile, name, agents_dir)
         if os.path.isfile(path) or os.path.islink(path):
             os.remove(path)
             lines.append(f"removed {path}")
+    return lines
+
+
+def save_all_native_agents(refresh, lanes_doc, targets):
+    """save_native_agents for every native profile's (profile, directory)."""
+    lines = []
+    for profile, agents_dir in targets or ():
+        lines += save_native_agents(refresh, lanes_doc, agents_dir, profile)
     return lines
 
 
@@ -535,7 +540,7 @@ def read_tier_lines(path):
 
 
 def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=None,
-                      agents_dir=None):
+                      targets=None):
     print(lanes_path)
     print(routing_path)
     for name, lane in lanes_doc["lanes"].items():
@@ -552,7 +557,7 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=
     write_json(routing_path, routing_doc)
     print(f"wrote {lanes_path}")
     print(f"wrote {routing_path}")
-    for line in save_native_agents(refresh, lanes_doc, agents_dir):
+    for line in save_all_native_agents(refresh, lanes_doc, targets):
         print(line)
 
 
@@ -664,7 +669,7 @@ def main(argv=None):
                 setup_tui.write_order_from_lines(lanes_doc, parsed)
             ask_routing(routing_doc)
             confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path,
-                              refresh=refresh, agents_dir=native_agents_dir(config_dir))
+                              refresh=refresh, targets=native_targets(config_dir))
         else:
             if args.bench_report:
                 print("note: --bench-report is ignored in TUI mode")
@@ -727,8 +732,8 @@ def main(argv=None):
                     print(f"wrote {lanes_path}")
                     print(f"wrote {routing_path}")
                     # the plan the wizard holds: a rescan replaced launch's
-                    for line in save_native_agents(wizard.refresh, result_lanes,
-                                                   native_agents_dir(config_dir)):
+                    for line in save_all_native_agents(wizard.refresh, result_lanes,
+                                                       native_targets(config_dir)):
                         print(line)
     except SetupAbort:
         return 130
