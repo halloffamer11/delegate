@@ -112,7 +112,7 @@ What shipped:
 - **Rule statements (7).** `SKILL.md`, `CONTEXT.md` (a new **Order** term; **Margin**
   and **Pick** restated), the skill's `CLAUDE.md`, the `rank.py` docstring, and the
   root `CLAUDE.md` "Settled" bullet, which names tickets 01, 02 and 28. The spec
-  `docs/superpowers/specs/2026-09-08-delegate-redesign.md` (lines 95 and 102) still
+  `.scratch/delegate-redesign/spec.md` (lines 95 and 102) still
   states the earlier rule; it was outside this ticket's list and is left as written.
 
 Tests. No test was removed. Replaced assertions: `test_rank.py` case 12 (the row key

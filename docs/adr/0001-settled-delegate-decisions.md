@@ -41,3 +41,7 @@ its ticket, where the reason is.
 - Routing reads the Meters as they are when a job is sent. No usage history and no
   burn rate or velocity: probes are minutes apart and usage can drain fast or slow
   between them (Orin, 2026-09-27; ticket 40).
+- Delegate is user-invoked only: it runs when the user explicitly asks for delegation,
+  never on the model's own initiative. Every delegate skill keeps
+  `disable-model-invocation: true`, and its description and body say the same, because
+  other orchestrators do not read that field (Orin, 2026-10-02; any-harness ticket 09).

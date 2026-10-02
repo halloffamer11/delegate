@@ -2,7 +2,7 @@
 
 **What to build:** Implement the agreed throwaway Herdr plugin and project-pinned
 delegation dashboard described in the
-[project delegation dashboard prototype spec](../../../docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md).
+[project delegation dashboard prototype spec](../spec.md).
 The prototype must use delegate's effective catalog and ranking boundary, edit only
 Project order, Gate, and Margin, and visibly mark one deterministic Tier leader in
 each Tier.

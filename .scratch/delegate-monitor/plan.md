@@ -2,7 +2,7 @@
 
 > Implement task-by-task. Checkboxes are the progress record. Do not start a later task until that task’s gate commands pass.
 
-**Goal:** Land the approved event contract, then a testable store crate, then the Ratatui cockpit. Spec: `docs/superpowers/specs/2026-09-02-delegate-monitor-design.md`.
+**Goal:** Land the approved event contract, then a testable store crate, then the Ratatui cockpit. Spec: `.scratch/delegate-monitor/spec.md`.
 
 **Architecture:** JSONL v1 (`meter`, `dispatch.start`, `dispatch.finish`) written by `usage.py` and `dispatch.sh`. Rust crate `agents/skills/delegate/monitor/` (binary `delegate-mon`) folds the ledger into a snapshot and draws meters / open threads / burn. TUI does not dispatch.
 

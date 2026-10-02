@@ -16,6 +16,6 @@ from this directory). Implements the Ratatui 0.30 + crossterm terminal interface
 
 ## References
 
-- Design spec: `docs/superpowers/specs/2026-09-02-delegate-monitor-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-09-02-delegate-monitor.md`
+- Design spec: `.scratch/delegate-monitor/spec.md`
+- Implementation plan: `.scratch/delegate-monitor/plan.md`
 - Delegate skill root: `../../agents/skills/delegate/`
