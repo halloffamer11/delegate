@@ -249,6 +249,39 @@ with tempfile.TemporaryDirectory() as tmp:
     check("runs roll-up reports measured total and unmeasured count",
           f"{money(usd)} measured across {len(measured)} runs, {n_unm} unmeasured" in out, out)
 
+    # A Lane with a null input price (as the wizard creates every new Lane) is
+    # unpriced: never $0 measured, kept out of the measured total, and counted.
+    unpriced_cfg = os.path.join(tmp, "unpriced-config")
+    shutil.copytree(SAMPLES, unpriced_cfg)
+    lanes_path = os.path.join(unpriced_cfg, "lanes.json")
+    lanes_doc = json.load(open(lanes_path))
+    lanes_doc["lanes"]["luna-low@codex"]["price"]["in"] = None
+    with open(lanes_path, "w") as f:
+        json.dump(lanes_doc, f, indent=2)
+    unpriced_run = os.path.join(tmp, "run-unpriced")
+    write_dispatch(unpriced_run, {
+        "lane": "luna-low@codex",
+        "usage": {"input_tokens": 500000, "output_tokens": 1000},
+        "secs": 20, "status": "done",
+    })
+    rc, out, err = run(["log", "--work", "Unpriced job", "--run", unpriced_run, "--verdict", "clean",
+                        "--config-dir", unpriced_cfg], env)
+    check("log --run on an unpriced lane exits 0", rc == 0, err)
+    check("logged line ends with unpriced", out.strip().endswith("unpriced"), out)
+    up_rec = [json.loads(l) for l in open(env["DELEGATE_RUNS"])][-1]
+    upc = up_rec.get("cost") or {}
+    check("unpriced cost is not measured and keeps its tokens",
+          upc.get("measured") is False and upc.get("unpriced") is True
+          and upc.get("input_tokens") == 500000 and "usd_total" not in upc, str(upc))
+    rc, out, _ = run(["cost", unpriced_run, "--config-dir", unpriced_cfg], env)
+    check("cost names the unpriced lane", out.startswith("unpriced: unpriced lane luna-low@codex: no in price"), out)
+    rc, out, _ = run(["runs"] + cfg, env)
+    up_row = next((l for l in out.splitlines() if "Unpriced job" in l), "")
+    check("runs shows unpriced, not $0.00",
+          up_row and cells(up_row)[3] == "unpriced" and "$0.00" not in up_row, out)
+    check("roll-up keeps the unpriced run out of the measured total and counts it",
+          f"{money(usd)} measured across {len(measured)} runs, 1 unpriced, {n_unm} unmeasured" in out, out)
+
     missing = os.path.join(tmp, "no-catalog")
     os.makedirs(missing)
     rc, out, err = run(["limits", "--max-age-min", "600", "--config-dir", missing], env)
