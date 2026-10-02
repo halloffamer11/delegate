@@ -157,5 +157,5 @@ Python-only path, so execution stays in one layer.
 
 `.scratch/delegate-any-harness/issues/`. Order: review fixes (01-08) and the
 user-invoked-only consistency (09), evals (10), the harness registry (11), the CLI-first skill
-(12), harness-agnostic orchestration (13), Kiro (14-15), the features (16-18), and the
-skill rewrite last (19).
+(12), harness-agnostic orchestration (13), Kiro (14-15), the features (16-18), the
+skill rewrite (19), and a routing diagram in the README (20).
