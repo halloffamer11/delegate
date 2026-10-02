@@ -26,6 +26,9 @@ history. The repo is public.
 - Dashboard: spec `docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`,
   tickets `.scratch/delegate-dashboard-plugin/issues/`.
 - Browser setup and parity: `.scratch/delegate-browser/issues/`.
+- Any-harness refactor (Kiro, registry, review fixes): spec
+  `docs/superpowers/specs/2026-10-02-delegate-any-harness.md`, tickets
+  `.scratch/delegate-any-harness/issues/`.
 - Modular (complete): `.scratch/delegate-modular/CLAUDE.md`.
 - A ticket's `**Status:**` line names each open box that waits on Orin.
 - Settled decisions: `docs/adr/`. Do not reopen one.
