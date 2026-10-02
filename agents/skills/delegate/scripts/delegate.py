@@ -362,6 +362,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
 
 
 def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes, leash=True):
+    runs_dir_param = runs_dir_param or os.environ.get("DELEGATE_RUNS_DIR")
     runs_dir = os.path.abspath(os.path.expanduser(runs_dir_param)) if runs_dir_param else os.path.expanduser("~/.cache/delegate/runs")
     os.makedirs(runs_dir, exist_ok=True)
 
@@ -997,7 +998,7 @@ def main(argv=None):
     p_dispatch.add_argument("--harness", default=None, choices=HARNESSES, help="require the resolved lane to run on this harness")
     p_dispatch.add_argument("--config-dir", default=None, help="directory containing lanes.json and routing.json")
     p_dispatch.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
-    p_dispatch.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored")
+    p_dispatch.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
     p_dispatch.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
     p_dispatch.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
 
@@ -1012,7 +1013,7 @@ def main(argv=None):
     p_run.add_argument("--meters", default=None, help="path to usage document JSON file")
     p_run.add_argument("--harnesses", default=None, help="comma-separated list of present harnesses")
     p_run.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
-    p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored")
+    p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
     p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
     p_run.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
 

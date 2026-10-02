@@ -4,6 +4,9 @@
 #   make install             # link the skills, the courier agent and the `delegate` command; write the codex home
 #   make test                # every script test and the dashboard test (stdlib only, no network);
 #                            # PYTHON=python3.X picks the interpreter, 3.9 or newer
+#   make eval-ping           # eval 1: a pong job on every installed harness (spends a little quota);
+#                            # EVAL_ARGS=--offline runs it on the fake relay and stub CLIs
+#   make eval-orchestrate    # eval 3: the same job sent through the skill from each orchestrator harness
 #   make delegate-codex-home # delegate's own CODEX_HOME: the disposable browser and nothing else
 #   make delegate-wizard     # the catalog wizard on this machine's catalog with the accepted benchmark rows;
 #                            # WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
@@ -34,7 +37,7 @@ DELEGATE_DASHBOARD_PLACEMENT ?= split
 # oldest one in use sets the minimum: 3.9, macOS's /usr/bin/python3.
 PYTHON ?= python3
 
-.PHONY: install test delegate-codex-home delegate-wizard delegate-dashboard
+.PHONY: install test eval-ping eval-orchestrate delegate-codex-home delegate-wizard delegate-dashboard
 
 install: delegate-codex-home
 	@# A real directory at a link path is someone's data: stop rather than nest a link inside it.
@@ -52,6 +55,12 @@ test:
 		$(PYTHON) $$f >/dev/null 2>&1 && echo "ok   $$f" || { echo "FAIL $$f"; fail=1; }; \
 	done; exit $${fail:-0}
 	$(PYTHON) $(CURDIR)/tools/delegate-dashboard/test_dashboard.py >/dev/null 2>&1 && echo "ok   tools/delegate-dashboard/test_dashboard.py"
+
+eval-ping:
+	$(PYTHON) $(CURDIR)/agents/skills/delegate/scripts/evals.py ping $(EVAL_ARGS)
+
+eval-orchestrate:
+	$(PYTHON) $(CURDIR)/agents/skills/delegate/scripts/evals.py orchestrate $(EVAL_ARGS)
 
 delegate-codex-home:
 	mkdir -p $(HOME)/.local/share/delegate/codex-home $(HOME)/.cache/playwright-mcp
