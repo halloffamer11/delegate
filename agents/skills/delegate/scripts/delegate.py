@@ -246,15 +246,18 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         )
         sys.exit(2)
 
-    ads_sh = os.path.join(HERE, "ads.sh")
-    env = dict(os.environ)
-    if ads_dir:
-        env["ADS_DIR"] = os.path.abspath(ads_dir)
-    proc = subprocess.run(["sh", ads_sh, "check"], capture_output=True, text=True, env=env)
-    if proc.returncode != 0:
-        msg = (proc.stderr or proc.stdout).strip()
-        sys.stderr.write(f"{msg}\n")
-        sys.exit(2)
+    # Only a relayed lane goes through ADS and node. A native lane runs as the
+    # orchestrator's own agent, so a machine without node (or ADS) still runs it.
+    if harness != ORCHESTRATOR:
+        ads_sh = os.path.join(HERE, "ads.sh")
+        env = dict(os.environ)
+        if ads_dir:
+            env["ADS_DIR"] = os.path.abspath(ads_dir)
+        proc = subprocess.run(["sh", ads_sh, "check"], capture_output=True, text=True, env=env)
+        if proc.returncode != 0:
+            msg = (proc.stderr or proc.stdout).strip()
+            sys.stderr.write(f"{msg}\n")
+            sys.exit(2)
 
     resolved_ads_dir = os.path.abspath(ads_dir) if ads_dir else (os.environ.get("ADS_DIR") or os.path.expanduser("~/.local/share/delegate/ads"))
 
@@ -753,14 +756,18 @@ def fail_run(run_dir, secs, reason):
     """Write return.json and dispatch.json for a run that failed after its start.
 
     The status is blocked, as for a relay that fails: return.json has no other
-    word for a run that did no work.
+    word for a run that did no work. It never raises: the ledger finish comes
+    after it, and a file that cannot be written must not leave the run running.
     """
     deliverable = f"blocked: {reason}"
     return_doc = {"status": "blocked", "deliverable": deliverable, "evidence": [],
                   "open_questions": [], "changed_files": []}
-    with open(os.path.join(run_dir, "return.json"), "w", encoding="utf-8") as f:
-        json.dump(return_doc, f, indent=2)
-        f.write("\n")
+    try:
+        with open(os.path.join(run_dir, "return.json"), "w", encoding="utf-8") as f:
+            json.dump(return_doc, f, indent=2)
+            f.write("\n")
+    except OSError as e:
+        sys.stderr.write(f"delegate: could not write return.json: {e}\n")
     dispatch_path = os.path.join(run_dir, "dispatch.json")
     try:
         with open(dispatch_path, "r", encoding="utf-8") as f:
@@ -769,9 +776,12 @@ def fail_run(run_dir, secs, reason):
         dispatch_doc = {}
     dispatch_doc.update({"status": "blocked", "reason": reason, "secs": secs,
                          "finished_at": datetime.now(timezone.utc).isoformat()})
-    with open(dispatch_path, "w", encoding="utf-8") as f:
-        json.dump(dispatch_doc, f, indent=2)
-        f.write("\n")
+    try:
+        with open(dispatch_path, "w", encoding="utf-8") as f:
+            json.dump(dispatch_doc, f, indent=2)
+            f.write("\n")
+    except OSError as e:
+        sys.stderr.write(f"delegate: could not write dispatch.json: {e}\n")
     return {"status": "blocked", "reason": reason, "session_id": None}
 
 

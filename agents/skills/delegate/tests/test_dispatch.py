@@ -686,6 +686,32 @@ def main():
         record("12e. an exception after the ledger start still writes a finish and a return.json", ok12e,
                f"rc={res12e.returncode} out={res12e.stdout} err={res12e.stderr[-400:]} ledger={new12e} ret={ret12e}")
 
+        # 12f. return.json cannot be written either (here it is a directory):
+        # the ledger still gets its finish, so the run is never left running.
+        blocked_return = (
+            f"import os, sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate\n"
+            "def no_relay(**kw):\n"
+            "    os.mkdir(os.path.join(kw['run_dir'], 'return.json'))\n"
+            "    raise FileNotFoundError(2, 'No such file or directory', 'node')\n"
+            "delegate.run_relay = no_relay; sys.exit(delegate.main())"
+        )
+        ledger_before12f = len(ledger_lines())
+        res12f = subprocess.run(
+            [sys.executable, "-c", blocked_return, "dispatch", "--config-dir", t_env["config_dir"],
+             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
+             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
+            capture_output=True, text=True, env=t_env["env"])
+        new12f = ledger_lines()[ledger_before12f:]
+        ok12f = (
+            res12f.returncode == 1 and
+            [e.get("kind") for e in new12f] == ["dispatch.start", "dispatch.finish"] and
+            new12f[1].get("status") == "blocked" and
+            "could not write return.json" in res12f.stderr and
+            "Traceback" not in res12f.stderr
+        )
+        record("12f. a return.json that cannot be written still leaves a ledger finish", ok12f,
+               f"rc={res12f.returncode} err={res12f.stderr[-400:]} ledger={new12f}")
+
 
         # -------------------------------------------------------------
         # 13. readOnlyViolation true -> open_questions carries tripwire line
@@ -1059,6 +1085,14 @@ def main():
         record("29a. --effort on a native lane: matching passes, differing warns and records the lane's effort", ok29a,
                f"same={res29a_same.stderr!r} {disp29a_same.get('effort')} diff={res29a_diff.stderr!r} "
                f"{disp29a_diff.get('effort')} relay={res29a_relay.stderr!r} {disp29a_relay.get('effort')}")
+
+        # 29c. a native lane needs neither node nor ADS: it prints its agent line.
+        res29c = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29, "--cwd", cwd],
+                              extra_env={'PATH': no_node_bin, 'ADS_FAKE_GIT_SHA': '0' * 40})
+        ok29c = (res29c.returncode == 0 and
+                 res29c.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high "))
+        record("29c. a native lane runs with node absent and ADS out of date", ok29c,
+               f"rc={res29c.returncode} out={res29c.stdout} err={res29c.stderr}")
 
         # -------------------------------------------------------------
         # 29b. the courier's two greps, read from courier.md, run on the log

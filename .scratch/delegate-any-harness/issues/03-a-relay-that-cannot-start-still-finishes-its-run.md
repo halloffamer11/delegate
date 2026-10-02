@@ -25,8 +25,13 @@ The finish status is `blocked`, not a new `failed`: return.json and the ledger u
 `done`/`partial`/`blocked`, and a relay that fails is already recorded as blocked. The
 finish event's `rc` is 1.
 
-A native lane also passes through `ads.sh check`, so it too now needs `node` on PATH.
+After Codex's review of PR #2: a native lane no longer runs `ads.sh check` at all, so
+it needs neither `node` nor ADS (the first version made native lanes need `node`).
+`fail_run` never raises: if return.json or dispatch.json cannot be written it says so on
+stderr and the ledger finish still follows.
 
 Verified: `test_dispatch.py` 12d (node absent: exit 2, no run dir, no ledger line) and
 12e (node removed after the check: start and finish in the ledger, blocked return.json
-naming node). 12e fails on the old `delegate.py`. Passes on 3.9 and 3.13.
+naming node), 12f (return.json cannot be written: the ledger still finishes) and 29c
+(a native lane with no `node` and a stale ADS prints its agent line). 12e, 12f and 29c
+fail on the code before each fix. Passes on 3.9 and 3.13.
