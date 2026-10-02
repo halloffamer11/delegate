@@ -226,6 +226,14 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
             f"delegate: effort override ignored on {lane_name}; agy carries effort in the model name\n"
         )
         effort = lane_data["effort"]
+    elif harness == ORCHESTRATOR and effort_arg is not None and effort_arg != lane_data["effort"]:
+        # A native lane runs as its lane-*.md agent, whose file fixes the effort,
+        # so an override would be recorded and never used.
+        sys.stderr.write(
+            f"delegate: effort override ignored on {lane_name}; a native lane runs at its agent file's "
+            f"effort, {lane_data['effort']}\n"
+        )
+        effort = lane_data["effort"]
     else:
         effort = effort_arg if effort_arg is not None else lane_data["effort"]
     if effort not in EFFORTS:

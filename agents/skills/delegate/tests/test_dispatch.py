@@ -1029,6 +1029,36 @@ def main():
         record("29. dispatch native lane prints native line, writes prompt.md, no relay", ok29, f"rc={res29.returncode} stdout={res29.stdout}")
 
         # -------------------------------------------------------------
+        # 29a. --effort on a native lane: a matching one passes quietly; a
+        # differing one warns like agy, and dispatch.json records the effort
+        # the agent file runs at. Relayed (orchestrator codex), it still applies.
+        def native_effort(effort, orchestrator=None):
+            before = set(os.listdir(t_env["runs_dir"]))
+            res = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29,
+                                       "--cwd", cwd, "--effort", effort], orchestrator=orchestrator)
+            new = list(set(os.listdir(t_env["runs_dir"])) - before)
+            disp = {}
+            if len(new) == 1:
+                disp = json.load(open(os.path.join(t_env["runs_dir"], new[0], "dispatch.json")))
+            return res, disp
+
+        res29a_same, disp29a_same = native_effort("high")
+        res29a_diff, disp29a_diff = native_effort("low")
+        res29a_relay, disp29a_relay = native_effort("low", orchestrator="codex")
+        native_warn = "delegate: effort override ignored on opus-high@claude; a native lane runs at its agent file's effort, high"
+        ok29a = (
+            res29a_same.returncode == 0 and "override ignored" not in res29a_same.stderr and
+            disp29a_same.get("effort") == "high" and
+            res29a_diff.returncode == 0 and native_warn in res29a_diff.stderr and
+            disp29a_diff.get("effort") == "high" and
+            res29a_diff.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high ") and
+            "override ignored" not in res29a_relay.stderr and disp29a_relay.get("effort") == "low"
+        )
+        record("29a. --effort on a native lane: matching passes, differing warns and records the lane's effort", ok29a,
+               f"same={res29a_same.stderr!r} {disp29a_same.get('effort')} diff={res29a_diff.stderr!r} "
+               f"{disp29a_diff.get('effort')} relay={res29a_relay.stderr!r} {disp29a_relay.get('effort')}")
+
+        # -------------------------------------------------------------
         # 29b. the courier's two greps, read from courier.md, run on the log
         # its background command writes: the agy override warning (24) comes
         # first and is not the result; the native line (29) is not a result.
