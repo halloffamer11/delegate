@@ -36,45 +36,32 @@ import tempfile
 
 CONFIG_DIR = "~/.config/delegate"
 
-HARNESSES = ("claude", "codex", "agy", "grok")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import harnesses  # noqa: E402
+
+# The harnesses, their efforts and their CLIs come from the registry
+# (scripts/harnesses/), which is the one place a harness is defined.
+HARNESSES = harnesses.NAMES
 
 
 def cli_installed(harness):
     """Whether this harness's CLI is on PATH. Every caller asks here.
 
-    The CLI is named after the harness today. Ticket 11 moves this behind the
-    harness adapter, where a CLI may be named otherwise (Kiro's `kiro-cli`).
+    The adapter names the binary, which need not be the harness name (Kiro's
+    is `kiro-cli`).
     """
-    return shutil.which(harness) is not None
+    return harnesses.cli_installed(harness)
 
 
-def installed_harnesses(harnesses=None):
+def installed_harnesses(names=None):
     """The harnesses, of HARNESSES or the ones given, whose CLI is on PATH."""
-    return {h for h in (HARNESSES if harnesses is None else harnesses) if cli_installed(h)}
+    return {h for h in (HARNESSES if names is None else names) if cli_installed(h)}
 
 
-EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+EFFORTS = harnesses.EFFORTS
 # The efforts each harness offers, and so the only efforts a lane on it may
-# carry (ticket 19). Sources, each checked 2026-09-12:
-#   codex   every effort; `codex debug models` lists them per model, and ultra
-#           is one of them.
-#   claude  `claude --help` (Claude Code 2.1.269): `--effort <level>` with
-#           `(low, medium, high, xhigh, max)` on the next line; the same five in
-#           https://code.claude.com/docs/en/model-config. That page also says
-#           Haiku supports no effort level, which is a model's limit, not the
-#           harness's: discover.py applies it.
-#   agy     `agy --help`: `--effort ... (low|medium|high)`, and `agy models`
-#           lists a -low, -medium and -high slug per Gemini Flash model.
-#   grok    `grok --help` documents `--reasoning-effort <EFFORT>` with no
-#           values, and `grok --reasoning-effort bogus models` exits 0, so the
-#           CLI checks nothing locally. Only high is proven: it is the effort
-#           grok46-high@grok has run at. A probe that proves more costs a paid run.
-HARNESS_EFFORTS = {
-    "codex": EFFORTS,
-    "claude": ("low", "medium", "high", "xhigh", "max"),
-    "agy": ("low", "medium", "high"),
-    "grok": ("high",),
-}
+# carry (ticket 19). Each adapter records its source.
+HARNESS_EFFORTS = {h.name: tuple(h.efforts) for h in harnesses.REGISTRY}
 CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
 LANES_VERSION = "delegate-lanes.v1"
 ROUTING_VERSION = "delegate-routing.v1"
@@ -206,23 +193,20 @@ def strip_effort_suffix(model):
     return model, None
 
 
-def agy_family(slug):
-    """The agy slug family a model slug belongs to: (base, effort).
+def slug_family(slug):
+    """(base, effort) for a model slug whose effort may be part of it.
 
-    agy carries the effort in the slug, so `gemini-3.8-flash-high` is the model
-    `gemini-3.8-flash` at effort high. A slug whose suffix is not an effort agy
-    offers is a family of its own, with no effort: `(slug, None)`.
+    A harness that carries the effort in the slug (`harnesses.Harness.
+    effort_in_slug`) names one model at several efforts, so
+    `gemini-3.8-flash-high` is the model `gemini-3.8-flash` at effort high. A
+    slug no such harness reads an effort from is a family of its own, with no
+    effort: `(slug, None)`.
 
-    One rule in one place. Discovery groups a harness listing with it
-    (`discover.group_agy_models`) and the carry rule groups a lane's rows with it
-    (`bench.model_families`), so the wizard can never disagree with the models
-    discovery reported (ticket 30).
+    One rule in one place. Discovery groups a harness listing with it and the
+    carry rule groups a lane's rows with it (`bench.model_families`), so the
+    wizard can never disagree with the models discovery reported (ticket 30).
     """
-    text = slug or ""
-    base, effort = strip_effort_suffix(text)
-    if not base or effort not in HARNESS_EFFORTS["agy"]:
-        return text, None
-    return base, effort
+    return harnesses.slug_family(slug)
 
 
 def published_as_map(lanes_doc):

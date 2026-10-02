@@ -2587,7 +2587,7 @@ try:
            and by_name["claude"][2] == "4" and new["codex"] == 11 and removed["codex"] == 11
            and v["body"][0].startswith("Scanned at launch: ")
            and v["body"][1] == "Benchmark rows: Artificial Analysis fetched 3h ago, still fresh"
-           and v["legend"] == [setup_tui.CLAUDE_COUNT_LEGEND]
+           and v["legend"] == [setup_tui.count_legend("claude")]
            # r is offered only when there is a scrub to run
            and v["footer"] == setup_tui.DISCOVERY_FOOTER and "r: rescan" not in v["footer"]
            and grid[setup_tui.TOP].startswith("Scanned at launch")
@@ -2972,11 +2972,11 @@ try:
     record("79 the harnesses page at 80x16 shows every harness row, and its body",
            len(v["body"]) == 2 and shown == list(catalog.HARNESSES)
            and grid[setup_tui.TOP].startswith("Scanned at launch")
-           and not any(line.startswith(setup_tui.CLAUDE_COUNT_LEGEND[:20]) for line in grid)
+           and not any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in grid)
            and grid[16 - 3].startswith("any key")
            and not grid[2].rstrip().endswith("of 4")
            # with room, the legend is back
-           and any(line.startswith(setup_tui.CLAUDE_COUNT_LEGEND[:20]) for line in roomy),
+           and any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in roomy),
            repr(grid))
 except Exception as e:
     record("79 the harnesses page at 80x16 shows every harness row", False, repr(e))

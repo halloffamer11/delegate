@@ -14,7 +14,9 @@ ADS_REPO=https://github.com/halloffamer11/delegate-skills.git
 ADS_COMMIT=1ff8bd6129b78124bd0e6e99fb6e4144b2ca4fe5
 ADS_DIR=${ADS_DIR:-$HOME/.local/share/delegate/ads}
 
-HARNESSES="claude codex agy grok"
+# The relays come from the harness registry, the one list of harnesses.
+# Parameter expansion, not dirname: the check runs on a bare PATH in tests.
+case "$0" in */*) HARNESS_DIR="${0%/*}/harnesses" ;; *) HARNESS_DIR=./harnesses ;; esac
 
 case "${1:-}" in
   install)
@@ -44,10 +46,11 @@ case "${1:-}" in
       echo "ads: commit mismatch (expected $ADS_COMMIT, got $sha); run ads.sh install" >&2
       exit 1
     fi
-    for h in $HARNESSES; do
-      relay="$ADS_DIR/skills/$h-delegate/scripts/relay.mjs"
+    relays=$(python3 "$HARNESS_DIR" relays) || { echo "ads: cannot read the harness registry at $HARNESS_DIR" >&2; exit 1; }
+    for r in $relays; do
+      relay="$ADS_DIR/skills/$r/scripts/relay.mjs"
       if [ ! -f "$relay" ]; then
-        echo "ads: missing relay for $h at $relay; run ads.sh install" >&2
+        echo "ads: missing relay $r at $relay; run ads.sh install" >&2
         exit 1
       fi
     done

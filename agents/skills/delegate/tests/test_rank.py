@@ -24,6 +24,7 @@ sys.path.insert(0, DELEGATE_DIR)
 import catalog
 import rank
 import usage
+import harnesses  # noqa: E402
 
 fails = 0
 
@@ -989,7 +990,7 @@ with tempfile.TemporaryDirectory() as td:
     os.environ["DELEGATE_CACHE"] = missing_cache24
     probed24 = []
     orig_probe = usage.probe
-    origs = (usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok)
+    origs = {h: h.probe for h in harnesses.REGISTRY}
     def mark_probe(*a, **k):
         probed24.append("probe")
         return orig_probe(*a, **k)
@@ -997,7 +998,8 @@ with tempfile.TemporaryDirectory() as td:
         probed24.append("vendor")
         return [usage.lane("codex", None, note="stub")]
     usage.probe = mark_probe
-    usage.probe_codex = usage.probe_agy = usage.probe_claude = usage.probe_grok = boom_vendor
+    for h in harnesses.REGISTRY:
+        h.probe = boom_vendor
     try:
         cached24 = rank.load_cached_usage()
         record("load_cached_usage on missing cache is {} and does not probe",
@@ -1010,7 +1012,8 @@ with tempfile.TemporaryDirectory() as td:
                ))
     finally:
         usage.probe = orig_probe
-        usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok = origs
+        for h, probe in origs.items():
+            h.probe = probe
         os.environ.pop("DELEGATE_CACHE", None)
 
     # 25. routing.meters off: Tier/Order/name only, no Gate, no steal, no probe.

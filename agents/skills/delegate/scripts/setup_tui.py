@@ -38,6 +38,7 @@ from bench import (
     resolve_effort_rows,
     unmatched_message,
 )
+import harnesses as harness_registry  # noqa: E402
 from catalog import (
     CLASSES,
     HARNESSES,
@@ -105,7 +106,9 @@ CLASSES_DEF = definition("classes", "each class has a floor and a ceiling tier, 
 CONFIRM_OFF_DEF = definition("off", "written with enabled: false; on lanes omit the key")
 # The harness page counts claude's models, but Claude Code lists none: the
 # count is the catalog's own (`discover.discover`).
-CLAUDE_COUNT_LEGEND = "claude lists no model; its count is the catalog's own"
+def count_legend(harness):
+    """The discovery page's note under a harness that lists no model."""
+    return f"{harness} lists no model; its count is the catalog's own"
 
 
 def class_descriptions(path=None):
@@ -1368,7 +1371,8 @@ class Wizard:
                               "current generation.")]
             if self.rows_note:
                 body.append(self._fit(self.rows_note))
-            legend = [CLAUDE_COUNT_LEGEND] if live and "claude" in harnesses else []
+            legend = [count_legend(h.name) for h in harness_registry.REGISTRY
+                      if live and h.catalog_models and h.name in harnesses]
             return self._frame(
                 "discovery", "Delegate setup: discovery",
                 columns=["harness", "status", "models", "new lanes", "removed lanes"],

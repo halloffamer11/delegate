@@ -11,7 +11,10 @@ _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
 import usage
-from usage import claude_reset, write_cache, load_cache, load_cached, lane, get_cache_path, eligible, observations
+import harnesses
+from harnesses.agy import COMBINED_NOTE as AGY_NOTE
+from harnesses.claude import reset as claude_reset
+from usage import write_cache, load_cache, load_cached, lane, get_cache_path, eligible, observations
 
 
 def fail(msg):
@@ -127,18 +130,14 @@ def main():
 
         # 4. Cached-only reads emit no meter event and launch no vendor probe.
         calls = []
-        orig_codex, orig_agy, orig_claude, orig_grok = (
-            usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok,
-        )
+        originals = {h: h.probe for h in harnesses.REGISTRY}
         def boom(name):
             def _boom(*a, **k):
                 calls.append(name)
                 raise AssertionError(f"vendor probe {name}")
             return _boom
-        usage.probe_codex = boom("codex")
-        usage.probe_agy = boom("agy")
-        usage.probe_claude = boom("claude")
-        usage.probe_grok = boom("grok")
+        for h in harnesses.REGISTRY:
+            h.probe = boom(h.name)
         try:
             cached = load_cached(cache_path=cache_path)
             assert_true(cached.get("lanes")[0].get("remaining_weekly_model") == 0.59,
@@ -148,9 +147,8 @@ def main():
             assert_true(len(lines4) == 2, f"load_cached appended a meter event; count is {len(lines4)}")
             assert_true(calls == [], f"load_cached launched probes: {calls}")
         finally:
-            usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok = (
-                orig_codex, orig_agy, orig_claude, orig_grok,
-            )
+            for h, probe in originals.items():
+                h.probe = probe
 
     # 5. Cache path: DELEGATE_CACHE wins, else CONSULT_CACHE, else default.
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -187,8 +185,8 @@ def main():
     derived = ("r", "binding", "reset_binding", "cycle_left", "pace", "score", "status")
     assert_true(all(l_agy[k] == l_codex[k] for k in derived),
                 f"agy and codex should derive the same figures: {l_agy} vs {l_codex}")
-    assert_true("assumption" in usage.AGY_COMBINED_NOTE and "not a vendor bound" in usage.AGY_COMBINED_NOTE,
-                f"the agy note must call the combined figure an assumption: {usage.AGY_COMBINED_NOTE}")
+    assert_true("assumption" in AGY_NOTE and "not a vendor bound" in AGY_NOTE,
+                f"the agy note must call the combined figure an assumption: {AGY_NOTE}")
 
     # One Window missing: the documented fallback of the other Meters applies.
     for meter_name, five_h, weekly in (("gemini", None, 0.90), ("gemini", 0.80, None)):
@@ -209,11 +207,11 @@ def main():
                 {"window": "weekly", "remaining_fraction": 0.90, "reset_time": "2026-09-24T03:00:00Z"}]}]}}})
     with patch.object(usage, "which", return_value=True), \
          patch.object(usage, "run", return_value=_R()):
-        probed_agy = usage.probe_agy()
+        probed_agy = harnesses.get("agy").probe()
     assert_true(len(probed_agy) == 1 and probed_agy[0]["r"] == 0.80
                 and probed_agy[0]["pace"] is not None,
                 f"a fresh agy probe must give Remaining and Pace: {probed_agy}")
-    assert_true(usage.AGY_COMBINED_NOTE in (probed_agy[0].get("note") or ""),
+    assert_true(AGY_NOTE in (probed_agy[0].get("note") or ""),
                 f"a fresh agy probe must carry the assumption note: {probed_agy[0].get('note')}")
 
     # 8. A cached observation written under the old rule — Windows present,
@@ -277,10 +275,10 @@ def main():
     import subprocess
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "clock-cache.json")
-        with patch.object(usage, "probe_codex", return_value=[]), \
-             patch.object(usage, "probe_agy", return_value=[]), \
-             patch.object(usage, "probe_claude", return_value=[]), \
-             patch.object(usage, "probe_grok", return_value=[]), \
+        with patch.object(harnesses.get("codex"), "probe", return_value=[]), \
+             patch.object(harnesses.get("agy"), "probe", return_value=[]), \
+             patch.object(harnesses.get("claude"), "probe", return_value=[]), \
+             patch.object(harnesses.get("grok"), "probe", return_value=[]), \
              patch.object(usage, "append"), \
              patch.object(usage.time, "time", return_value=10000):
             first = usage.probe(refresh=True, cache_path=path)

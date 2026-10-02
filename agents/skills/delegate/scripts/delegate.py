@@ -54,6 +54,7 @@ sys.path.insert(0, HERE)
 from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS, meters_enabled
 import catalog
 import events
+import harnesses
 import rank
 import usage
 
@@ -221,9 +222,9 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
             f"{harness} offers {', '.join(HARNESS_EFFORTS[harness])}\n"
         )
         sys.exit(2)
-    if harness == "agy" and effort_arg is not None:
+    if harnesses.get(harness).effort_in_slug and effort_arg is not None:
         sys.stderr.write(
-            f"delegate: effort override ignored on {lane_name}; agy carries effort in the model name\n"
+            f"delegate: effort override ignored on {lane_name}; {harness} carries effort in the model name\n"
         )
         effort = lane_data["effort"]
     elif harness == ORCHESTRATOR and effort_arg is not None and effort_arg != lane_data["effort"]:
@@ -320,9 +321,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     else:
         clause = b"Read-only: do not create, edit, or delete files.\n"
 
-    agy_extra = b""
-    if harness == "agy" and not write_dir:
-        agy_extra = b"Browser tools are permitted. Terminal commands run inside a sandbox confined to the workspace; you still must not create, edit, or delete files.\n"
+    harness_note = harnesses.get(harness).prompt_note(write_dir).encode("utf-8")
 
     cwd_section = f"\n# Working directory\n{child_cwd}\nEvery relative path in this brief is under it. Do not search elsewhere.\n\n".encode("utf-8")
 
@@ -344,7 +343,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     prompt_bytes = (
         preamble_bytes +
         clause +
-        agy_extra +
+        harness_note +
         cwd_section +
         brief_heading +
         brief_bytes +
@@ -431,24 +430,9 @@ def probe_meters(no_probe, routing=None):
     usage.acquire(refresh=True, timeout=180)
 
 
-def codex_home():
-    """The delegate-owned CODEX_HOME, or None when this machine has none.
-
-    A codex worker must reach the disposable browser and nothing else that is in
-    Orin's own config: no plugins, no Gmail, no codex-cli, no node_repl, no
-    hooks, no notify, and not ~/.codex/AGENTS.md, which symlinks his global
-    CLAUDE.md. A home of delegate's own holds one MCP server and gives exactly
-    that, so a run that finds one drops --ignore-user-config and points codex at
-    it. A machine without the home keeps the old isolation, which stays correct
-    and has no browser. `make delegate-codex-home` builds it.
-    """
-    home = os.environ.get("DELEGATE_CODEX_HOME") or os.path.expanduser("~/.local/share/delegate/codex-home")
-    return home if os.path.isfile(os.path.join(home, "config.toml")) else None
-
-
 def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_cwd, write_dir, run_dir):
-    relay_script = os.path.join(ads_dir, "skills", f"{harness}-delegate", "scripts", "relay.mjs")
-    env = None
+    adapter = harnesses.get(harness)
+    relay_script = os.path.join(ads_dir, "skills", adapter.relay, "scripts", "relay.mjs")
     cmd = [
         "node",
         relay_script,
@@ -457,30 +441,12 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
         "--out-dir", run_dir,
         "--model", model,
     ]
-    if harness == "claude":
-        cmd.extend(["--effort", effort, "--timeout", timeout_str])
-        if not write_dir:
-            cmd.append("--read-only")
-    elif harness == "codex":
-        cmd.extend(["--effort", effort, "--timeout", timeout_str, "--skip-git-repo-check"])
-        home = codex_home()
-        if home:
-            env = dict(os.environ)
-            env["CODEX_HOME"] = home
-        else:
-            cmd.append("--ignore-user-config")
-        if not write_dir:
-            cmd.append("--read-only")
-    elif harness == "agy":
-        cmd.extend(["--print-timeout", timeout_str])
-        if not write_dir:
-            cmd.append("--read-only")
-        else:
-            cmd.append("--dangerously-skip-permissions")
-    elif harness == "grok":
-        cmd.extend(["--effort", effort, "--timeout", timeout_str])
-        if not write_dir:
-            cmd.append("--read-only")
+    args, env_extra = adapter.run_args(effort, timeout_str, write_dir)
+    cmd.extend(args)
+    env = None
+    if env_extra:
+        env = dict(os.environ)
+        env.update(env_extra)
 
     stdout_path = os.path.join(run_dir, "relay.stdout")
     stderr_path = os.path.join(run_dir, "relay.stderr")

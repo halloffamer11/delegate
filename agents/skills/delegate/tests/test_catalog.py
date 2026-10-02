@@ -22,6 +22,7 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
+import harnesses  # noqa: E402
 import rank
 
 fails = 0
@@ -2840,7 +2841,7 @@ with tempfile.TemporaryDirectory() as which_tmp:
     try:
         answers = {h: (catalog.cli_installed(h), usage.which(h)) for h in catalog.HARNESSES}
         present = catalog.installed_harnesses()
-        absent_row = usage.probe_codex()
+        absent_row = harnesses.get("codex").probe()
     finally:
         os.environ["PATH"] = saved_path
     record(

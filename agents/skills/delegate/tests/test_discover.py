@@ -26,6 +26,8 @@ sys.path.insert(0, DELEGATE_DIR)
 import bench
 import catalog
 import discover
+import harnesses
+from harnesses import agy as agy_module, grok as grok_module
 import setup_tui
 
 fails = 0
@@ -46,7 +48,7 @@ codex_fixture_path = os.path.join(FIXTURES_DIR, "codex-debug-models.json")
 with open(codex_fixture_path, "r", encoding="utf-8") as f:
     codex_raw = f.read()
 
-codex_models = discover.parse_codex_output(codex_raw)
+codex_models = harnesses.get("codex").parse_models(codex_raw)
 codex_slugs = [m["slug"] for m in codex_models]
 codex_ok = (
     codex_slugs == ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
@@ -63,7 +65,7 @@ agy_fixture_path = os.path.join(FIXTURES_DIR, "agy-models.txt")
 with open(agy_fixture_path, "r", encoding="utf-8") as f:
     agy_raw = f.read()
 
-agy_models = discover.parse_agy_output(agy_raw)
+agy_models = agy_module.parse_listing(agy_raw)
 agy_slugs = [m["slug"] for m in agy_models]
 agy_ok = (
     len(agy_models) == 14
@@ -82,7 +84,7 @@ grok_fixture_path = os.path.join(FIXTURES_DIR, "grok-models.txt")
 with open(grok_fixture_path, "r", encoding="utf-8") as f:
     grok_raw = f.read()
 
-grok_models = discover.parse_grok_output(grok_raw)
+grok_models = grok_module.parse_listing(grok_raw)
 grok_slugs = [m["slug"] for m in grok_models]
 grok_ok = (
     grok_slugs == ["grok-4.6", "grok-4.5"]
@@ -625,20 +627,20 @@ with open(os.path.join(FIXTURES_DIR, "claude-help.txt"), encoding="utf-8") as f:
     claude_help = f.read()
 record(
     "the claude --help fixture (Claude Code 2.1.269) parses to its five efforts, in order",
-    discover.parse_claude_help(claude_help) == ["low", "medium", "high", "xhigh", "max"]
-    and discover.parse_claude_help("  --effort <level>  Effort level\n  --other  x (a, b)") == []
-    and discover.parse_claude_help("") == [],
-    repr(discover.parse_claude_help(claude_help)),
+    harnesses.get("claude").efforts_from_help(claude_help) == ["low", "medium", "high", "xhigh", "max"]
+    and harnesses.get("claude").efforts_from_help("  --effort <level>  Effort level\n  --other  x (a, b)") == []
+    and harnesses.get("claude").efforts_from_help("") == [],
+    repr(harnesses.get("claude").efforts_from_help(claude_help)),
 )
 record(
     "when claude --help lists no effort the harness table stands in, and says so",
-    discover.claude_efforts(runner=lambda h: "  --effort <level>  Effort level\n")
+    discover.help_efforts("claude", runner=lambda h: "  --effort <level>  Effort level\n")
     == (list(catalog.HARNESS_EFFORTS["claude"]), "catalog.HARNESS_EFFORTS (claude --help listed none)")
-    and discover.claude_efforts(fixture_dir=FIXTURES_DIR)[1] == "claude --help",
-    repr(discover.claude_efforts(runner=lambda h: "")),
+    and discover.help_efforts("claude", fixture_dir=FIXTURES_DIR)[1] == "claude --help",
+    repr(discover.help_efforts("claude", runner=lambda h: "")),
 )
 
-families = discover.group_agy_models(agy_models)
+families = harnesses.get("agy").group(agy_models)
 by_slug = {f["slug"]: f for f in families}
 record(
     "agy slugs group into one model per family with its efforts and member slugs",
@@ -747,7 +749,7 @@ record(
 )
 
 with open(os.path.join(REFRESH_DIR, "codex-debug-models.json"), encoding="utf-8") as f:
-    codex_generation = discover.mark_generation(discover.parse_codex_output(f.read()), "codex")
+    codex_generation = discover.mark_generation(harnesses.get("codex").parse_models(f.read()), "codex")
 by_slug = {m["slug"]: m for m in codex_generation}
 record(
     "superseded is the harness's own word or a higher version of the level",

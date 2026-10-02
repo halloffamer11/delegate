@@ -28,6 +28,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import catalog
+import harnesses  # noqa: E402
 # Reconciling a source's printed model name against a lane model is the
 # catalog's own knowledge; both this report and the setup pre-screen read it
 # from there rather than keeping a second copy.
@@ -945,13 +946,14 @@ def certain_effort_rows(effort_rows):
 def model_families(lanes_doc):
     """{lane model: the family key "the same model" means for the carry rule}.
 
-    On every harness but agy a model is its own family, so the key is the model
-    string and the rule is what it always was. agy names each effort as its own
-    model (`gemini-3.8-flash-low`, `-medium`, `-high`), so under the model string
-    no agy lane ever had "another effort of the same model" and the rule could
-    never propose a flash lane off — ticket 19 recorded that as a limit. There
-    the key is the slug with its trailing effort removed: `catalog.agy_family`,
-    the same grouping discovery reports the harness's models under (ticket 30).
+    On most harnesses a model is its own family, so the key is the model string
+    and the rule is what it always was. A harness that carries the effort in the
+    slug (agy) names each effort as its own model (`gemini-3.8-flash-low`,
+    `-medium`, `-high`), so under the model string no such lane ever had
+    "another effort of the same model" and the rule could never propose a flash
+    lane off — ticket 19 recorded that as a limit. There the key is the slug
+    with its trailing effort removed: the adapter's `family`, the same grouping
+    discovery reports the harness's models under (ticket 30).
 
     The harness decides, never the spelling, so a slug on another harness that
     happens to end in an effort word is still one model of its own.
@@ -963,8 +965,9 @@ def model_families(lanes_doc):
         model = lane.get("model")
         if not isinstance(model, str) or not model.strip():
             continue
-        if lane.get("harness") == "agy":
-            families[model] = catalog.agy_family(model)[0]
+        adapter = harnesses.get(lane.get("harness"))
+        if adapter is not None and adapter.effort_in_slug:
+            families[model] = adapter.family(model)[0]
         elif model not in families:
             families[model] = model
     return families

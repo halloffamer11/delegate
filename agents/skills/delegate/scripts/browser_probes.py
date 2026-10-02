@@ -26,10 +26,11 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
+import harnesses
 
 DELEGATE_PY = os.path.join(HERE, "delegate.py")
 PROBES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "probes"))
-ALL_HARNESSES = ("claude", "codex", "agy", "grok")
+ALL_HARNESSES = harnesses.NAMES
 ALL_PROBES = ("disposable", "agent-profile")
 
 
@@ -89,8 +90,9 @@ def build_dispatch_cmd(lane, harness, brief_path, cwd):
         "--brief", brief_path,
         "--cwd", cwd,
     ]
-    if harness != "agy":
-        cmd.extend(["--effort", "low"])
+    effort = harnesses.get(harness).browser_probe_effort()
+    if effort:
+        cmd.extend(["--effort", effort])
     return cmd
 
 
@@ -298,7 +300,7 @@ def main(argv=None):
                 h_rows.append((harness, "—", probe, "FAIL", "cli absent"))
             return harness, h_rows
 
-        version = get_cli_version(harness)
+        version = get_cli_version(harnesses.get(harness).binary)
         lane = pick_lowest_tier_lane(cat, harness)
         if not lane:
             for probe in probes:

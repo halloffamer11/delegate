@@ -22,6 +22,8 @@ sys.path.insert(0, DELEGATE_DIR)
 
 import bench  # noqa: E402  (after sys.path, as the other test files do)
 import catalog  # noqa: E402
+import harnesses  # noqa: E402
+AGY = harnesses.get("agy")
 
 HEADER = (
     "model_id,benchmark_id,performance,benchmark,benchmark_release_date,"
@@ -842,16 +844,16 @@ except Exception as e:
 
 try:
     record(
-        "the agy family rule has one implementation, in the catalog",
-        catalog.agy_family("gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
-        and catalog.agy_family("gemini-3.8-flash") == ("gemini-3.8-flash", None)
+        "the agy family rule has one implementation, in its adapter",
+        AGY.family("gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
+        and AGY.family("gemini-3.8-flash") == ("gemini-3.8-flash", None)
         # xhigh, max and ultra are not agy efforts, so such a slug is not a family
-        and catalog.agy_family("gpt-6-astra-xhigh") == ("gpt-6-astra-xhigh", None),
-        str([catalog.agy_family(s) for s in
+        and AGY.family("gpt-6-astra-xhigh") == ("gpt-6-astra-xhigh", None),
+        str([AGY.family(s) for s in
              ("gemini-3.8-flash-high", "gemini-3.8-flash", "gpt-6-astra-xhigh")]),
     )
 except Exception as e:
-    record("the agy family rule has one implementation, in the catalog", False, repr(e))
+    record("the agy family rule has one implementation, in its adapter", False, repr(e))
 
 
 try:
