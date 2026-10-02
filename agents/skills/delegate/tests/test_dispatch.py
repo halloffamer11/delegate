@@ -628,6 +628,64 @@ def main():
         record("12. pre-run errors exit 2 and no run dir", ok12, f"12a={ok12a} 12b={ok12b} 12c={ok12c} ads_err={res12_ads.stderr}")
 
         # -------------------------------------------------------------
+        # 12d. node absent from PATH: ads.sh check refuses before the ledger
+        # records a start; and if node goes missing after the start, the run
+        # still finishes, with a blocked return.json that says why.
+        # -------------------------------------------------------------
+        no_node_bin = os.path.join(tmpdir, "no_node_bin")
+        os.makedirs(no_node_bin, exist_ok=True)
+        for name in os.listdir(t_env["fake_bin"]):
+            if name != "node":
+                os.symlink(os.path.join(t_env["fake_bin"], name), os.path.join(no_node_bin, name))
+        no_node_env = {"PATH": no_node_bin}
+
+        def ledger_lines():
+            with open(ledger_path, "r", encoding="utf-8") as f:
+                return [json.loads(l) for l in f if l.strip()]
+
+        b12d = make_brief("b12d.md", f"fake-relay: status=completed final={done_final}\nBrief 12d.")
+        runs_before12d = set(os.listdir(t_env["runs_dir"]))
+        ledger_before12d = len(ledger_lines())
+        res12d = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
+                              extra_env=no_node_env)
+        ok12d_check = (
+            res12d.returncode == 2 and "node is not on PATH" in res12d.stderr and
+            set(os.listdir(t_env["runs_dir"])) == runs_before12d and
+            len(ledger_lines()) == ledger_before12d
+        )
+        record("12d. ads.sh check reports a missing node before the ledger records a start", ok12d_check,
+               f"rc={res12d.returncode} err={res12d.stderr}")
+
+        # node passes the check, then is gone when the relay starts
+        drop_node = (
+            f"import os, sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; "
+            "real = delegate.run_relay\n"
+            "def no_node(**kw):\n"
+            f"    os.environ['PATH'] = {no_node_bin!r}\n"
+            "    return real(**kw)\n"
+            "delegate.run_relay = no_node; sys.exit(delegate.main())"
+        )
+        res12e = subprocess.run(
+            [sys.executable, "-c", drop_node, "dispatch", "--config-dir", t_env["config_dir"],
+             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
+             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
+            capture_output=True, text=True, env=t_env["env"])
+        dir12e = parse_run_dir_from_stdout(res12e.stdout)
+        new12e = ledger_lines()[ledger_before12d:]
+        ret12e = json.load(open(os.path.join(dir12e, "return.json"))) if dir12e else {}
+        disp12e = json.load(open(os.path.join(dir12e, "dispatch.json"))) if dir12e else {}
+        ok12e = (
+            res12e.returncode == 1 and dir12e is not None and
+            [e.get("kind") for e in new12e] == ["dispatch.start", "dispatch.finish"] and
+            new12e[0].get("thread_id") == new12e[1].get("thread_id") and
+            new12e[1].get("status") == "blocked" and new12e[1].get("rc") == 1 and
+            ret12e.get("status") == "blocked" and "node is not on PATH" in ret12e.get("deliverable", "") and
+            disp12e.get("status") == "blocked" and "node" in (disp12e.get("reason") or "")
+        )
+        record("12e. an exception after the ledger start still writes a finish and a return.json", ok12e,
+               f"rc={res12e.returncode} out={res12e.stdout} err={res12e.stderr[-400:]} ledger={new12e} ret={ret12e}")
+
+        # -------------------------------------------------------------
         # 13. readOnlyViolation true -> open_questions carries tripwire line
         # -------------------------------------------------------------
         b13 = make_brief("b13.md", f"fake-relay: status=completed final={done_final} violation=true\nBrief 13.")

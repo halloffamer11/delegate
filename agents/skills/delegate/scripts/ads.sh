@@ -29,6 +29,12 @@ case "${1:-}" in
     echo "ads: $ADS_DIR at $short_sha"
     ;;
   check)
+    # Every relay is a node script. Without node a dispatch would start, fail at
+    # the relay and leave nothing to read, so say so before anything starts.
+    if ! command -v node >/dev/null 2>&1; then
+      echo "ads: node is not on PATH; the relays need Node.js" >&2
+      exit 1
+    fi
     if [ ! -d "$ADS_DIR" ]; then
       echo "ads: directory $ADS_DIR does not exist; run ads.sh install" >&2
       exit 1

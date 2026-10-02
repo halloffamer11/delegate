@@ -684,6 +684,83 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
     }
 
 
+def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, prompt_path, child_cwd, write, run_dir):
+    """Steps 5-7 of dispatch: probe, run the relay, probe, map its result."""
+    # Step 5: Probe meters (before)
+    probe_meters(no_probe, routing)
+
+    # Step 6: Run the relay
+    relay_exit, secs = run_relay(
+        ads_dir=ads_d,
+        harness=harness,
+        model=model,
+        effort=eff,
+        timeout_str=lane_timeout,
+        prompt_path=prompt_path,
+        child_cwd=child_cwd,
+        write_dir=write,
+        run_dir=run_dir,
+    )
+
+    # Step 5: Probe meters (after)
+    probe_meters(no_probe, routing)
+
+    # Step 7: Map the result
+    mapped = map_result(
+        run_dir=run_dir,
+        lane_timeout=lane_timeout,
+        relay_exit=relay_exit,
+        write_dir=write,
+    )
+
+    # Update secs in dispatch.json
+    dispatch_path = os.path.join(run_dir, "dispatch.json")
+    if os.path.isfile(dispatch_path):
+        with open(dispatch_path, "r", encoding="utf-8") as f:
+            d_doc = json.load(f)
+        d_doc["secs"] = secs
+        with open(dispatch_path, "w", encoding="utf-8") as f:
+            json.dump(d_doc, f, indent=2)
+            f.write("\n")
+
+    return relay_exit, secs, mapped
+
+
+def start_failure(exc):
+    """Why a run that the ledger has started could not run, in one line."""
+    if isinstance(exc, FileNotFoundError) and exc.filename == "node":
+        return "node is not on PATH; the relay needs Node.js"
+    if isinstance(exc, KeyboardInterrupt):
+        return "dispatch interrupted"
+    return f"dispatch failed: {type(exc).__name__}: {exc}"
+
+
+def fail_run(run_dir, secs, reason):
+    """Write return.json and dispatch.json for a run that failed after its start.
+
+    The status is blocked, as for a relay that fails: return.json has no other
+    word for a run that did no work.
+    """
+    deliverable = f"blocked: {reason}"
+    return_doc = {"status": "blocked", "deliverable": deliverable, "evidence": [],
+                  "open_questions": [], "changed_files": []}
+    with open(os.path.join(run_dir, "return.json"), "w", encoding="utf-8") as f:
+        json.dump(return_doc, f, indent=2)
+        f.write("\n")
+    dispatch_path = os.path.join(run_dir, "dispatch.json")
+    try:
+        with open(dispatch_path, "r", encoding="utf-8") as f:
+            dispatch_doc = json.load(f)
+    except (OSError, ValueError):
+        dispatch_doc = {}
+    dispatch_doc.update({"status": "blocked", "reason": reason, "secs": secs,
+                         "finished_at": datetime.now(timezone.utc).isoformat()})
+    with open(dispatch_path, "w", encoding="utf-8") as f:
+        json.dump(dispatch_doc, f, indent=2)
+        f.write("\n")
+    return {"status": "blocked", "reason": reason, "session_id": None}
+
+
 def ledger_finish(thread_id, lane, class_name, secs, relay_exit, status, session_id, return_path):
     events.append(events.finish_event(
         thread_id=thread_id,
@@ -780,42 +857,19 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         write_dir=write,
     )
 
-    # Step 5: Probe meters (before)
-    probe_meters(no_probe, resolved.get("routing"))
-
-    # Step 6: Run the relay
-    relay_exit, secs = run_relay(
-        ads_dir=ads_d,
-        harness=harness,
-        model=model,
-        effort=eff,
-        timeout_str=lane_timeout,
-        prompt_path=prompt_path,
-        child_cwd=child_cwd,
-        write_dir=write,
-        run_dir=run_dir,
-    )
-
-    # Step 5: Probe meters (after)
-    probe_meters(no_probe, resolved.get("routing"))
-
-    # Step 7: Map the result
-    mapped = map_result(
-        run_dir=run_dir,
-        lane_timeout=lane_timeout,
-        relay_exit=relay_exit,
-        write_dir=write,
-    )
-
-    # Update secs in dispatch.json
-    dispatch_path = os.path.join(run_dir, "dispatch.json")
-    if os.path.isfile(dispatch_path):
-        with open(dispatch_path, "r", encoding="utf-8") as f:
-            d_doc = json.load(f)
-        d_doc["secs"] = secs
-        with open(dispatch_path, "w", encoding="utf-8") as f:
-            json.dump(d_doc, f, indent=2)
-            f.write("\n")
+    # Steps 5-8. Anything that stops them, a missing `node` included, would leave
+    # the start above with no finish: no return.json, and a running glyph in the
+    # statusline until the timeout. So a failure here still finishes the run.
+    t0 = time.time()
+    try:
+        relay_exit, secs, mapped = relay_and_map(
+            no_probe=no_probe, routing=resolved.get("routing"), ads_d=ads_d, harness=harness,
+            model=model, eff=eff, lane_timeout=lane_timeout, prompt_path=prompt_path,
+            child_cwd=child_cwd, write=write, run_dir=run_dir,
+        )
+    except (Exception, KeyboardInterrupt) as e:
+        relay_exit, secs = None, int(time.time() - t0)
+        mapped = fail_run(run_dir, secs, start_failure(e))
 
     # Step 8: Ledger finish
     ledger_finish(
