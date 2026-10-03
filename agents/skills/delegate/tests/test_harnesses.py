@@ -140,6 +140,43 @@ def test_ads_reads_the_registry():
     record("ads.sh keeps no harness list of its own", 'HARNESSES="' not in text)
 
 
+def test_ads_install_fetches_a_pin_off_the_default_branch():
+    """`ads.sh install` reaches a pin that only a side branch of the fork holds.
+    A clone made before the pin is the 2026-10-03 "commit mismatch": a fetch by
+    URL brings down the default branch only."""
+    def git(*args, cwd=None):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fork = os.path.join(tmp, "fork")
+        os.mkdir(fork)
+        git("init", "-q", "-b", "main", cwd=fork)
+        ident = ["-c", "user.name=t", "-c", "user.email=t@t"]
+        git(*ident, "commit", "-q", "--allow-empty", "-m", "default", cwd=fork)
+        existing = os.path.join(tmp, "existing")
+        git("clone", "-q", fork, existing)
+        git("checkout", "-q", "-b", "side", cwd=fork)
+        git(*ident, "commit", "-q", "--allow-empty", "-m", "pin", cwd=fork)
+        pin = git("rev-parse", "HEAD", cwd=fork)
+        git("checkout", "-q", "main", cwd=fork)
+
+        with open(os.path.join(SCRIPTS, "ads.sh")) as f:
+            text = f.read()
+        lines = [f"ADS_REPO={fork}" if l.startswith("ADS_REPO=")
+                 else f"ADS_COMMIT={pin}" if l.startswith("ADS_COMMIT=") else l
+                 for l in text.splitlines()]
+        script = os.path.join(tmp, "ads.sh")
+        with open(script, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+        for case, ads in (("fresh clone", os.path.join(tmp, "fresh")), ("existing clone", existing)):
+            out = subprocess.run(["sh", script, "install"], capture_output=True, text=True,
+                                 env=dict(os.environ, ADS_DIR=ads))
+            head = git("rev-parse", "HEAD", cwd=ads) if os.path.isdir(ads) else ""
+            record(f"ads.sh install reaches a side-branch pin ({case})",
+                   out.returncode == 0 and head == pin, out.stdout + out.stderr)
+
+
 KIRO_FIXTURES = os.path.join(HERE, "fixtures", "kiro")
 
 
@@ -306,5 +343,6 @@ if __name__ == "__main__":
     test_family()
     test_run_args()
     test_ads_reads_the_registry()
+    test_ads_install_fetches_a_pin_off_the_default_branch()
     test_kiro()
     sys.exit(1 if fails else 0)
