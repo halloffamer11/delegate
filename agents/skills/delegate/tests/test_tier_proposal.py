@@ -12,6 +12,7 @@ SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, SCRIPTS)
 
 import catalog  # noqa: E402
+import harnesses  # noqa: E402
 import tier_proposal  # noqa: E402
 from setup_tui import Wizard  # noqa: E402
 
@@ -152,7 +153,7 @@ def test_order_is_a_list():
     record("proposal_lines prints that order",
            tier_proposal.proposal_lines(proposals)
            == "".join(f"{n} {proposals[n]['tier']}\n" for n in names))
-    w = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, set(catalog.HARNESSES),
+    w = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, set(harnesses.NAMES),
                "/tmp/lanes.json", "/tmp/routing.json", effort_rows=AA_ROWS, class_guide={})
     walk_to_tier_four(w)
     w.handle("p")
@@ -162,7 +163,7 @@ def test_order_is_a_list():
 
 def test_wizard_confirm_and_quit():
     def fresh():
-        return Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, set(catalog.HARNESSES),
+        return Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, set(harnesses.NAMES),
                       "/tmp/lanes.json", "/tmp/routing.json", effort_rows=AA_ROWS, class_guide={})
 
     w = fresh()

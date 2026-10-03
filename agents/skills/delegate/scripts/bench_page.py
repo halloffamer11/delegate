@@ -39,7 +39,7 @@ from bench import (
     model_group,
     propose_enabled,
 )
-from catalog import EFFORTS
+from harnesses import EFFORTS
 import harnesses
 
 # A published sweep runs the API's own enum, which starts below the lowest

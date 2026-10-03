@@ -49,7 +49,7 @@ SCRIPT_COMMANDS = {
     "log": ("report.py", ["log"]),
     "runs": ("report.py", ["runs"]),
     "cost": ("report.py", ["cost"]),
-    "catalog": ("catalog.py", []),
+    "catalog": ("catalog_cli.py", []),
 }
 
 

@@ -24,7 +24,8 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
+    from catalog import load_catalog, CatalogError, meters_enabled
+    from harnesses import NAMES as HARNESSES, installed as installed_harnesses
 except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 

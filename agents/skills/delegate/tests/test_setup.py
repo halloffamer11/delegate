@@ -22,6 +22,8 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
+import harnesses
+import catalog_edit
 import orchestrators  # noqa: E402
 # The shipped Claude Code profile: the one that runs claude Lanes in-process.
 CLAUDE_PROFILE = orchestrators.load([orchestrators.SHIPPED_DIR])["claude"]
@@ -112,7 +114,7 @@ def case_all_harnesses_write_canonical_samples():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(cfg, discover_path, default_answers(len(lanes_sample["lanes"])), "--no-bench")
         lanes, routing = load_written(cfg)
         canonical = (
@@ -121,7 +123,7 @@ def case_all_harnesses_write_canonical_samples():
             and open(os.path.join(cfg, "routing.json"), "rb").read()
             == catalog.format_json(routing).encode("utf-8")
         )
-        expected = sample_proposal(catalog.HARNESSES)
+        expected = sample_proposal(harnesses.NAMES)
         all_sample_values = all(
             lanes["lanes"][name]["tier"] == sample["tier"]
             for name, sample in lanes_sample["lanes"].items()
@@ -166,7 +168,7 @@ def case_existing_values_are_prompt_defaults():
         catalog.write_json(os.path.join(cfg, "lanes.json"), existing)
         catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(cfg, discover_path, default_answers(6), "--no-bench")
         lanes, _routing = load_written(cfg)
         return (
@@ -181,11 +183,11 @@ def case_one_lane_values_change_only_that_lane():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         answers = "4\n" + "\n" * 6 + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         lanes, _routing = load_written(cfg)
-        changed = sample_proposal(catalog.HARNESSES)
+        changed = sample_proposal(harnesses.NAMES)
         changed["lanes"]["fable-xhigh@claude"]["tier"] = 4
         return lanes == changed and result.returncode == 0, f"code={result.returncode}, lanes={lanes == changed}"
 
@@ -195,7 +197,7 @@ def case_bench_report_is_display_only():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         report_path = os.path.join(td, "bench.md")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         report_text = "terra-high@codex tier 1\nfixture benchmark report\n"
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report_text)
@@ -220,7 +222,7 @@ def case_decline_writes_nothing():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         answers = "\n" * 13 + "n\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         return (
@@ -236,7 +238,7 @@ def case_out_of_range_retries_then_writes_value():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         answers = "9\n3\n" + "\n" * 6 + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         lanes, _routing = load_written(cfg)
@@ -252,7 +254,7 @@ def case_eof_aborts_without_writing():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(cfg, discover_path, "", "--no-bench")
         return (
             result.returncode == 130
@@ -266,7 +268,7 @@ def case_routing_edits_keep_other_classes():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         answers = "\n" * 6 + "n\n" + "\n" * 6 + "3\n3\n" + "\n" * 2 + "0.3\n\n\n" + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         _lanes, routing = load_written(cfg)
@@ -291,7 +293,7 @@ def case_effort_rows_says_the_prompt_interface_has_no_prescreen():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         rows_path = os.path.join(td, "rows.json")
         with open(rows_path, "w", encoding="utf-8") as f:
             json.dump([{"source": "t", "model": "gpt-5.6-luna", "effort": "low",
@@ -343,11 +345,11 @@ def case_plain_prints_the_start_facts():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        saved = discover.discover(sample_proposal(catalog.HARNESSES), fixture_dir=fixture_dir)
+        saved = discover.discover(sample_proposal(harnesses.NAMES), fixture_dir=fixture_dir)
         catalog.write_json(discover_path, saved)
         # the same refresh the wizard runs, so the facts are the same facts
         refreshed, refresh = discover.refresh_catalog(
-            sample_proposal(catalog.HARNESSES), saved
+            sample_proposal(harnesses.NAMES), saved
         )
         _paths, rows_note = setup.refresh_effort_rows(None, fixture_dir=fixture_dir)
         result = subprocess.run(
@@ -378,7 +380,7 @@ def case_tiers_from_applies_the_page_lines():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         lines = os.path.join(td, "tiers.txt")
         with open(lines, "w", encoding="utf-8") as f:
             f.write("grok46-high@grok 4\nterra-high@codex 4\n\nluna-low@codex off\nnobody@codex 2\n")
@@ -404,7 +406,7 @@ def case_tiers_from_unreadable_file_writes_nothing():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
                            "--no-bench", "--plain", "--tiers-from", os.path.join(td, "absent.txt"))
         ok = (result.returncode == 1 and "tiers-from" in result.stderr
@@ -438,7 +440,7 @@ def case_no_discover_skips_all_acquisition():
     return (
         data == "skipped (--no-discover)"
         and hits["discover"] == 0
-        and discovered == set(catalog.HARNESSES)
+        and discovered == set(harnesses.NAMES)
         and orig_run is None
     ), f"data={data!r} hits={hits} discovered={discovered} subprocess={orig_run}"
 
@@ -463,7 +465,7 @@ def case_one_discovery_path_is_discover():
 
     discover_mod.discover = wrapped_discover
     try:
-        discovered, data = setup.acquire_discovery(sample_proposal(catalog.HARNESSES), Args())
+        discovered, data = setup.acquire_discovery(sample_proposal(harnesses.NAMES), Args())
     finally:
         discover_mod.discover = orig_discover
     ok = (
@@ -546,7 +548,7 @@ def case_plain_collects_bench_in_process():
     real_print = builtins.print
     builtins.print = capture
     try:
-        setup.show_bench(Args(), sample_proposal(catalog.HARNESSES), routing_sample)
+        setup.show_bench(Args(), sample_proposal(harnesses.NAMES), routing_sample)
     finally:
         builtins.print = real_print
     text = "\n".join(buf)
@@ -568,11 +570,11 @@ def case_focused_screen_rejects_plain():
         catalog.write_json(os.path.join(cfg, "lanes.json"), copy.deepcopy(lanes_sample))
         catalog.write_json(os.path.join(cfg, "routing.json"), copy.deepcopy(routing_sample))
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(cfg, discover_path, "", "--no-bench", "--plain", "--screen", "carry")
         return (
             result.returncode == 1
-            and "catalog.py" in result.stderr
+            and "delegate catalog" in result.stderr
             and "set" in result.stderr
             and not (result.stdout or "").strip().endswith("wrote"),
             f"code={result.returncode} stderr={result.stderr!r}",
@@ -583,7 +585,7 @@ def case_start_screen_keeps_plain_wizard():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(
             cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
             "--no-bench", "--screen", "start",
@@ -766,7 +768,7 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
     def scan(args, lanes_doc, force=False, fallback=None):
         seen.append((force, fallback))
         if not force:
-            return (set(catalog.HARNESSES), "probe failed", setup.load_effort_rows([aa]), "", [aa])
+            return (set(harnesses.NAMES), "probe failed", setup.load_effort_rows([aa]), "", [aa])
         return real_scan(args, lanes_doc, force=force, fallback=fallback)
 
     def run_curses(wizard):
@@ -830,7 +832,7 @@ def case_scan_and_propose_are_the_launch_steps():
     doc, plan_again, mapped = setup.propose_generation(copy.deepcopy(frozen), data, rows)
     skipped = setup.propose_generation(copy.deepcopy(frozen), "probe failed", rows)
     # the refresh fixture predates Kiro, so its machine has no Kiro listing
-    ok = (discovered == set(catalog.HARNESSES) - {"kiro"} and isinstance(data, dict)
+    ok = (discovered == set(harnesses.NAMES) - {"kiro"} and isinstance(data, dict)
           and note.startswith("Benchmark rows: Artificial Analysis from ")
           and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
           and rows[1] == "" and len(rows[0]) > 0
@@ -971,7 +973,7 @@ def case_no_discover_fetches_no_rows():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        write_discover(discover_path, harnesses.NAMES)
         result = run_setup(cfg, discover_path,
                            default_answers(len(lanes_sample["lanes"])), "--no-bench")
         ok = (result.returncode == 0
@@ -999,7 +1001,7 @@ def case_plain_prints_the_refresh_change_lines():
         )
         expected = setup_tui.refresh_lines(plan, 10_000)
         check = subprocess.run(
-            [sys.executable, os.path.join(DELEGATE_DIR, "catalog.py"), "check",
+            [sys.executable, os.path.join(DELEGATE_DIR, "catalog_cli.py"), "check",
              os.path.join(cfg, "lanes.json")],
             capture_output=True, text=True,
         )
@@ -1074,7 +1076,7 @@ try:
             os.symlink(os.path.join(real, name), os.path.join(cfg, name))
         lp, rp = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
         before = {p: open(p, "rb").read() for p in (lp, rp)}
-        rev = catalog.catalog_revision(config_dir=cfg)
+        rev = catalog_edit.catalog_revision(config_dir=cfg)
         setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
         record("focused no-op preserves bytes and stow links",
                all(os.path.islink(p) and open(p, "rb").read() == before[p] for p in (lp, rp)))

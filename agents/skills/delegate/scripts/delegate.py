@@ -45,7 +45,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, meters_enabled
+from catalog import load_catalog, CatalogError, meters_enabled
+from harnesses import NAMES as HARNESSES, EFFORTS
 import catalog
 import events
 import harnesses
@@ -731,7 +732,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
 
-def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None, as_json=False):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, present_harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None, as_json=False):
     try:
         cat = load_catalog(cwd=cwd, config_dir=config_dir)
     except CatalogError as e:
@@ -744,14 +745,14 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         sys.exit(2)
 
     if harness is not None:
-        present_list = None if harnesses is None else [h.strip() for h in harnesses.split(",")]
-        error = (catalog.harness_constraint_error(harness) if present_list is None else
+        present_list = None if present_harnesses is None else [h.strip() for h in present_harnesses.split(",")]
+        error = (harnesses.constraint_error(harness) if present_list is None else
                  None if harness in present_list else
                  f"harness '{harness}' is not installed; installed: {', '.join(present_list)}")
         if error:
             sys.stderr.write(f"delegate: {error}\n")
             sys.exit(2)
-        cat = catalog.restrict_to_harness(cat, harness)
+        cat = rank.restrict_to_harness(cat, harness)
 
     cls_config = cat.get("routing", {}).get("classes", {}).get(class_, {})
     floor = cls_config.get("floor")
@@ -768,10 +769,10 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
     # metering is off; dispatch then ranks and runs on that one acquisition.
     probed = meters is None and meters_enabled(cat.get("routing", {}))
 
-    if harnesses is not None:
-        present = set(h.strip() for h in harnesses.split(",") if h.strip())
+    if present_harnesses is not None:
+        present = set(h.strip() for h in present_harnesses.split(",") if h.strip())
     else:
-        present = catalog.installed_harnesses()
+        present = harnesses.installed()
 
     rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
     # with --json, stdout carries the one JSON object, so the ranking is
@@ -900,7 +901,7 @@ def main(argv=None):
             dry_run=args.dry_run,
             config_dir=args.config_dir,
             meters=args.meters,
-            harnesses=args.harnesses,
+            present_harnesses=args.harnesses,
             ads_dir=args.ads_dir,
             runs_dir=args.runs_dir,
             no_probe=args.no_probe,

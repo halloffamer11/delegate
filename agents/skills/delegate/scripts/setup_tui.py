@@ -41,19 +41,10 @@ from bench import (
 import harnesses as harness_registry  # noqa: E402
 import catalog  # noqa: E402
 import tier_proposal  # noqa: E402
-from catalog import (
-    CLASSES,
-    HARNESSES,
-    TIER_LINE_VALUES,
-    apply_tier_lines_to_doc,
-    meter_dependency_lines,
-    meters_enabled,
-    parse_tier_lines,
-    tier_lines_summary,
-    unnamed_carried,
-    write_order_from_lines,
-)
-from catalog import default_class_guide_path as catalog_guide_path
+from catalog import CLASSES, meter_dependency_lines, meters_enabled
+from harnesses import NAMES as HARNESSES
+from tier_lines import parse_tier_lines, tier_lines_summary, unnamed_carried
+from class_guides import default_class_guide_path as catalog_guide_path
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence

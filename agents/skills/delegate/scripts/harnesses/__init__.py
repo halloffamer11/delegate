@@ -26,6 +26,26 @@ def cli_installed(name):
     return h is not None and h.installed()
 
 
+def installed(names=None):
+    """The harnesses, of NAMES or the ones given, whose CLI is on PATH."""
+    return {name for name in (NAMES if names is None else names) if cli_installed(name)}
+
+
+def constraint_error(name):
+    """Why a user's harness constraint cannot be applied, or None.
+
+    The constraint (`/delegate agy <task>`, or a standing "use agy for all
+    delegated work") restricts ranking to one harness's Lanes. Only the user
+    states one; a harness that is unknown or whose CLI is not on PATH is
+    refused, naming the installed ones.
+    """
+    if name in NAMES and cli_installed(name):
+        return None
+    present = ", ".join(sorted(installed())) or "none"
+    why = "is not a harness" if name not in NAMES else "is not installed"
+    return f"harness '{name}' {why}; installed: {present}"
+
+
 def vendor_words():
     """The first words of the harnesses' own vendors' slugs: words that name a
     whole family of models rather than one (`gpt`, `gemini`)."""

@@ -34,7 +34,7 @@ Efforts per harness (ticket 19):
     model family, `gemini-3.8-flash`, with efforts high, medium and low, and
     a stanza for one of them names the suffixed slug.
   - grok: the grok adapter's `efforts` (scripts/harnesses/grok.py, which
-    `catalog.HARNESS_EFFORTS` copies); `grok --help` lists no values and the
+    the catalog checks lanes against); `grok --help` lists no values and the
     CLI accepts any, so only the effort a lane has run at is offered.
 
 Drift detection:
@@ -117,9 +117,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-import catalog
 import harnesses
-from catalog import CatalogError, EFFORTS, load_catalog
+from catalog import CatalogError, load_catalog
+from harnesses import EFFORTS
 
 # Harness evaluation order: harnesses with a model list first, then those whose
 # models the catalog names by hand. Every per-harness fact below comes from the
@@ -205,14 +205,14 @@ def model_level(slug, harness=None):
     `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`, at (6,) and (5, 6);
     `claude-opus-5-5` is `claude-opus` at (5, 5); a slug with no version is its
     own level, at (). The agy effort suffix comes off first, so one slug family
-    has one level (`catalog.slug_family`, or the harness's own rule when the
+    has one level (`harnesses.slug_family`, or the harness's own rule when the
     harness is named), and a trailing date stamp comes off next (`DATE_PART`):
     `claude-haiku-4-5-20251001` is `claude-haiku` at (4, 5).
     """
     if harness is not None:
         base, _effort = harnesses.family(harness, slug or "")
     else:
-        base, _effort = catalog.slug_family(slug or "")
+        base, _effort = harnesses.slug_family(slug or "")
     parts = base.split("-")
     if len(parts) > 1 and DATE_PART.match(parts[-1]):
         parts = parts[:-1]
@@ -287,7 +287,7 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
         if fixture_dir is not None:
             present = {h for h in DISCOVER_HARNESSES if harnesses.get(h).present_in(fixture_dir)}
         else:
-            present = catalog.installed_harnesses(DISCOVER_HARNESSES)
+            present = harnesses.installed(DISCOVER_HARNESSES)
     else:
         present = set(present)
 

@@ -74,12 +74,22 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
+import harnesses
 from catalog import CatalogError, CLASSES, load_catalog
 import usage
 
 
 # Compatibility export for dashboard callers. Validity lives in usage.
 meter_observations = usage.observations
+
+
+def restrict_to_harness(cat, harness):
+    """A copy of the catalog holding only this harness's Lanes, so ranking,
+    the Gate, overflow and the Margin all run inside the constraint."""
+    out = dict(cat)
+    out["lanes"] = {name: lane for name, lane in (cat.get("lanes") or {}).items()
+                    if lane.get("harness") == harness}
+    return out
 
 
 def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="tier"):
@@ -499,20 +509,20 @@ def main(argv=None):
         sys.exit(2)
 
     if args.harness is not None:
-        error = catalog.harness_constraint_error(args.harness) if args.harnesses is None else (
+        error = harnesses.constraint_error(args.harness) if args.harnesses is None else (
             None if args.harness in args.harnesses.split(",") else
             f"harness '{args.harness}' is not installed; installed: {args.harnesses}")
         if error:
             sys.stderr.write(f"rank: {error}\n")
             sys.exit(2)
-        cat = catalog.restrict_to_harness(cat, args.harness)
+        cat = restrict_to_harness(cat, args.harness)
 
     meters_doc = load_usage(cat, args.meters, refresh=not tiers_mode)
 
     if args.harnesses is not None:
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
     else:
-        present = catalog.installed_harnesses()
+        present = harnesses.installed()
 
     if tiers_mode:
         previews = tier_leaders(cat, meters_doc, present)

@@ -27,6 +27,10 @@ sys.path.insert(0, DELEGATE_DIR)
 
 import bench
 import catalog
+import published_names
+import harnesses
+import catalog_edit
+import tier_lines
 import discover
 import effort
 import setup_tui
@@ -34,7 +38,7 @@ from setup_tui import Wizard
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
 ROUTING = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "routing.json")))
-DISCOVERED = set(catalog.HARNESSES)
+DISCOVERED = set(harnesses.NAMES)
 fails = 0
 
 
@@ -1113,7 +1117,7 @@ try:
         _packet, AA_ROWS = effort.aa_extract(f.read(), observed="2026-09-11")
     doc = astra_lanes()
     lane_models = {lane["model"] for lane in doc["lanes"].values()}
-    resolved = {(r["model"], catalog.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
+    resolved = {(r["model"], published_names.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
     _rows, unmatched = setup_tui.resolve_effort_rows(doc, AA_ROWS)
     w = wizard(lanes=doc, effort_rows=AA_ROWS)
     w.handle("enter")
@@ -1248,7 +1252,7 @@ def pty_smoke():
         discover = {
             "version": "delegate-discover.v1",
             "discovered": [{"key": key, "binary": key, "version": "test",
-                            "authenticated": True} for key in catalog.HARNESSES],
+                            "authenticated": True} for key in harnesses.NAMES],
             "missing": [],
         }
         with open(discover_path, "w", encoding="utf-8") as f:
@@ -1838,11 +1842,11 @@ try:
             "sol-ultra@codex 3\n"         # an ultra lane is never carried
             "nobody@codex off\n"
             "fable-max@claude 1\n")
-    parsed = setup_tui.parse_tier_lines(text, doc)
+    parsed = tier_lines.parse_tier_lines(text, doc)
     carried = ["sol-high@codex", "luna-low@codex", "terra-high@codex", "grok46-high@grok", "flash-low@agy"]
-    dropped = setup_tui.unnamed_carried(parsed, carried)
-    summary = setup_tui.tier_lines_summary(parsed, dropped)
-    nothing = setup_tui.parse_tier_lines("nobody@codex 2\nnot a line\n", doc)
+    dropped = tier_lines.unnamed_carried(parsed, carried)
+    summary = tier_lines.tier_lines_summary(parsed, dropped)
+    nothing = tier_lines.parse_tier_lines("nobody@codex 2\nnot a line\n", doc)
     record("47 one parser reads tier lines: blank lines skipped, the last line for a lane wins, unknown "
            "lanes, bad tiers and ultra lanes ignored, and one summary line says each",
            parsed["decided"] == {"sol-high@codex": 4, "terra-high@codex": "off", "fable-max@claude": 1}
@@ -1857,10 +1861,10 @@ try:
                            "named twice, last line kept: terra-high@codex; unknown, ignored: nobody@codex; "
                            "ultra, never carried, ignored: sol-ultra@codex; "
                            "not <lane> <1-4|off>, ignored: line 6, 7, 8, 9.")
-           and setup_tui.parse_tier_lines("", doc)["decided"] == {}
+           and tier_lines.parse_tier_lines("", doc)["decided"] == {}
            # lines that name no lane decide nothing, so nothing goes off
-           and setup_tui.unnamed_carried(nothing, carried) == []
-           and setup_tui.tier_lines_summary(nothing, []) == (
+           and tier_lines.unnamed_carried(nothing, carried) == []
+           and tier_lines.tier_lines_summary(nothing, []) == (
                "Lines: no line names a lane in this catalog, so nothing changed; "
                "unknown, ignored: nobody@codex; not <lane> <1-4|off>, ignored: line 2."),
            repr((parsed, dropped, summary)))
@@ -2270,7 +2274,7 @@ try:
     result = w.result()[0]
     record("61 focused Tier unmark demotes one Tier and appends at its end",
            result["lanes"][name]["tier"] == 2
-           and catalog._carried_in_tier(result["lanes"], 2)[-1] == name, result)
+           and catalog_edit._carried_in_tier(result["lanes"], 2)[-1] == name, result)
     record("61 untouched Tiers keep their original records",
            all(result["lanes"][n] == lane for n, lane in LANES["lanes"].items()
                if lane["tier"] not in (2, 3)))
@@ -2576,7 +2580,7 @@ try:
     w.handle("enter")
     v = w.view(80)
     by_name = {row["cells"][0]: row["cells"] for row in v["rows"]}
-    per_harness = lambda names: {h: sum(1 for n in names if n.endswith("@" + h)) for h in catalog.HARNESSES}
+    per_harness = lambda names: {h: sum(1 for n in names if n.endswith("@" + h)) for h in harnesses.NAMES}
     new, removed = per_harness(plan["new"]), per_harness(plan["removed"])
     grid = screen(v, 80, 24)
     # a wizard built without a scrub result: the harnesses only, no counts
@@ -2973,16 +2977,16 @@ try:
     w, _r, _p = scanned_wizard(rescan=lambda: None)
     w.handle("enter")
     v = w.view(80)
-    rows = 12 + len(catalog.HARNESSES)
+    rows = 12 + len(harnesses.NAMES)
     grid = screen(v, 80, rows)
-    shown = [line.split()[0] for line in grid if line.split() and line.split()[0] in catalog.HARNESSES]
+    shown = [line.split()[0] for line in grid if line.split() and line.split()[0] in harnesses.NAMES]
     roomy = screen(v, 80, 25)
     record("79 the harnesses page at 80 by 12 + harnesses rows shows every harness row, and its body",
-           len(v["body"]) == 2 and shown == list(catalog.HARNESSES)
+           len(v["body"]) == 2 and shown == list(harnesses.NAMES)
            and grid[setup_tui.TOP].startswith("Scanned at launch")
            and not any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in grid)
            and grid[rows - 3].startswith("any key")
-           and not grid[2].rstrip().endswith(f"of {len(catalog.HARNESSES)}")
+           and not grid[2].rstrip().endswith(f"of {len(harnesses.NAMES)}")
            # with room, the legend is back
            and any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in roomy),
            repr(grid))

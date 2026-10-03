@@ -18,10 +18,14 @@ _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
-CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
+CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog_cli.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
+import published_names
+import class_guides
+import catalog_edit
+import catalog_cli
 import harnesses  # noqa: E402
 import rank
 
@@ -178,9 +182,9 @@ for lane_name, eff, offered in (
     )
 record(
     "every harness has an effort list, each inside EFFORTS",
-    set(catalog.HARNESS_EFFORTS) == set(catalog.HARNESSES)
-    and all(set(v) <= set(catalog.EFFORTS) and v for v in catalog.HARNESS_EFFORTS.values()),
-    str(catalog.HARNESS_EFFORTS),
+    all(set(harnesses.get(h).efforts) <= set(harnesses.EFFORTS) and harnesses.get(h).efforts
+        for h in harnesses.NAMES),
+    str({h: harnesses.get(h).efforts for h in harnesses.NAMES}),
 )
 
 # 2. Rejections
@@ -504,7 +508,7 @@ with tempfile.TemporaryDirectory() as td:
     old_out = sys.stdout
     sys.stdout = buf
     try:
-        catalog.show_catalog(cwd=fake_git, config_dir=cfg_dir)
+        catalog_cli.show_catalog(cwd=fake_git, config_dir=cfg_dir)
     finally:
         sys.stdout = old_out
     show_out = buf.getvalue()
@@ -672,7 +676,7 @@ record(
 )
 
 # 7.5 resolution: what the pre-screen asks of the catalog
-resolve = catalog.resolve_published_model
+resolve = published_names.resolve_published_model
 astra = copy.deepcopy(lanes_sample)
 astra["lanes"]["astra-high@codex"] = copy.deepcopy(astra["lanes"]["sol-high@codex"])
 astra["lanes"]["astra-high@codex"]["model"] = "gpt-6-astra"
@@ -747,11 +751,11 @@ record(
 
 record(
     "7.8 every effort strips as a suffix, longest first",
-    [catalog.strip_effort_suffix(f"m-{e}") for e in catalog.EFFORTS]
-    == [("m", e) for e in catalog.EFFORTS]
-    and catalog.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
-    and catalog.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
-    str([catalog.strip_effort_suffix(f"m-{e}") for e in catalog.EFFORTS]),
+    [published_names.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]
+    == [("m", e) for e in harnesses.EFFORTS]
+    and published_names.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
+    and published_names.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
+    str([published_names.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]),
 )
 
 # The published name is reconciled against the lane's model, reaching past an
@@ -1024,7 +1028,7 @@ with tempfile.TemporaryDirectory() as td:
     old_out = sys.stdout
     sys.stdout = show
     try:
-        catalog.show_catalog(cwd=project_dir, config_dir=cfg_dir)
+        catalog_cli.show_catalog(cwd=project_dir, config_dir=cfg_dir)
     finally:
         sys.stdout = old_out
     show_text = show.getvalue()
@@ -1038,7 +1042,7 @@ with tempfile.TemporaryDirectory() as td:
 
     # Reload the fixture after the project write: both public ranking projections
     # must consume the one effective catalog rather than applying an overlay again.
-    present = set(catalog.HARNESSES)
+    present = set(harnesses.NAMES)
     before_pick = next(r["lane"] for r in rank.rank("impl", before, {}, present) if r["pick"])
     before_tier2 = rank.tier_leaders(before, {}, present)[1]["leader"]
     after_pick = next(r["lane"] for r in rank.rank("impl", effective, {}, present) if r["pick"])
@@ -1076,7 +1080,7 @@ def class_guide(names, extra="", prefix="# Class guide\n\n# How to pick\n\nPick 
 
 
 try:
-    catalog.validate_guide(GUIDE_PATH)
+    class_guides.validate_guide(GUIDE_PATH)
     record("9.1 shipped class guide validates as global", True)
 except Exception as e:
     record("9.1 shipped class guide validates as global", False, str(e))
@@ -1100,18 +1104,18 @@ res_guide_default = subprocess.run(
 record(
     "9.1c check-guide default path is the shipped guide",
     res_guide_default.returncode == 0
-    and res_guide_default.stdout.strip() == f"ok: {catalog.default_class_guide_path()}"
-    and os.path.samefile(catalog.default_class_guide_path(), GUIDE_PATH),
+    and res_guide_default.stdout.strip() == f"ok: {class_guides.default_class_guide_path()}"
+    and os.path.samefile(class_guides.default_class_guide_path(), GUIDE_PATH),
     res_guide_default.stdout + res_guide_default.stderr,
 )
 
 record(
     "9.1d metadata headings are not Class sections",
-    catalog.validate_guide_text(class_guide(catalog.CLASSES)) == catalog.CLASSES,
+    class_guides.validate_guide_text(class_guide(catalog.CLASSES)) == catalog.CLASSES,
 )
 
 msg = check_catalog_error(
-    catalog.validate_guide_text,
+    class_guides.validate_guide_text,
     "# Class guide\n\n## How to pick\n\n" + class_guide(catalog.CLASSES, prefix=""),
 )
 record(
@@ -1125,10 +1129,10 @@ with tempfile.TemporaryDirectory() as td:
     with open(overlay_path, "w", encoding="utf-8") as f:
         f.write(class_guide(("scout", "impl")))
     try:
-        names = catalog.validate_guide_text(
+        names = class_guides.validate_guide_text(
             class_guide(("scout", "impl")), overlay=True
         )
-        catalog.validate_guide(overlay_path, overlay=True)
+        class_guides.validate_guide(overlay_path, overlay=True)
         overlay_ok = names == ("scout", "impl")
     except Exception as e:
         overlay_ok = False
@@ -1162,11 +1166,11 @@ with tempfile.TemporaryDirectory() as td:
         f.write("# How to pick\n\nProject note only.\n")
     record(
         "9.2c overlay with no Class sections is an empty subset",
-        check_catalog_error(catalog.validate_guide, empty_overlay, overlay=True) is None,
+        check_catalog_error(class_guides.validate_guide, empty_overlay, overlay=True) is None,
     )
 
 msg = check_catalog_error(
-    catalog.validate_guide_text,
+    class_guides.validate_guide_text,
     class_guide(("scout", "knowledge-scout", "impl")),
     overlay=True,
 )
@@ -1177,7 +1181,7 @@ record(
 )
 
 partial = [c for c in catalog.CLASSES if c != "review"]
-msg = check_catalog_error(catalog.validate_guide_text, class_guide(partial))
+msg = check_catalog_error(class_guides.validate_guide_text, class_guide(partial))
 record(
     "9.4 global missing Class section is rejected",
     bool(msg and "missing required class 'review'" in msg),
@@ -1185,7 +1189,7 @@ record(
 )
 
 msg = check_catalog_error(
-    catalog.validate_guide_text,
+    class_guides.validate_guide_text,
     class_guide(catalog.CLASSES) + "\n## scout\n\nAgain.\n",
 )
 record(
@@ -1195,7 +1199,7 @@ record(
 )
 
 msg = check_catalog_error(
-    catalog.validate_guide_text,
+    class_guides.validate_guide_text,
     class_guide(catalog.CLASSES, extra="\n### Default\n\nfloor: 2\n"),
 )
 record(
@@ -1205,7 +1209,7 @@ record(
 )
 
 msg = check_catalog_error(
-    catalog.validate_guide_text,
+    class_guides.validate_guide_text,
     class_guide(("scout",), extra="\nCeiling = 3\n"),
     overlay=True,
 )
@@ -1218,11 +1222,11 @@ record(
 reordered = class_guide(("mechanical",) + catalog.CLASSES[2:] + ("scout",))
 record(
     "9.7 global Class sections may use a different order",
-    check_catalog_error(catalog.validate_guide_text, reordered) is None,
+    check_catalog_error(class_guides.validate_guide_text, reordered) is None,
 )
 record(
     "9.7b indented Markdown headings remain Class sections",
-    check_catalog_error(catalog.validate_guide_text,
+    check_catalog_error(class_guides.validate_guide_text,
                         class_guide(catalog.CLASSES).replace("## scout", "   ## scout")) is None,
 )
 
@@ -1232,7 +1236,7 @@ fenced = class_guide(
 )
 # A fenced heading is not a Class section; a fenced floor: integer still
 # duplicates routing.json policy and is refused.
-msg = check_catalog_error(catalog.validate_guide_text, fenced)
+msg = check_catalog_error(class_guides.validate_guide_text, fenced)
 record(
     "9.8 fenced floor integer is still routing policy",
     bool(msg and "floor" in msg and "routing.json" in msg),
@@ -1244,12 +1248,12 @@ fenced_heading_only = class_guide(
 )
 record(
     "9.8b fenced unknown heading is not a Class section",
-    check_catalog_error(catalog.validate_guide_text, fenced_heading_only) is None,
+    check_catalog_error(class_guides.validate_guide_text, fenced_heading_only) is None,
 )
 
 with tempfile.TemporaryDirectory() as missing_dir:
     missing_path = os.path.join(missing_dir, "classes.md")
-    msg = check_catalog_error(catalog.validate_guide, missing_path)
+    msg = check_catalog_error(class_guides.validate_guide, missing_path)
     record(
         "9.9 missing guide file is refused",
         bool(msg and "file is missing" in msg),
@@ -1258,7 +1262,7 @@ with tempfile.TemporaryDirectory() as missing_dir:
 
 
 # 10. Focused catalog edits (ticket 11 CLI). Fixtures only; never the live config.
-ALL_HARNESSES = set(catalog.HARNESSES)
+ALL_HARNESSES = set(harnesses.NAMES)
 EMPTY_METERS = {}
 
 
@@ -1309,7 +1313,7 @@ def same_path(a, b):
     return os.path.realpath(a) == os.path.realpath(b)
 
 
-def catalog_cli(args, env, cwd=None):
+def run_catalog_cli(args, env, cwd=None):
     return subprocess.run(
         [sys.executable, CATALOG_PY, *args],
         capture_output=True,
@@ -1356,7 +1360,7 @@ def expected_picks_leaders(cwd, config_dir, present=ALL_HARNESSES, meters=EMPTY_
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td, project={"note": "keep me", "margin": 0.5})
     present = ALL_HARNESSES
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set",
         field="routing.gate",
         value=0.25,
@@ -1391,7 +1395,7 @@ with tempfile.TemporaryDirectory() as td:
     routing_before = file_bytes(os.path.join(cfg, "routing.json"))
     project_before = file_bytes(os.path.join(repo, ".delegate", "routing.json"))
     lanes_before = file_bytes(os.path.join(cfg, "lanes.json"))
-    applied = catalog.edit_catalog(
+    applied = catalog_edit.edit_catalog(
         "set",
         field="routing.gate",
         value=0.25,
@@ -1424,7 +1428,7 @@ with tempfile.TemporaryDirectory() as td:
     )
 
     stale = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "set",
         field="routing.gate",
         value=0.3,
@@ -1448,7 +1452,7 @@ with tempfile.TemporaryDirectory() as td:
     cfg, repo, real_cfg = make_edit_fixture(td, symlink=True)
     lanes_link = os.path.join(cfg, "lanes.json")
     routing_link = os.path.join(cfg, "routing.json")
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set",
         field="lanes.terra-high@codex.tier",
         value=3,
@@ -1469,7 +1473,7 @@ with tempfile.TemporaryDirectory() as td:
         and "lanes.terra-high@codex.order" in preview["changed"],
         repr(preview["target"]) + repr(preview["values"]),
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set",
         field="lanes.terra-high@codex.tier",
         value=3,
@@ -1496,7 +1500,7 @@ with tempfile.TemporaryDirectory() as td:
     os.remove(lanes_link)
     os.symlink(other, lanes_link)
     msg = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "set",
         field="lanes.terra-high@codex.tier",
         value=1,
@@ -1522,7 +1526,7 @@ with tempfile.TemporaryDirectory() as td:
     routing_path = os.path.join(cfg, "routing.json")
     before = file_bytes(routing_path)
     mtime = os.stat(routing_path).st_mtime_ns
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set",
         field="routing.gate",
         value=0.1,
@@ -1532,7 +1536,7 @@ with tempfile.TemporaryDirectory() as td:
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
-    applied = catalog.edit_catalog(
+    applied = catalog_edit.edit_catalog(
         "set",
         field="routing.gate",
         value=0.1,
@@ -1557,7 +1561,7 @@ with tempfile.TemporaryDirectory() as td:
 
     invalid_before = file_bytes(routing_path)
     msg = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "set",
         field="routing.gate",
         value=2,
@@ -1565,7 +1569,7 @@ with tempfile.TemporaryDirectory() as td:
         cwd=repo,
         config_dir=cfg,
         apply=True,
-        expect=catalog.catalog_revision(cwd=repo, config_dir=cfg),
+        expect=catalog_edit.catalog_revision(cwd=repo, config_dir=cfg),
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
@@ -1578,7 +1582,7 @@ with tempfile.TemporaryDirectory() as td:
 
     # Since ticket 32 a project Lane Tier is legal and goes to its own file,
     # never to the global lane catalog.
-    preview_pt = catalog.edit_catalog(
+    preview_pt = catalog_edit.edit_catalog(
         "set",
         field="lanes.terra-high@codex.tier",
         value=1,
@@ -1596,7 +1600,7 @@ with tempfile.TemporaryDirectory() as td:
         and preview_pt["written"] is False,
         repr(preview_pt["values"]),
     )
-    preview_m = catalog.edit_catalog(
+    preview_m = catalog_edit.edit_catalog(
         "set",
         field="routing.meters",
         value=False,
@@ -1614,7 +1618,7 @@ with tempfile.TemporaryDirectory() as td:
         and preview_m["noop"] is False,
         repr(preview_m["values"]),
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set",
         field="routing.meters",
         value=False,
@@ -1639,7 +1643,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td)
     global_before = file_bytes(os.path.join(cfg, "routing.json"))
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "range",
         cls="scout",
         floor=4,
@@ -1661,7 +1665,7 @@ with tempfile.TemporaryDirectory() as td:
         and preview["sources"]["project"]["exists"] is False,
         repr(preview["values"]),
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "range",
         cls="scout",
         floor=4,
@@ -1685,7 +1689,7 @@ with tempfile.TemporaryDirectory() as td:
         repr(project_doc),
     )
     msg = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "range",
         cls="scout",
         floor=4,
@@ -1708,7 +1712,7 @@ with tempfile.TemporaryDirectory() as td:
         td,
         project={"project_order": ["flash-high@agy"], "note": "other tiers stay"},
     )
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "order",
         lane="grok46-high@grok",
         position=1,
@@ -1726,7 +1730,7 @@ with tempfile.TemporaryDirectory() as td:
         and preview["changed"] == ["lanes.grok46-high@grok.order", "lanes.terra-high@codex.order"],
         repr(preview["values"]),
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "order",
         lane="grok46-high@grok",
         position=1,
@@ -1751,8 +1755,8 @@ with tempfile.TemporaryDirectory() as td:
         and project_doc["note"] == "other tiers stay",
     )
 
-    rev = catalog.catalog_revision(cwd=repo, config_dir=cfg)
-    preview_p = catalog.edit_catalog(
+    rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    preview_p = catalog_edit.edit_catalog(
         "order",
         lane="terra-high@codex",
         position=1,
@@ -1762,7 +1766,7 @@ with tempfile.TemporaryDirectory() as td:
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "order",
         lane="terra-high@codex",
         position=1,
@@ -1799,8 +1803,8 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td, dotted=True)
     field = "lanes.gpt-5.6-luna-low@codex.tier"
-    kind, name = catalog.parse_set_field(field)
-    preview = catalog.edit_catalog(
+    kind, name = catalog_edit.parse_set_field(field)
+    preview = catalog_edit.edit_catalog(
         "set",
         field=field,
         value=2,
@@ -1824,7 +1828,7 @@ with tempfile.TemporaryDirectory() as td:
             ),
         repr(preview["values"]),
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set",
         field=field,
         value=2,
@@ -1850,7 +1854,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td)
     env = isolated_cli_env(td, meters_doc={})
-    helper = catalog.edit_catalog(
+    helper = catalog_edit.edit_catalog(
         "set",
         field="routing.margin",
         value=0.4,
@@ -1860,7 +1864,7 @@ with tempfile.TemporaryDirectory() as td:
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
-    res = catalog_cli(
+    res = run_catalog_cli(
         [
             "set", "routing.margin", "0.4",
             "--scope", "global",
@@ -1880,7 +1884,7 @@ with tempfile.TemporaryDirectory() as td:
         and cli["unavailable_harnesses"] == [],
         res.stderr + res.stdout[:500],
     )
-    res_apply = catalog_cli(
+    res_apply = run_catalog_cli(
         [
             "set", "routing.margin", "0.4",
             "--scope", "global",
@@ -1902,7 +1906,7 @@ with tempfile.TemporaryDirectory() as td:
         and catalog.load_json(os.path.join(cfg, "routing.json"))["margin"] == 0.4,
         res_apply.stderr,
     )
-    res_bad = catalog_cli(
+    res_bad = run_catalog_cli(
         [
             "set", "routing.margin", "0.4",
             "--scope", "global",
@@ -1918,17 +1922,17 @@ with tempfile.TemporaryDirectory() as td:
         res_bad.stderr,
     )
 
-    absent_rev = catalog.catalog_revision(cwd=repo, config_dir=cfg)
+    absent_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
     os.makedirs(os.path.join(repo, ".delegate"), exist_ok=True)
     catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), {"gate": 0.2})
-    present_rev = catalog.catalog_revision(cwd=repo, config_dir=cfg)
+    present_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
     record(
         "10.9 absent project file is part of the revision",
         absent_rev != present_rev,
         f"{absent_rev} == {present_rev}",
     )
     msg = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "set",
         field="routing.margin",
         value=0.5,
@@ -1955,7 +1959,7 @@ with tempfile.TemporaryDirectory() as td:
         f.write("#!/bin/sh\nexit 0\n")
     os.chmod(os.path.join(bindir, "codex"), 0o755)
     env_partial["PATH"] = bindir
-    res_unavail = catalog_cli(
+    res_unavail = run_catalog_cli(
         ["set", "routing.gate", "0.1", "--scope", "global", "--cwd", repo, "--config-dir", cfg],
         env_partial,
     )
@@ -1981,33 +1985,33 @@ with tempfile.TemporaryDirectory() as td:
         if item["tier"] == dest:
             item.pop("order", None)
     catalog.write_json(path, doc)
-    preview = catalog.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
+    preview = catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
         field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES)
-    catalog.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
+    catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
         field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES,
         apply=True, expect=preview["revision"])
     after = catalog.load_json(path)["lanes"]
     record("10.11 Tier move follows unordered destination Lanes",
-          catalog._carried_in_tier(after, dest)[-1] == moving, preview)
+          catalog_edit._carried_in_tier(after, dest)[-1] == moving, preview)
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _ = make_edit_fixture(td)
-    preview = catalog.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
+    preview = catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
         field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
-    original_preview = catalog._rank_preview
+    original_preview = catalog_edit._rank_preview
     path = os.path.join(cfg, "routing.json")
     def intervening_write(*args):
         doc = catalog.load_json(path)
         doc["note"] = "intervening edit during preview"
         catalog.write_json(path, doc)
         return original_preview(*args)
-    catalog._rank_preview = intervening_write
+    catalog_edit._rank_preview = intervening_write
     try:
-        msg = check_catalog_error(lambda: catalog.edit_catalog("set", scope="global",
+        msg = check_catalog_error(lambda: catalog_edit.edit_catalog("set", scope="global",
             cwd=repo, config_dir=cfg, field="routing.gate", value=0.2, meters={},
             present=ALL_HARNESSES, apply=True, expect=preview["revision"]))
     finally:
-        catalog._rank_preview = original_preview
+        catalog_edit._rank_preview = original_preview
     record("10.12 Re-read immediately before write rejects intervening change",
           msg is not None and "intervening edit" in msg and
           catalog.load_json(path)["gate"] == routing_sample["gate"], msg)
@@ -2019,7 +2023,7 @@ with tempfile.TemporaryDirectory() as td:
     path = os.path.join(project_dir, "routing.json")
     with open(path, "w") as f:
         f.write("null\n")
-    msg = check_catalog_error(catalog.edit_catalog, "set", scope="project", cwd=repo,
+    msg = check_catalog_error(catalog_edit.edit_catalog, "set", scope="project", cwd=repo,
         config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
     record("10.13 Present null project is invalid, not an absent overlay",
         msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
@@ -2051,11 +2055,11 @@ with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td)
     routing_path = os.path.join(cfg, "routing.json")
     before = file_bytes(routing_path)
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set", field="routing.meters", value=True, scope="global",
         cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
     )
-    applied = catalog.edit_catalog(
+    applied = catalog_edit.edit_catalog(
         "set", field="routing.meters", value=True, scope="global",
         cwd=repo, config_dir=cfg, apply=True, expect=preview["revision"],
         present=ALL_HARNESSES, meters=EMPTY_METERS,
@@ -2080,11 +2084,11 @@ with tempfile.TemporaryDirectory() as td:
         and "meters" not in catalog.load_json(os.path.join(cfg, "routing.json")),
         repr(cat["routing"].get("meters")),
     )
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set", field="routing.meters", value=True, scope="project",
         cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set", field="routing.meters", value=True, scope="project",
         cwd=repo, config_dir=cfg, apply=True, expect=preview["revision"],
         present=ALL_HARNESSES, meters=EMPTY_METERS,
@@ -2101,11 +2105,11 @@ with tempfile.TemporaryDirectory() as td:
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, real_cfg = make_edit_fixture(td, symlink=True)
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set", field="routing.meters", value=False, scope="global",
         cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set", field="routing.meters", value=False, scope="global",
         cwd=repo, config_dir=cfg, apply=True, expect=preview["revision"],
         present=ALL_HARNESSES, meters=EMPTY_METERS,
@@ -2210,18 +2214,18 @@ for bad in (0, 1, "false", None, 0.0):
 
 record(
     "13.5 routing.overflow is a set field",
-    catalog.parse_set_field("routing.overflow") == ("routing", "overflow"),
-    repr(catalog.parse_set_field("routing.overflow")),
+    catalog_edit.parse_set_field("routing.overflow") == ("routing", "overflow"),
+    repr(catalog_edit.parse_set_field("routing.overflow")),
 )
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td)
     routing_path = os.path.join(cfg, "routing.json")
-    preview_o = catalog.edit_catalog(
+    preview_o = catalog_edit.edit_catalog(
         "set", field="routing.overflow", value=False, scope="global",
         cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set", field="routing.overflow", value=False, scope="global",
         cwd=repo, config_dir=cfg, apply=True, expect=preview_o["revision"],
         present=ALL_HARNESSES, meters=EMPTY_METERS,
@@ -2252,8 +2256,8 @@ with tempfile.TemporaryDirectory() as td:
 
 record(
     "14.1 lanes.<lane>.tier is a project set field too",
-    catalog.parse_set_field("lanes.sol-high@codex.tier") == ("lane_tier", "sol-high@codex"),
-    repr(catalog.parse_set_field("lanes.sol-high@codex.tier")),
+    catalog_edit.parse_set_field("lanes.sol-high@codex.tier") == ("lane_tier", "sol-high@codex"),
+    repr(catalog_edit.parse_set_field("lanes.sol-high@codex.tier")),
 )
 
 PROJECT_LANES_SOURCE = "project lanes.json"
@@ -2366,7 +2370,7 @@ with tempfile.TemporaryDirectory() as td:
     out = io.StringIO()
     _stdout, sys.stdout = sys.stdout, out
     try:
-        catalog.show_catalog(cwd=repo, config_dir=cfg)
+        catalog_cli.show_catalog(cwd=repo, config_dir=cfg)
     finally:
         sys.stdout = _stdout
     shown = out.getvalue()
@@ -2381,7 +2385,7 @@ with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td)
     global_lanes_before = file_bytes(os.path.join(cfg, "lanes.json"))
     routing_before = file_bytes(os.path.join(cfg, "routing.json"))
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "set",
         field="lanes.sol-high@codex.tier",
         value=2,
@@ -2407,7 +2411,7 @@ with tempfile.TemporaryDirectory() as td:
         repr(preview["values"]),
     )
     stale = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "set",
         field="lanes.sol-high@codex.tier",
         value=2,
@@ -2425,7 +2429,7 @@ with tempfile.TemporaryDirectory() as td:
         and not os.path.exists(project_lanes_path),
         stale,
     )
-    applied = catalog.edit_catalog(
+    applied = catalog_edit.edit_catalog(
         "set",
         field="lanes.sol-high@codex.tier",
         value=2,
@@ -2449,7 +2453,7 @@ with tempfile.TemporaryDirectory() as td:
     )
     # The project file goes stale for the next preview, which is the revision
     # the dashboard passes back.
-    back = catalog.edit_catalog(
+    back = catalog_edit.edit_catalog(
         "set",
         field="lanes.sol-high@codex.tier",
         value=3,
@@ -2464,7 +2468,7 @@ with tempfile.TemporaryDirectory() as td:
         back["revision"] != preview["revision"],
         f"{back['revision']} vs {preview['revision']}",
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "set",
         field="lanes.sol-high@codex.tier",
         value=3,
@@ -2486,7 +2490,7 @@ with tempfile.TemporaryDirectory() as td:
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(td)
-    noop = catalog.edit_catalog(
+    noop = catalog_edit.edit_catalog(
         "set",
         field="lanes.sol-high@codex.tier",
         value=3,
@@ -2503,7 +2507,7 @@ with tempfile.TemporaryDirectory() as td:
         repr(noop["values"]),
     )
     msg = check_catalog_error(
-        catalog.edit_catalog,
+        catalog_edit.edit_catalog,
         "set",
         field="lanes.no-such@codex.tier",
         value=2,
@@ -2523,7 +2527,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(
         td, project_lanes={"lanes": {"sol-high@codex": {"tier": 2}}})
-    preview = catalog.edit_catalog(
+    preview = catalog_edit.edit_catalog(
         "order",
         lane="sol-high@codex",
         position=1,
@@ -2542,7 +2546,7 @@ with tempfile.TemporaryDirectory() as td:
         and preview["target"]["file"] == os.path.join(repo, ".delegate", "routing.json"),
         repr(preview["values"]),
     )
-    catalog.edit_catalog(
+    catalog_edit.edit_catalog(
         "order",
         lane="sol-high@codex",
         position=1,
@@ -2579,7 +2583,7 @@ with tempfile.TemporaryDirectory() as td:
         res.stdout + res.stderr,
     )
 
-# 15. Ticket 14: catalog.plan_edits is the one planning path. It takes documents
+# 15. Ticket 14: catalog_edit.plan_edits is the one planning path. It takes documents
 # already in hand, plans a list of the same operations edit_catalog accepts, and
 # returns named fields. It reads no Meter and writes no file.
 
@@ -2611,11 +2615,11 @@ with tempfile.TemporaryDirectory() as td:
         if os.path.exists(path)
     }
 
-    saved_meters, saved_preview = catalog._cached_meters, catalog._rank_preview
-    catalog._cached_meters = refuse_meter_read
-    catalog._rank_preview = refuse_meter_read
+    saved_meters, saved_preview = catalog_edit._cached_meters, catalog_edit._rank_preview
+    catalog_edit._cached_meters = refuse_meter_read
+    catalog_edit._rank_preview = refuse_meter_read
     try:
-        plan = catalog.plan_edits(
+        plan = catalog_edit.plan_edits(
             plan_ops,
             plan_lanes_doc,
             plan_routing_doc,
@@ -2623,7 +2627,7 @@ with tempfile.TemporaryDirectory() as td:
             plan_files,
         )
     finally:
-        catalog._cached_meters, catalog._rank_preview = saved_meters, saved_preview
+        catalog_edit._cached_meters, catalog_edit._rank_preview = saved_meters, saved_preview
 
     record(
         "15.1 plan_edits returns named documents, the effective catalog and one step per op",
@@ -2678,7 +2682,7 @@ with tempfile.TemporaryDirectory() as td:
     # The same operations through edit_catalog leave exactly the planned bytes.
     for op_spec in plan_ops:
         kwargs = {k: v for k, v in op_spec.items() if k not in ("op", "scope")}
-        preview = catalog.edit_catalog(
+        preview = catalog_edit.edit_catalog(
             op_spec["op"],
             scope=op_spec["scope"],
             cwd=repo,
@@ -2687,7 +2691,7 @@ with tempfile.TemporaryDirectory() as td:
             meters=EMPTY_METERS,
             **kwargs,
         )
-        catalog.edit_catalog(
+        catalog_edit.edit_catalog(
             op_spec["op"],
             scope=op_spec["scope"],
             cwd=repo,
@@ -2716,14 +2720,14 @@ with tempfile.TemporaryDirectory() as td:
 
     record(
         "15.7 an empty operation list is the documents as they stand",
-        catalog.plan_edits(
+        catalog_edit.plan_edits(
             [], plan_lanes_doc, plan_routing_doc, plan_project_doc, plan_files
         )["catalog"]["lanes"]["sol-high@codex"]["tier"] == 3,
         "empty plan",
     )
 
     msg = check_catalog_error(
-        catalog.plan_edits,
+        catalog_edit.plan_edits,
         [{"op": "carry", "scope": "project", "lane": "sol-high@codex"}],
         plan_lanes_doc,
         plan_routing_doc,
@@ -2768,7 +2772,7 @@ with tempfile.TemporaryDirectory() as td:
         repr(rows[:1]),
     )
     env = isolated_cli_env(td)
-    res_stale = catalog_cli(
+    res_stale = run_catalog_cli(
         ["order", "terra-high@codex", "1", "--scope", "project",
          "--cwd", repo, "--config-dir", cfg],
         env,
@@ -2840,7 +2844,7 @@ with tempfile.TemporaryDirectory() as td:
     )
 
     env = isolated_cli_env(td)
-    res_off = catalog_cli(
+    res_off = run_catalog_cli(
         ["order", "sol-high@codex", "1", "--scope", "project",
          "--cwd", repo, "--config-dir", cfg],
         env,
@@ -2869,8 +2873,8 @@ with tempfile.TemporaryDirectory() as which_tmp:
     saved_path = os.environ.get("PATH", "")
     os.environ["PATH"] = os.pathsep.join(["", bin_dir])
     try:
-        answers = {h: (catalog.cli_installed(h), harnesses.get(h).installed()) for h in catalog.HARNESSES}
-        present = catalog.installed_harnesses()
+        answers = {h: (harnesses.cli_installed(h), harnesses.get(h).installed()) for h in harnesses.NAMES}
+        present = harnesses.installed()
         absent_row = harnesses.get("codex").meters()
     finally:
         os.environ["PATH"] = saved_path
@@ -2916,7 +2920,7 @@ def class_world(td, routing_classes, guide=None, project=None, project_guide=Non
     return config, cwd
 
 
-def catalog_cli(*args, home):
+def run_guide_cli(*args, home):
     env = dict(os.environ, HOME=home)
     return subprocess.run([sys.executable, CATALOG_PY, *args], capture_output=True, text=True, env=env)
 
@@ -2929,11 +2933,11 @@ with tempfile.TemporaryDirectory() as td:
            and cat["routing"]["classes"] == routing_sample["classes"]
            and cat["sources"]["classes.review.floor"] == catalog.DEFAULT_CLASSES_SOURCE,
            repr(cat["routing"]["classes"]))
-    picks = {c: rank.rank(c, cat, {}, set(catalog.HARNESSES))[0]["lane"] for c in catalog.CLASSES}
+    picks = {c: rank.rank(c, cat, {}, set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, copy.deepcopy(routing_sample["classes"]))
     cat_full = catalog.load_catalog(cwd=cwd, config_dir=config)
-    picks_full = {c: rank.rank(c, cat_full, {}, set(catalog.HARNESSES))[0]["lane"] for c in catalog.CLASSES}
+    picks_full = {c: rank.rank(c, cat_full, {}, set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
 record("19.2 the shipped Classes rank the same whether the catalog writes them or not",
        picks == picks_full, f"{picks} vs {picks_full}")
 
@@ -2941,7 +2945,7 @@ with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"review": {"floor": 2, "ceiling": 3},
                                    "triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    rows = rank.rank("triage", cat, {}, set(catalog.HARNESSES))
+    rows = rank.rank("triage", cat, {}, set(harnesses.NAMES))
     record("19.3 a global Class extends the defaults and rank accepts it",
            catalog.class_names(cat["routing"]) == list(catalog.CLASSES) + ["triage"]
            and cat["routing"]["classes"]["review"] == {"floor": 2, "ceiling": 3}
@@ -2949,7 +2953,7 @@ with tempfile.TemporaryDirectory() as td:
            and rows and all(r["tier"] <= 2 for r in rows if r["pick"]),
            repr(cat["routing"]["classes"]))
     res = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "triage",
-                          "--config-dir", config, "--cwd", cwd, "--harnesses", ",".join(catalog.HARNESSES),
+                          "--config-dir", config, "--cwd", cwd, "--harnesses", ",".join(harnesses.NAMES),
                           "--meters", os.path.join(HERE, "fixture", "meters.json")],
                          capture_output=True, text=True)
     res_bad = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "ghost",
@@ -2959,8 +2963,8 @@ with tempfile.TemporaryDirectory() as td:
            res.returncode == 0 and "triage" in res.stdout
            and res_bad.returncode == 2 and "ghost" in res_bad.stderr and "triage" in res_bad.stderr,
            res.stdout + res.stderr + res_bad.stderr)
-    guide_ok = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
-    check_ok = catalog_cli("check", os.path.join(config, "routing.json"), home=td)
+    guide_ok = run_guide_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    check_ok = run_guide_cli("check", os.path.join(config, "routing.json"), home=td)
     record("19.5 check-guide and check accept a Class with a Range and a guide section",
            guide_ok.returncode == 0 and f"ok: {os.path.join(config, 'classes.md')}" in guide_ok.stdout
            and check_ok.returncode == 0,
@@ -2968,8 +2972,8 @@ with tempfile.TemporaryDirectory() as td:
 
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}})
-    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
-    check_res = catalog_cli("check", os.path.join(config, "routing.json"), home=td)
+    guide_res = run_guide_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    check_res = run_guide_cli("check", os.path.join(config, "routing.json"), home=td)
     record("19.6 a Class with no guide section is rejected by check-guide and check, by name",
            guide_res.returncode == 1 and "'triage'" in guide_res.stderr and "## triage" in guide_res.stderr
            and check_res.returncode == 1 and "'triage'" in check_res.stderr,
@@ -2977,7 +2981,7 @@ with tempfile.TemporaryDirectory() as td:
 
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, None, guide=TRIAGE_GUIDE)
-    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    guide_res = run_guide_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
     record("19.7 a guide section for a Class with no Range is rejected, by name",
            guide_res.returncode == 1 and "triage" in guide_res.stderr and "routing.json" in guide_res.stderr,
            guide_res.stderr)
@@ -2986,7 +2990,7 @@ with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, None, project={"classes": {"triage": {"floor": 1, "ceiling": 2}}},
                               project_guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    guide_res = run_guide_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
     record("19.8 a project adds a Class with its own Range and guide",
            "triage" in catalog.class_names(cat["routing"]) and guide_res.returncode == 0,
            guide_res.stdout + guide_res.stderr)
@@ -2999,11 +3003,11 @@ with tempfile.TemporaryDirectory() as td:
 # One effort list: the suffixes are EFFORTS longest first, not a copy of it.
 record(
     "20.1 the effort suffixes are EFFORTS, longest first",
-    sorted(e for _, e in catalog.MODEL_EFFORT_SUFFIXES) == sorted(catalog.EFFORTS)
-    and all(suffix == f"-{e}" for suffix, e in catalog.MODEL_EFFORT_SUFFIXES)
-    and [len(e) for _, e in catalog.MODEL_EFFORT_SUFFIXES]
-    == sorted((len(e) for e in catalog.EFFORTS), reverse=True),
-    str(catalog.MODEL_EFFORT_SUFFIXES),
+    sorted(e for _, e in published_names.MODEL_EFFORT_SUFFIXES) == sorted(harnesses.EFFORTS)
+    and all(suffix == f"-{e}" for suffix, e in published_names.MODEL_EFFORT_SUFFIXES)
+    and [len(e) for _, e in published_names.MODEL_EFFORT_SUFFIXES]
+    == sorted((len(e) for e in harnesses.EFFORTS), reverse=True),
+    str(published_names.MODEL_EFFORT_SUFFIXES),
 )
 
 # agy carries the effort in the slug, so a slug agy lists at xhigh is a lane at
@@ -3066,7 +3070,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    picks, _leaders = catalog._rank_preview(cat, {}, set(catalog.HARNESSES))
+    picks, _leaders = catalog_edit._rank_preview(cat, {}, set(harnesses.NAMES))
     record("21.5 the rank preview picks for every Class the catalog defines",
            list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
            repr(picks))

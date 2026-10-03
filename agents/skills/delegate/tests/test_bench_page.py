@@ -33,7 +33,9 @@ sys.path.insert(0, DELEGATE_DIR)
 import bench
 import bench_page
 import catalog
+import harnesses
 import setup_tui
+import tier_lines  # noqa: E402
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
 NODE = shutil.which("node")
@@ -771,7 +773,7 @@ try:
         if not groups or groups[-1] != l["group"]:
             groups.append(l["group"])
     wizard = setup_tui.Wizard(copy.deepcopy(doc), {"classes": {}, "margin": 0, "gate": 0}, collected,
-                              set(catalog.HARNESSES), "/tmp/l", "/tmp/r", effort_rows=SWEEP)
+                              set(harnesses.NAMES), "/tmp/l", "/tmp/r", effort_rows=SWEEP)
     record("the page lists every lane in the tier page's order, grouped by model, efforts most to least, "
            "and says which are carried, proposed off, or drawn nowhere",
            [l["name"] for l in lanes] == setup_tui.lane_order(doc, collected)
@@ -1090,7 +1092,7 @@ try:
                and out["pointTier"] == [None, 2, None] and out["pointOff"] == [True, False, False],
                repr((out["store"], out["banded"], out["pointTier"], out["pointOff"])))
         doc = {"lanes": {n: {"model": n, "effort": "high"} for n in names}}
-        parsed = setup_tui.parse_tier_lines(out["text"], doc)
+        parsed = tier_lines.parse_tier_lines(out["text"], doc)
         record("27.2 the copy writes one line per decided lane, tiers in the review page's order then off, "
                "and the wizard's parser reads back exactly the page's decisions",
                out["text"].splitlines() == ["b@x 4", "d@x 2", "c@x 1", "a@x off", "e@x off"]
@@ -1271,10 +1273,10 @@ try:
                                      "tier": 1, "enabled": False},
             "dry@x": {"harness": "codex", "model": "dry", "effort": "high", "tier": 1},
         }}
-        parsed = setup_tui.parse_tier_lines(out["text"], doc)
-        dropped = setup_tui.unnamed_carried(parsed, [n for n, l in doc["lanes"].items()
+        parsed = tier_lines.parse_tier_lines(out["text"], doc)
+        dropped = tier_lines.unnamed_carried(parsed, [n for n, l in doc["lanes"].items()
                                                      if l.get("enabled") is not False])
-        setup_tui.apply_tier_lines_to_doc(doc, parsed)
+        tier_lines.apply_tier_lines_to_doc(doc, parsed)
         record("35.4 pasted into the wizard, the page's line carries that lane at that tier",
                out["text"].splitlines() == ["opus-high@claude 4", "opus55-medium@claude 3"]
                and parsed["decided"] == {"opus-high@claude": 4, "opus55-medium@claude": 3}

@@ -1,5 +1,6 @@
 """Antigravity: `agy`, Google's CLI. Its effort is part of the model slug."""
 import json
+import published_names
 import re
 
 from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness
@@ -11,7 +12,7 @@ COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
 SUPERSEDED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
 # `gemini-3.8-flash-high` -> ("gemini-3.8-flash", "high"). Every effort word
-# delegate knows, longest first as `catalog.strip_effort_suffix` reads them, so
+# delegate knows, longest first as `published_names.strip_effort_suffix` reads them, so
 # a `-xhigh` or `-max` slug joins its family instead of standing as a model of
 # its own.
 _EFFORT_WORDS = "|".join(EFFORTS_LONGEST_FIRST)

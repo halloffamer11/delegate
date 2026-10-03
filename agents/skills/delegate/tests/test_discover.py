@@ -19,7 +19,7 @@ DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 FIXTURES_DIR = os.path.join(HERE, "fixtures", "discover")
 DISCOVER_PY = os.path.join(DELEGATE_DIR, "discover.py")
-CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
+CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog_cli.py")
 PRICE_KEY = '"price": {'
 
 sys.path.insert(0, DELEGATE_DIR)

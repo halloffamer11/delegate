@@ -28,11 +28,14 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import catalog
+import published_names
 import harnesses  # noqa: E402
 # Reconciling a source's printed model name against a lane model is the
 # catalog's own knowledge; both this report and the setup pre-screen read it
 # from there rather than keeping a second copy.
-from catalog import CatalogError, EFFORTS, normalize_name, resolve_published_model, strip_effort_suffix
+from catalog import CatalogError
+from harnesses import EFFORTS
+from published_names import normalize_name, resolve_published_model, strip_effort_suffix
 
 EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
 DEFAULT_OUT_DIR = "~/.cache/delegate/bench/"
@@ -52,7 +55,7 @@ EPOCH_BENCHMARKS = (
 # figure, strongest first. A subset of EFFORTS on purpose: a low-effort figure
 # would understate the model.
 EFFORT_FALLBACK = ("max", "xhigh", "high")
-# Every effort a lane can carry, strongest first: catalog.EFFORTS reversed,
+# Every effort a lane can carry, strongest first: harnesses.EFFORTS reversed,
 # because a source reports whatever the vendor exposes. While it was a copy
 # that stopped at `xhigh` a max-effort figure could never be preferred, and the
 # distance between two efforts was measured on a scale missing its top half
@@ -483,7 +486,7 @@ def aa_component_rows(effort_rows, lanes_doc):
         if not isinstance(benchmark, str) or not benchmark.strip() or score is None:
             continue
         effort = row.get("effort")
-        model = catalog.resolve_published_model(row.get("model"), lanes_doc, effort=effort)
+        model = published_names.resolve_published_model(row.get("model"), lanes_doc, effort=effort)
         if model is None:
             continue
         out.append({
@@ -869,7 +872,7 @@ def resolve_effort_rows(lanes_doc, effort_rows):
     Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
     comparison below is against `lane["model"]`, so each row is re-keyed to the
     lane model its printed name denotes, and the catalog owns that mapping
-    (`catalog.resolve_published_model`). A row naming no lane model is dropped
+    (`published_names.resolve_published_model`). A row naming no lane model is dropped
     rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
     Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
     all is what a human needs to spot a `published_as` they still owe us.
@@ -1346,7 +1349,7 @@ def identity_of(published, lanes_doc, effort=None):
             "identity_reason": None,
             "candidates": [resolved],
         }
-    key = catalog.normalize_name(published)
+    key = published_names.normalize_name(published)
     if not key:
         return {
             "lane_model": None,
@@ -1361,8 +1364,8 @@ def identity_of(published, lanes_doc, effort=None):
         model = lane.get("model")
         if not isinstance(model, str) or not model.strip():
             continue
-        normalized = catalog.normalize_name(model)
-        base, _suffix = catalog.strip_effort_suffix(normalized)
+        normalized = published_names.normalize_name(model)
+        base, _suffix = published_names.strip_effort_suffix(normalized)
         if key in (normalized, base):
             candidates.add(model)
     ordered = sorted(candidates)
@@ -1398,11 +1401,11 @@ def inspect_targets(query, lanes_doc):
             models.append(model)
     if query in models:
         return [query], ident
-    qn = catalog.normalize_name(query)
+    qn = published_names.normalize_name(query)
     family = []
     for model in models:
-        normalized = catalog.normalize_name(model)
-        base, _suffix = catalog.strip_effort_suffix(normalized)
+        normalized = published_names.normalize_name(model)
+        base, _suffix = published_names.strip_effort_suffix(normalized)
         if qn and qn in (normalized, base):
             family.append(model)
     if family:
@@ -1617,8 +1620,8 @@ def _record_matches_query(rec, query, targets):
         return True
     if set(rec.get("candidates") or ()).intersection(targets):
         return True
-    qn = catalog.normalize_name(query)
-    if qn and catalog.normalize_name(rec.get("published")) == qn:
+    qn = published_names.normalize_name(query)
+    if qn and published_names.normalize_name(rec.get("published")) == qn:
         return True
     slug = rec.get("slug")
     if slug:

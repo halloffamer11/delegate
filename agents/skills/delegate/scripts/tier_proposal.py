@@ -32,7 +32,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import bench  # noqa: E402
-import catalog  # noqa: E402
+import published_names  # noqa: E402
 
 FRONTIER = "frontier"
 DIVERSITY = "diversity"
@@ -57,7 +57,7 @@ def lane_scores(lanes_doc, effort_rows, settings, names=None):
         score = bench.as_number(row.get("score"))
         if score is None:
             continue
-        model = catalog.resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
+        model = published_names.resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
         if model is None:
             continue
         for name in names:

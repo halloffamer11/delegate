@@ -21,7 +21,6 @@ BENCH_PY = os.path.join(DELEGATE_DIR, "bench.py")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench  # noqa: E402  (after sys.path, as the other test files do)
-import catalog  # noqa: E402
 import harnesses  # noqa: E402
 AGY = harnesses.get("agy")
 
@@ -613,15 +612,15 @@ record(
 
 record(
     "LANE_EFFORT_ORDER covers every effort a lane can carry",
-    set(bench.LANE_EFFORT_ORDER) == set(catalog.EFFORTS),
-    f"order={bench.LANE_EFFORT_ORDER} efforts={catalog.EFFORTS}",
+    set(bench.LANE_EFFORT_ORDER) == set(harnesses.EFFORTS),
+    f"order={bench.LANE_EFFORT_ORDER} efforts={harnesses.EFFORTS}",
 )
 
 # One effort list: the strongest-first order is EFFORTS reversed, and the
 # fallback is a subset of it in the same order, never words of its own.
 record(
     "LANE_EFFORT_ORDER is EFFORTS reversed, and EFFORT_FALLBACK is a part of it",
-    bench.LANE_EFFORT_ORDER == tuple(reversed(catalog.EFFORTS))
+    bench.LANE_EFFORT_ORDER == tuple(reversed(harnesses.EFFORTS))
     and list(bench.EFFORT_FALLBACK)
     == [e for e in bench.LANE_EFFORT_ORDER if e in bench.EFFORT_FALLBACK],
     f"order={bench.LANE_EFFORT_ORDER} fallback={bench.EFFORT_FALLBACK}",

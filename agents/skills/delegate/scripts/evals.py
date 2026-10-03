@@ -396,7 +396,7 @@ def main(argv=None):
     parser.add_argument("--keep", action="store_true", help="keep the sandbox directory")
     args = parser.parse_args(argv)
 
-    names = args.harness or list(catalog.HARNESSES)
+    names = args.harness or list(harnesses.NAMES)
     sandbox = Sandbox(args.offline, keep=args.keep)
     try:
         if args.eval == "ping":

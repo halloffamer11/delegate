@@ -4,7 +4,7 @@
 The model resolves one Git project during construction, reads only cached Meter
 observations, and never runs a vendor probe or acquires Meter data.  Eligibility
 and leader decisions go to ``rank.tier_leaders``.  Gate, Margin, and Project-order
-saves go through ``catalog.edit_catalog`` with ``scope='project'``, cached meters,
+saves go through ``catalog_edit.edit_catalog`` with ``scope='project'``, cached meters,
 and the construction-time harness set.  ``move_lane_tier`` is the same path for a
 Lane's Tier, written against ticket 32's project Lanes document; until that backend
 is installed its preview raises and nothing is written.  The dashboard makes no
@@ -39,6 +39,8 @@ if str(DELEGATE_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(DELEGATE_SCRIPTS))
 
 import catalog
+import harnesses
+import catalog_edit
 import rank
 
 
@@ -51,7 +53,7 @@ TIER_COLORS = {
 
 _CURRENT_POLICY = object()
 
-# catalog.edit_catalog raises CatalogError with this exact text on a stale expect.
+# catalog_edit.edit_catalog raises CatalogError with this exact text on a stale expect.
 INTERVENING_EDIT_MARK = (
     "intervening edit: source documents or resolved paths changed; preview again"
 )
@@ -79,7 +81,7 @@ class StagedChange:
     """One unsaved change: the catalog call it will make, and its one line.
 
     ``kind`` is what the pane marks -- ``order``, ``tier``, ``gate`` or
-    ``margin``.  ``op`` and ``kwargs`` are the ``catalog.edit_catalog``
+    ``margin``.  ``op`` and ``kwargs`` are the ``catalog_edit.edit_catalog``
     arguments, which are also what replays the change onto a document, so the
     staged view and the save cannot drift apart.
     """
@@ -108,7 +110,7 @@ STAGE_BASE_NAMES = (
 )
 
 
-# catalog.edit_catalog raises this while a project may not carry Lane Tiers.
+# catalog_edit.edit_catalog raises this while a project may not carry Lane Tiers.
 PROJECT_TIER_UNSUPPORTED = "is global-only"
 PROJECT_TIER_MISSING = "Tier move needs the project Lanes backend (ticket 32)"
 
@@ -216,7 +218,7 @@ class DashboardModel:
         self.present = (
             frozenset(present)
             if present is not None
-            else frozenset(catalog.installed_harnesses())
+            else frozenset(harnesses.installed())
         )
         self.state: dict[str, Any] = {}
         self._revision = 0
@@ -373,14 +375,14 @@ class DashboardModel:
     ) -> dict[str, Any]:
         """Plan the staged changes onto the documents, in the order they came.
 
-        ``catalog.plan_edits`` is the catalog's one planning path, the same one
+        ``catalog_edit.plan_edits`` is the catalog's one planning path, the same one
         ``edit_catalog`` writes through, so a staged document is the document
         ``edit_catalog`` would write for the same call, the second change is
         planned against the result of the first exactly as a second immediate
         save would be, and the staged view is ranked from the catalog those
         documents produce.  Nothing here touches the filesystem.
         """
-        return catalog.plan_edits(
+        return catalog_edit.plan_edits(
             [
                 dict(change.kwargs, op=change.op, scope="project")
                 for change in changes
@@ -794,7 +796,7 @@ class DashboardModel:
 
         kwargs = {**self._catalog_edit_kwargs(), **edit_kwargs}
         try:
-            preview = catalog.edit_catalog(op, apply=False, **kwargs)
+            preview = catalog_edit.edit_catalog(op, apply=False, **kwargs)
         except (catalog.CatalogError, OSError, ValueError) as exc:
             return self._fail_catalog_call(exc)
 
@@ -813,7 +815,7 @@ class DashboardModel:
             return True
 
         try:
-            result = catalog.edit_catalog(
+            result = catalog_edit.edit_catalog(
                 op,
                 apply=True,
                 expect=preview["revision"],
@@ -888,7 +890,7 @@ class DashboardModel:
         )
 
     def save_percentage_edit(self, edit: PercentageEdit, text: str) -> bool:
-        """Validate and save a percentage edit through catalog.edit_catalog."""
+        """Validate and save a percentage edit through catalog_edit.edit_catalog."""
         if not isinstance(edit, PercentageEdit) or edit.field not in ("gate", "margin"):
             self._set_save_state("error", "Not saved: invalid percentage edit.")
             return False
@@ -1028,7 +1030,7 @@ class DashboardModel:
         """Move one carried Lane one Tier down or up, for this project only.
 
         Ticket 32: a project sets a Lane's Tier in
-        ``<git-root>/.delegate/lanes.json`` and ``catalog.edit_catalog`` takes it
+        ``<git-root>/.delegate/lanes.json`` and ``catalog_edit.edit_catalog`` takes it
         as ``set lanes.<lane>.tier`` at ``scope='project'``, on the same
         preview/``expect``/apply contract ``move_lane`` uses for Order.  Setting
         a Lane back to its global Tier removes the entry; the catalog does that,
@@ -1054,7 +1056,7 @@ class DashboardModel:
         kwargs = self._catalog_edit_kwargs()
         field = f"lanes.{lane_name}.tier"
         try:
-            preview = catalog.edit_catalog(
+            preview = catalog_edit.edit_catalog(
                 "set", apply=False, field=field, value=destination, **kwargs
             )
         except catalog.CatalogError as exc:
@@ -1076,7 +1078,7 @@ class DashboardModel:
             return True
 
         try:
-            result = catalog.edit_catalog(
+            result = catalog_edit.edit_catalog(
                 "set",
                 apply=True,
                 expect=preview["revision"],

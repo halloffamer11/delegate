@@ -30,14 +30,14 @@ def record(name, ok, detail=""):
 
 def test_registry_is_the_list():
     record("catalog's harness list is the registry's",
-           catalog.HARNESSES == harnesses.NAMES and len(set(harnesses.NAMES)) == len(harnesses.NAMES),
-           f"{catalog.HARNESSES} vs {harnesses.NAMES}")
+           harnesses.NAMES == harnesses.NAMES and len(set(harnesses.NAMES)) == len(harnesses.NAMES),
+           f"{harnesses.NAMES} vs {harnesses.NAMES}")
     record("each adapter names a binary, efforts, the models it owns and a relay",
            all(h.binary and h.efforts and (h.vendor or h.owns("any-model")) and h.relay
                for h in harnesses.REGISTRY),
            repr([(h.name, h.binary, h.efforts, h.vendor, h.relay) for h in harnesses.REGISTRY]))
     record("catalog's per-harness efforts come from the adapters",
-           all(catalog.HARNESS_EFFORTS[h.name] == tuple(h.efforts) for h in harnesses.REGISTRY))
+           all(tuple(harnesses.get(h.name).efforts) == tuple(h.efforts) for h in harnesses.REGISTRY))
     record("discovery asks harnesses with a model list first",
            [harnesses.get(n).catalog_models for n in harnesses.discovery_order()]
            == sorted(harnesses.get(n).catalog_models for n in harnesses.discovery_order()))
@@ -118,7 +118,7 @@ def test_family():
     record("a harness with the effort in the slug splits it off; others never do",
            harnesses.family("agy", "gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
            and harnesses.family("codex", "gpt-6-sol-high") == ("gpt-6-sol-high", None)
-           and catalog.slug_family("gemini-3.8-flash-low") == ("gemini-3.8-flash", "low")
+           and harnesses.slug_family("gemini-3.8-flash-low") == ("gemini-3.8-flash", "low")
            and agy.lane_model({"slug": "gemini-3.8-flash", "members": {"low": "gemini-3.8-flash-low"}}, "low")
            == "gemini-3.8-flash-low")
 

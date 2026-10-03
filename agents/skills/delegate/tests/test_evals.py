@@ -25,6 +25,7 @@ _CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_CWD.name)
 
 import catalog  # noqa: E402
+import harnesses  # noqa: E402
 import rank  # noqa: E402
 
 fails = 0
@@ -67,7 +68,7 @@ def catalog_with(lane_overrides):
         shutil.rmtree(d)
 
 
-EVERY = set(catalog.HARNESSES)
+EVERY = set(harnesses.NAMES)
 # impl's Range in the sample routing is Tier 2 to 3. Its Tier 2 holds
 # terra-high@codex (Meter codex) and grok46-high@grok (Meter grok); Tier 3 holds
 # sol-high@codex, on the same codex Meter. Margin is 0.2 and the Gate 10%.
@@ -123,12 +124,12 @@ def run_eval(name):
 def test_offline_ping():
     rc, lines, err = run_eval("ping")
     verdicts = {line.split()[2].rstrip(":"): line.split()[0] for line in lines if len(line.split()) > 2}
-    relayed = [h for h in catalog.HARNESSES if verdicts.get(h) == "pass"]
+    relayed = [h for h in harnesses.NAMES if verdicts.get(h) == "pass"]
     record("eval 1 offline: every relayed harness answers pong, none fails",
            rc == 0 and "fail" not in verdicts.values() and len(relayed) >= 3,
            f"rc={rc} lines={lines} stderr={err[-300:]}")
     record("eval 1 offline: one line per harness",
-           sorted(verdicts) == sorted(catalog.HARNESSES), f"{lines}")
+           sorted(verdicts) == sorted(harnesses.NAMES), f"{lines}")
 
 
 def test_offline_orchestrate():

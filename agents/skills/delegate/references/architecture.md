@@ -43,8 +43,12 @@ replaces partial use of invalid documents.
 ## Scripts and assets
 
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`,
-  `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`),
-  validators, `show`/`check`/`fmt` and revision-checked `set`/`range`/`order`. `edit_catalog()`
+  `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`): load,
+  validate and project the effective catalog, and nothing else (ticket 26). It imports no other
+  delegate script but `harnesses` and `published_names`, so `rank` can import it with no cycle.
+  The efforts a harness offers are its adapter's `efforts`, with the command or page that proved
+  each list; `check` and `delegate.py --effort` refuse anything outside them (ticket 19).
+- `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
   previews cached Picks and resolved source paths, validates complete proposals, preserves stow
   symlinks, and rechecks source revisions before writing one document. `plan_edits()` is the one
   planning path (ticket 14). It takes the source documents already in hand and a list of the same
@@ -52,12 +56,14 @@ replaces partial use of invalid documents.
   and returns named fields: the four planned documents, the effective `catalog` they produce, and
   one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes
   nothing. `edit_catalog()` plans its one edit through it, and so does the dashboard's staged view,
-  so there is no second planner to drift. It also owns the mapping from a benchmark source's printed
-  model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's
-  `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it
-  from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that
-  proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19).
-  `single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
+  so there is no second planner to drift.
+- `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
+  edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
+  `scripts/tier_lines.py`: bulk Tier lines for the wizard.
+- `scripts/published_names.py`: the mapping from a benchmark source's printed model name to a
+  lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the
+  member of an agy slug family); `bench.py`, `tier_proposal.py` and the setup pre-screen read it.
+- `catalog.single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
   Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
   neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
   spec.
@@ -218,7 +224,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   their own heading and count, and "Copy as lines" writes `<lane> <1-4|off>` for every decided lane;
   the review page's `v` reads those lines from `pbpaste` (only on `v`; a missing or failing
   `pbpaste` changes nothing), and `setup.py --tiers-from <file>` applies them at start, both through
-  `catalog.parse_tier_lines` (re-exported by `setup_tui`) and one summary line
+  `tier_lines.parse_tier_lines` and one summary line
   (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it
   (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines'
   order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives
@@ -315,7 +321,7 @@ down one Tier; Tier 1 requires Carry to switch off.
   harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
   because agy names each effort as its own model. The harness decides, never the spelling. That
   family rule has one implementation, the adapter's `family` (`harnesses/agy.py`, reached through
-  `harnesses.family` and `catalog.slug_family`), which the agy adapter's `group` also groups its
+  `harnesses.family` and `harnesses.slug_family`), which the agy adapter's `group` also groups its
   model listing with. `dominating_effort`, `dominating_row` and `_first_domination` take the map;
   without one every model is its own family. `setup_tui` re-exports the policy helpers.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,

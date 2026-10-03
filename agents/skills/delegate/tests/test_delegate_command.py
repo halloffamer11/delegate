@@ -56,7 +56,7 @@ def make_checkout(td):
     record_to = os.path.join(td, "ran.json")
     scripts = os.path.join(checkout, "agents", "skills", "delegate", "scripts")
     os.makedirs(scripts)
-    for script in ("rank.py", "delegate.py", "report.py", "usage.py", "catalog.py"):
+    for script in ("rank.py", "delegate.py", "report.py", "usage.py", "catalog_cli.py"):
         executable(os.path.join(scripts, script), (
             "#!/usr/bin/env python3\n"
             "import json, os, sys\n"
@@ -198,7 +198,7 @@ expected = {
     ("status",): ("report.py", ["limits"]),
     ("status", "--json", "--refresh"): ("usage.py", ["--refresh"]),
     ("log", "--work", "w"): ("report.py", ["log", "--work", "w"]),
-    ("catalog", "show"): ("catalog.py", ["show"]),
+    ("catalog", "show"): ("catalog_cli.py", ["show"]),
 }
 for args, (program, argv) in expected.items():
     with tempfile.TemporaryDirectory() as td:
