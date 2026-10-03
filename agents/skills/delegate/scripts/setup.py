@@ -17,6 +17,7 @@ import tier_lines as tier_line_rules
 import discover
 import effort
 import harnesses
+import model_queue
 import orchestrators
 import setup_tui
 from catalog import CatalogError, load_json, validate_lanes, validate_routing, write_json
@@ -409,6 +410,8 @@ def propose_generation(lanes_doc, discovery_data, rows):
     lanes_doc, refresh = discover.refresh_catalog(
         lanes_doc, discovery_data, published_models=published_model_names(rows[0])
     )
+    # what dispatch noticed since the last run, named on the start page (ticket 29)
+    refresh["queued"] = model_queue.pending()
     return lanes_doc, refresh, discover.map_lanes(discovery_data, lanes_doc)
 
 
@@ -545,6 +548,17 @@ def read_tier_lines(path):
         raise CatalogError(f"tiers-from: {e}") from e
 
 
+def clear_queue(refresh):
+    """Empty dispatch's model queue once a run that saw it wrote the catalog
+    (ticket 29). A run whose refresh did not run saw no models, so it keeps
+    the queue for the next one."""
+    if refresh is not None and "queued" in refresh:
+        try:
+            model_queue.clear()
+        except OSError as e:
+            print(f"note: could not empty the model queue: {e}")
+
+
 def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=None,
                       targets=None):
     print(lanes_path)
@@ -563,6 +577,7 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=
     write_json(routing_path, routing_doc)
     print(f"wrote {lanes_path}")
     print(f"wrote {routing_path}")
+    clear_queue(refresh)
     for line in save_all_native_agents(refresh, lanes_doc, targets):
         print(line)
 
@@ -737,6 +752,7 @@ def main(argv=None):
                     write_json(routing_path, result_routing)
                     print(f"wrote {lanes_path}")
                     print(f"wrote {routing_path}")
+                    clear_queue(wizard.refresh)
                     # the plan the wizard holds: a rescan replaced launch's
                     for line in save_all_native_agents(wizard.refresh, result_lanes,
                                                        native_targets(config_dir)):

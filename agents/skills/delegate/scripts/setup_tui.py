@@ -266,6 +266,11 @@ def refresh_lines(refresh, width=80):
     # an effort a harness lists that no Lane may carry yet: named, not proposed
     for notice in refresh.get("notices") or ():
         lines.append(fit_line(notice, width))
+    # models dispatch noticed since the last run (ticket 29); the refresh
+    # lines above are the Lanes this run proposes for them
+    queued = [item["model"] for item in refresh.get("queued") or ()]
+    if queued:
+        lines.append(list_line("Dispatch noticed", queued, width))
     if not lines:
         return [fit_line("Catalog refresh: every model is the current generation", width)]
     return lines

@@ -21,6 +21,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # `.delegate/routing.json`. Every path this file needs comes from HERE.
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
+# the wizard reads and empties dispatch's model queue (ticket 29): never the real one
+os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(_ISOLATED_CWD.name, "new-models.json")
+os.environ["DELEGATE_MODEL_SCAN"] = "off"
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
