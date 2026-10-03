@@ -3,6 +3,14 @@
 What each script and asset owns. This file is the implementation authority for
 the scripts; `SKILL.md` is the authority for how a session routes.
 
+## Contents
+
+- [Project routing](#project-routing)
+- [Scripts and assets](#scripts-and-assets)
+- [Read-only per harness](#read-only-per-harness)
+- [Browser use per harness](#browser-use-per-harness)
+- [Benchmark data](#benchmark-data)
+
 ## Project routing
 
 Project routing changes go through `catalog.load_catalog()`: a flat `project_order`
@@ -34,17 +42,188 @@ replaces partial use of invalid documents.
 
 ## Scripts and assets
 
-- `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`), validators, `show`/`check`/`fmt` and revision-checked `set`/`range`/`order`. `edit_catalog()` previews cached Picks and resolved source paths, validates complete proposals, preserves stow symlinks, and rechecks source revisions before writing one document. `plan_edits()` is the one planning path (ticket 14). It takes the source documents already in hand and a list of the same `set`/`range`/`order` operations, plans each one onto the documents the one before it produced, and returns named fields: the four planned documents, the effective `catalog` they produce, and one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes nothing. `edit_catalog()` plans its one edit through it, and so does the dashboard's staged view, so there is no second planner to drift. It also owns the mapping from a benchmark source's printed model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19). `single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines, neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the spec.
-Classes are data (ticket 16). `CLASSES` names the five shipped Classes; their default Ranges are the ones in `assets/samples/routing.json` (`default_class_ranges`). `merge_routing` lays the defaults under the global document, so a catalog that writes no `classes` ranks exactly as one that writes the sample's, a catalog's Range for a shipped Class replaces the default, and a Class it adds (a name matching `CLASS_NAME`, with both floor and ceiling once merged) sorts after the five (`class_names`). Its guide section lives in an overlay, `<CONFIG_DIR>/classes.md` or `.delegate/classes.md` (`guide_files`); `check_class_guides` validates every guide together, naming a Class with a Range and no section, or a section with no Range. `check` on a routing file and `check-guide` with no file run it.
-- `scripts/rank.py`: the selection rule over the catalog and the live meters (class floor and ceiling, gate; sort by tier, then the lane's `order` inside its tier, then pace, then lane name; pace margin). A catalog with no `order` ranks as before ticket 28. Optional `routing.meters` defaults on; off bypasses Gate/Margin and Pace, leaving Tier/Order/name selection. Optional `routing.overflow` defaults on: when at least one carried Lane in a Class Range is under the Gate and every veto there is `gate` or `cli`, `rank()` admits the Tier above the Ceiling and ranks it by the same rule, one Tier at a time and never Tier 4 (`gate_only_stop`, `OVERFLOW_TOP_TIER`; ticket 29). A cli-absent Lane counts like a disabled one — the catalog is shared across machines and this one cannot run that Lane — so it neither causes the outage nor blocks the answer to one; the veto precedence in `rank_range` records a Lane failing both Gate and CLI as `gate`, and either reading decides the same. The Pick carries the `overflow` record, the header prints it as a second line, and every other veto kind, plus a Range with no gated Lane in it, keeps the stop. Automatic acquisition callers honor the effective project override; explicit limits refresh still works.
-- `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch (`run`); a Lane whose harness is the orchestrator's, under a profile that declares native Lanes, prints the native line and the profile's spawn line instead of starting a relay. `dispatch.json` records the orchestrator. Run directories under `~/.cache/delegate/runs/`, never reused.
-- `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork of amElnagdy) at commit `e3541ece582b64b5c4b9b094a78384ad8a6a181e` (branch `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is reproducible from that constant. The fork carries the grok and agy read-only fixes (redesign ticket 14; upstream PRs #119 and #120) and the `kiro-delegate` relay (any-harness ticket 14, not yet offered upstream).
-- `scripts/orchestrators.py`: orchestrator profiles, data not code paths (ticket 13). A profile (`assets/orchestrators/<name>.json`, or a machine's own in `~/.config/delegate/orchestrators/`, which overrides a shipped one) names its harness, the env vars that detect it, its headless `launch` for eval 3, and optionally `native`: its agents directory, agent name and file, the agent file template and the spawn line. `resolve()` takes `--orchestrator`, then `$DELEGATE_ORCHESTRATOR`, then detection; `none`, an unknown name or nothing detected is the default path, where every Lane is relayed. No other script names an orchestrator (`tests/test_orchestrators.py` greps for it).
-- `scripts/harnesses/`: the harness registry, one module per harness behind one interface (`base.Harness`): binary, efforts, model listing and parsing, the Meter probe, relay flags. Every other script iterates the registry; adding a harness is one module and one `REGISTRY` entry. `kiro.py` (ticket 15) is the first harness whose binary is not its name (`kiro-cli`) and that serves every vendor's models (`any_vendor`): the refresh offers all its current models, and its first Lanes, with no Lane on the harness to copy from, start from the adapter's `starter_lane` and add its `starter_meter` (plan and price assumed, Remaining unknown, so the Gate never vetoes it). Its listing's JSON field names are not documented, so `parse_models` reads the plausible spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing replaces it.
-- `scripts/usage.py`: cached subscription-meter probes; each harness's probe is in its adapter. `scripts/events.py`: the monitor ledger encoder (schema unchanged).
-- `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key; ticket 19): the AA columns are the component benchmarks some lane has a figure for, with cost per task beside them and the composite never a column. `collect()` returns two views of the same figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes` (only the figures measured at that lane's own effort, with `mean`/`n` over those). `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the page both read it from there. Carry and display-order policy live beside `collect`: `dominating_effort`, `propose_enabled`, `group_lanes`, `lane_order`. `propose_enabled` returns structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording. `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL` reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares identity, board/version standing, cost basis and uncertainty with HTML. Family evidence stays separate from exact-effort Lane attribution; ambiguous candidates remain visible.
-- `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY, prompt-driven under `--plain` or pipes). Each page makes one decision per line: with the same `[x]`/`[ ]` box, the carry page selects a model at an effort and the four tier pages assign a tier; the review page after tier 1 orders the carried lanes inside each tier (ticket 28). It lists them in sections tier 4 to 1, each numbered in its current order; j/k moves the cursor, J/K or shift-up/down moves the lane inside its tier, 1-4 moves it to the end of that tier, and the confirm write gives each carried lane `order`, its place from 1 (`catalog.py check` takes `order` as a whole number from 1). The starting order is the applied lines' order, then an `order` the catalog already has at that tier, then benchmark order. Tier pages restore the current catalog as their editable defaults: lanes at the current tier are marked, lanes at a lower tier are visible and unmarked, and lanes taken by a higher tier or not carried are hidden. Enter without edits preserves the current tiers and order; a lane not carried keeps its catalog tier. Lines applied by `v` or `--tiers-from` become the same editable defaults. The routing page explains the setting under the cursor in a panel beside the table. The start page, and `--plain` from the same `setup_tui.start_facts`, states only facts: the two files, the benchmark page, the discovery notices. Setup discovery is one `discover.discover` result; `--no-discover` skips every probe; `discover.mjs` is not on the default path. `--plain` calls `bench.collect` and `format_collection` in process. `view(width)` fits prose to the terminal; `layout_lines` places a frame and `overlay` composes it into the grid a terminal shows. The trail of steps is the top row of every page, the title two rows under it, and the bottom is three zones with a blank row between each: the rows, the legend, the keys. How each piece looks is decided in one table, `setup_tui.STYLES`, as a role name to (attributes, colour); `layout_lines` names the pieces drawn in a style of their own as spans (a ticked box, the current step, a key, a reason the data gave) and `_palette` resolves the table for the terminal at hand, colour only when it has colours on its own background, weight alone otherwise. The legend zone is three things read three ways (`_legend_zone`): `defs`, a definition list (`setup_tui.definition`: term, value, meaning, aligned in columns; the carry page defines only the reasons on it, the confirm page each routing term with the value it will write), then `legend` lines, then `warnings` (the single-Meter Tier lines, drawn as warnings). The routing page groups each class under a heading with its first sentence from `assets/classes.md` (`class_descriptions`, quoted, never paraphrased; fitted to the room the panel needs), then `ranking` for margin, gate and meters; the cursor lands only on a setting. The harnesses page shows what the launch scrub found — per harness its status, models listed, and the Lanes the refresh adds and removes — with the rows note, and `r` runs the scrub again through `setup.scan`, `setup.propose_generation` and `setup.collect_bench` (the callback `main` passes as `rescan`, forcing the rows fetch past the 24 h cache), after which `Wizard._load` derives every later page again and the `--tiers-from` lines are applied again; it is offered on that page only, before any decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`, which is never in the repo: each machine keeps its own (Orin, 2026-09-29). `make delegate-wizard` at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key opens, which reads its attribution, its domination rule and its lane order (`bench.lane_order`, `group_lanes`, `propose_enabled`) from `bench.py` rather than deciding any of them again. HTML carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with its own filters and the frontier of what is shown, and only lays out what Python decided. Each board shows what it measures, quoted from its source's methodology page with the URL beside it (`assets/boards.json`; a board with no entry says so and is never described from memory); an open table under the plots compares every board, and every evidence table sits collapsed below that. The wheel zooms a plot about the pointer, a drag pans once zoomed, and the reset button is always on screen. The page is where tiers are drawn (ticket 26): colour is the harness; three draggable horizontal tier lines per benchmark cut its score axis into bands and immediately assign carried lanes, preserving hand-set tiers until cleared; a click on a dot and a digit, or the boxes in the tier panel beside the plots, give a lane a tier; the panel counts lanes per harness per tier and lists them grouped as the wizard does; the panel, the counts and "Copy as lines" read `placeable(data.lanes)` — every lane a board draws, whether or not the catalog carries it, plus a carried lane with no rows, and never an `ultra` lane, which `parse_tier_lines` refuses (ticket 35); an uncarried lane says "not carried" on its row, and a band still assigns only the carried lanes, so drawing a line never carries one; "Reset every tier" asks once and then clears everything the page holds for this catalog — every tier and off drawn, every manual mark and every board's tier lines — keeping only the tier view toggle (`page.resetAll`, ticket 36); "Price per model" below the plots is one row per model with the vendor's list price in and out on one shared log axis, efforts collapsed because every effort of a model is charged the same and an agy model's slugs joined through `catalog.agy_family` (`bench_page.price_rows`, `drawPrices`): an open dot for input, a filled one for output, colour the meter, the value beside each dot, a model with no published price saying so and drawing nothing, two efforts that disagree drawing the range, and the same figures in a table under it; a tier view puts the digit in each dot; the page's tiers live in the browser's `localStorage` under the catalog's key and are written nowhere else, and "Copy as lines" gives them as `lane tier` in the review page's order. Panel hover and selection reveal the exact lane dot and its label; dot selection marks its panel row. The plot fills the height beside its settings. Groups without Epoch figures use their best AA mean rank in the wizard. Every table lists a model's efforts most to least. The page is the first input (ticket 27): each lane line offers `off` beside `4 3 2 1` (and `o` on a selected dot), off lanes have their own heading and count, and "Copy as lines" writes `<lane> <1-4|off>` for every decided lane; the review page's `v` reads those lines from `pbpaste` (only on `v`; a missing or failing `pbpaste` changes nothing), and `setup.py --tiers-from <file>` applies them at start, both through `catalog.parse_tier_lines` (re-exported by `setup_tui`) and one summary line (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines' order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives each meter its harness colour, and a second meter on one harness (`claude-fable`) a shade of it (`--h-<harness>-1`); the panel counts per meter. Under the plots a sensitivity table gives, per placed lane, the tier each board alone would give it at the page's tier proportions, with the composite shown and never counted; a lane another carried lane beats on score for no more cost on a board shown says "beaten by" in its tooltip and panel line. Both are display aids computed in the script (`sensitivity`, `beatenByLane`); the carry rule is unchanged. `--effort-rows` may be repeated to put several sources on one page.
-The tier pages propose a Tier for each carried Lane with a score (ticket 17, `scripts/tier_proposal.py`): the rule is `routing.json`'s `tier_proposal` (source, benchmark, thresholds for Tiers 2-4, diversity; the sample catalog's when a catalog has none, `catalog.tier_proposal_settings`, validated by `validate_tier_proposal`, global only). The score is the accepted row on that benchmark at the Lane's own effort; cost per task is the second axis. From Tier 4 down, a Tier keeps its candidates on the score-and-cost frontier and, with diversity, each harness's best candidate; the rest fall a Tier. A `proposed` column shows tier, score and cost, the legend names the benchmark and its bands, and `p` takes every proposal into the page's marks and the review order; nothing is written before the confirm page's `y`. Switching the benchmark is a `routing.json` edit.
+- `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`,
+  `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`),
+  validators, `show`/`check`/`fmt` and revision-checked `set`/`range`/`order`. `edit_catalog()`
+  previews cached Picks and resolved source paths, validates complete proposals, preserves stow
+  symlinks, and rechecks source revisions before writing one document. `plan_edits()` is the one
+  planning path (ticket 14). It takes the source documents already in hand and a list of the same
+  `set`/`range`/`order` operations, plans each one onto the documents the one before it produced,
+  and returns named fields: the four planned documents, the effective `catalog` they produce, and
+  one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes
+  nothing. `edit_catalog()` plans its one edit through it, and so does the dashboard's staged view,
+  so there is no second planner to drift. It also owns the mapping from a benchmark source's printed
+  model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's
+  `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it
+  from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that
+  proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19).
+  `single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
+  Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
+  neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
+  spec.
+Classes are data (ticket 16). `CLASSES` names the five shipped Classes; their default Ranges are the
+ones in `assets/samples/routing.json` (`default_class_ranges`). `merge_routing` lays the defaults
+under the global document, so a catalog that writes no `classes` ranks exactly as one that writes
+the sample's, a catalog's Range for a shipped Class replaces the default, and a Class it adds (a
+name matching `CLASS_NAME`, with both floor and ceiling once merged) sorts after the five
+(`class_names`). Its guide section lives in an overlay, `<CONFIG_DIR>/classes.md` or
+`.delegate/classes.md` (`guide_files`); `check_class_guides` validates every guide together, naming
+a Class with a Range and no section, or a section with no Range. `check` on a routing file and
+`check-guide` with no file run it.
+- `scripts/rank.py`: the selection rule over the catalog and the live meters (class floor and
+  ceiling, gate; sort by tier, then the lane's `order` inside its tier, then pace, then lane name;
+  pace margin). A catalog with no `order` ranks as before ticket 28. Optional `routing.meters`
+  defaults on; off bypasses Gate/Margin and Pace, leaving Tier/Order/name selection. Optional
+  `routing.overflow` defaults on: when at least one carried Lane in a Class Range is under the Gate
+  and every veto there is `gate` or `cli`, `rank()` admits the Tier above the Ceiling and ranks it
+  by the same rule, one Tier at a time and never Tier 4 (`gate_only_stop`, `OVERFLOW_TOP_TIER`;
+  ticket 29). A cli-absent Lane counts like a disabled one — the catalog is shared across machines
+  and this one cannot run that Lane — so it neither causes the outage nor blocks the answer to one;
+  the veto precedence in `rank_range` records a Lane failing both Gate and CLI as `gate`, and either
+  reading decides the same. The Pick carries the `overflow` record, the header prints it as a second
+  line, and every other veto kind, plus a Range with no gated Lane in it, keeps the stop. Automatic
+  acquisition callers honor the effective project override; explicit limits refresh still works.
+- `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch
+  (`run`); a Lane whose harness is the orchestrator's, under a profile that declares native Lanes,
+  prints the native line and the profile's spawn line instead of starting a relay. `dispatch.json`
+  records the orchestrator. Run directories under `~/.cache/delegate/runs/`, never reused.
+- `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
+  of amElnagdy) at commit `e3541ece582b64b5c4b9b094a78384ad8a6a181e` (branch
+  `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
+  reproducible from that constant. The fork carries the grok and agy read-only fixes (redesign
+  ticket 14; upstream PRs #119 and #120) and the `kiro-delegate` relay (any-harness ticket 14, not
+  yet offered upstream).
+- `scripts/orchestrators.py`: orchestrator profiles, data not code paths (ticket 13). A profile
+  (`assets/orchestrators/<name>.json`, or a machine's own in `~/.config/delegate/orchestrators/`,
+  which overrides a shipped one) names its harness, the env vars that detect it, its headless
+  `launch` for eval 3, and optionally `native`: its agents directory, agent name and file, the agent
+  file template and the spawn line. `resolve()` takes `--orchestrator`, then
+  `$DELEGATE_ORCHESTRATOR`, then detection; `none`, an unknown name or nothing detected is the
+  default path, where every Lane is relayed. No other script names an orchestrator
+  (`tests/test_orchestrators.py` greps for it).
+- `scripts/harnesses/`: the harness registry, one module per harness behind one interface
+  (`base.Harness`): binary, efforts, model listing and parsing, the Meter probe, relay flags. Every
+  other script iterates the registry; adding a harness is one module and one `REGISTRY` entry.
+  `kiro.py` (ticket 15) is the first harness whose binary is not its name (`kiro-cli`) and that
+  serves every vendor's models (`any_vendor`): the refresh offers all its current models, and its
+  first Lanes, with no Lane on the harness to copy from, start from the adapter's `starter_lane` and
+  add its `starter_meter` (plan and price assumed, Remaining unknown, so the Gate never vetoes it).
+  Its listing's JSON field names are not documented, so `parse_models` reads the plausible
+  spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing
+  replaces it.
+- `scripts/usage.py`: cached subscription-meter probes; each harness's probe is in its adapter.
+  `scripts/events.py`: the monitor ledger encoder (schema unchanged).
+- `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
+  benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis
+  comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
+  ticket 19): the AA columns are the component benchmarks some lane has a figure for, with cost per
+  task beside them and the composite never a column. `collect()` returns two views of the same
+  figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes`
+  (only the figures measured at that lane's own effort, with `mean`/`n` over those).
+  `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the
+  page both read it from there. Carry and display-order policy live beside `collect`:
+  `dominating_effort`, `propose_enabled`, `group_lanes`, `lane_order`. `propose_enabled` returns
+  structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
+  `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
+  reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares
+  identity, board/version standing, cost basis and uncertainty with HTML. Family evidence stays
+  separate from exact-effort Lane attribution; ambiguous candidates remain visible.
+- `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY,
+  prompt-driven under `--plain` or pipes). Each page makes one decision per line: with the same
+  `[x]`/`[ ]` box, the carry page selects a model at an effort and the four tier pages assign a
+  tier; the review page after tier 1 orders the carried lanes inside each tier (ticket 28). It lists
+  them in sections tier 4 to 1, each numbered in its current order; j/k moves the cursor, J/K or
+  shift-up/down moves the lane inside its tier, 1-4 moves it to the end of that tier, and the
+  confirm write gives each carried lane `order`, its place from 1 (`catalog.py check` takes `order`
+  as a whole number from 1). The starting order is the applied lines' order, then an `order` the
+  catalog already has at that tier, then benchmark order. Tier pages restore the current catalog as
+  their editable defaults: lanes at the current tier are marked, lanes at a lower tier are visible
+  and unmarked, and lanes taken by a higher tier or not carried are hidden. Enter without edits
+  preserves the current tiers and order; a lane not carried keeps its catalog tier. Lines applied by
+  `v` or `--tiers-from` become the same editable defaults. The routing page explains the setting
+  under the cursor in a panel beside the table. The start page, and `--plain` from the same
+  `setup_tui.start_facts`, states only facts: the two files, the benchmark page, the discovery
+  notices. Setup discovery is one `discover.discover` result; `--no-discover` skips every probe;
+  `discover.mjs` is not on the default path. `--plain` calls `bench.collect` and `format_collection`
+  in process. `view(width)` fits prose to the terminal; `layout_lines` places a frame and `overlay`
+  composes it into the grid a terminal shows. The trail of steps is the top row of every page, the
+  title two rows under it, and the bottom is three zones with a blank row between each: the rows,
+  the legend, the keys. How each piece looks is decided in one table, `setup_tui.STYLES`, as a role
+  name to (attributes, colour); `layout_lines` names the pieces drawn in a style of their own as
+  spans (a ticked box, the current step, a key, a reason the data gave) and `_palette` resolves the
+  table for the terminal at hand, colour only when it has colours on its own background, weight
+  alone otherwise. The legend zone is three things read three ways (`_legend_zone`): `defs`, a
+  definition list (`setup_tui.definition`: term, value, meaning, aligned in columns; the carry page
+  defines only the reasons on it, the confirm page each routing term with the value it will write),
+  then `legend` lines, then `warnings` (the single-Meter Tier lines, drawn as warnings). The routing
+  page groups each class under a heading with its first sentence from `assets/classes.md`
+  (`class_descriptions`, quoted, never paraphrased; fitted to the room the panel needs), then
+  `ranking` for margin, gate and meters; the cursor lands only on a setting. The harnesses page
+  shows what the launch scrub found — per harness its status, models listed, and the Lanes the
+  refresh adds and removes — with the rows note, and `r` runs the scrub again through `setup.scan`,
+  `setup.propose_generation` and `setup.collect_bench` (the callback `main` passes as `rescan`,
+  forcing the rows fetch past the 24 h cache), after which `Wizard._load` derives every later page
+  again and the `--tiers-from` lines are applied again; it is offered on that page only, before any
+  decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
+  which is never in the repo: each machine keeps its own (Orin, 2026-09-29). `make delegate-wizard`
+  at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
+  Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
+  opens, which reads its attribution, its domination rule and its lane order (`bench.lane_order`,
+  `group_lanes`, `propose_enabled`) from `bench.py` rather than deciding any of them again. HTML
+  carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline
+  JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with
+  its own filters and the frontier of what is shown, and only lays out what Python decided. Each
+  board shows what it measures, quoted from its source's methodology page with the URL beside it
+  (`assets/boards.json`; a board with no entry says so and is never described from memory); an open
+  table under the plots compares every board, and every evidence table sits collapsed below that.
+  The wheel zooms a plot about the pointer, a drag pans once zoomed, and the reset button is always
+  on screen. The page is where tiers are drawn (ticket 26): colour is the harness; three draggable
+  horizontal tier lines per benchmark cut its score axis into bands and immediately assign carried
+  lanes, preserving hand-set tiers until cleared; a click on a dot and a digit, or the boxes in the
+  tier panel beside the plots, give a lane a tier; the panel counts lanes per harness per tier and
+  lists them grouped as the wizard does; the panel, the counts and "Copy as lines" read
+  `placeable(data.lanes)` — every lane a board draws, whether or not the catalog carries it, plus a
+  carried lane with no rows, and never an `ultra` lane, which `parse_tier_lines` refuses (ticket
+  35); an uncarried lane says "not carried" on its row, and a band still assigns only the carried
+  lanes, so drawing a line never carries one; "Reset every tier" asks once and then clears
+  everything the page holds for this catalog — every tier and off drawn, every manual mark and every
+  board's tier lines — keeping only the tier view toggle (`page.resetAll`, ticket 36); "Price per
+  model" below the plots is one row per model with the vendor's list price in and out on one shared
+  log axis, efforts collapsed because every effort of a model is charged the same and an agy model's
+  slugs joined through `catalog.agy_family` (`bench_page.price_rows`, `drawPrices`): an open dot for
+  input, a filled one for output, colour the meter, the value beside each dot, a model with no
+  published price saying so and drawing nothing, two efforts that disagree drawing the range, and
+  the same figures in a table under it; a tier view puts the digit in each dot; the page's tiers
+  live in the browser's `localStorage` under the catalog's key and are written nowhere else, and
+  "Copy as lines" gives them as `lane tier` in the review page's order. Panel hover and selection
+  reveal the exact lane dot and its label; dot selection marks its panel row. The plot fills the
+  height beside its settings. Groups without Epoch figures use their best AA mean rank in the
+  wizard. Every table lists a model's efforts most to least. The page is the first input (ticket
+  27): each lane line offers `off` beside `4 3 2 1` (and `o` on a selected dot), off lanes have
+  their own heading and count, and "Copy as lines" writes `<lane> <1-4|off>` for every decided lane;
+  the review page's `v` reads those lines from `pbpaste` (only on `v`; a missing or failing
+  `pbpaste` changes nothing), and `setup.py --tiers-from <file>` applies them at start, both through
+  `catalog.parse_tier_lines` (re-exported by `setup_tui`) and one summary line
+  (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it
+  (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines'
+  order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives
+  each meter its harness colour, and a second meter on one harness (`claude-fable`) a shade of it
+  (`--h-<harness>-1`); the panel counts per meter. Under the plots a sensitivity table gives, per
+  placed lane, the tier each board alone would give it at the page's tier proportions, with the
+  composite shown and never counted; a lane another carried lane beats on score for no more cost on
+  a board shown says "beaten by" in its tooltip and panel line. Both are display aids computed in
+  the script (`sensitivity`, `beatenByLane`); the carry rule is unchanged. `--effort-rows` may be
+  repeated to put several sources on one page.
+The tier pages propose a Tier for each carried Lane with a score (ticket 17,
+`scripts/tier_proposal.py`): the rule is `routing.json`'s `tier_proposal` (source, benchmark,
+thresholds for Tiers 2-4, diversity; the sample catalog's when a catalog has none,
+`catalog.tier_proposal_settings`, validated by `validate_tier_proposal`, global only). The score is
+the accepted row on that benchmark at the Lane's own effort; cost per task is the second axis. From
+Tier 4 down, a Tier keeps its candidates on the score-and-cost frontier and, with diversity, each
+harness's best candidate; the rest fall a Tier. A `proposed` column shows tier, score and cost, the
+legend names the benchmark and its bands, and `p` takes every proposal into the page's marks and the
+review order; nothing is written before the confirm page's `y`. Switching the benchmark is a
+`routing.json` edit.
 
 At start the wizard refreshes itself, so one command is one command (ticket 33).
 `setup.refresh_effort_rows` fetches the Artificial Analysis rows in process through
@@ -55,9 +234,11 @@ stays on the repo's rows, and `--fixture-dir` reads `aa-accepted.json` beside th
 harness fixtures instead, so a test touches no network and no cache. The fetch runs
 in a thread beside the harness probes. `discover.refresh_catalog` then proposes the
 current generation in memory and `setup_tui.refresh_lines` states it on the start
-page, one line per model. The save writes the agent file of each new native lane, for every profile that
+page, one line per model. The save writes the agent file of each new native lane, for every profile
+that
 declares native Lanes, and removes each superseded one (`setup.save_native_agents`,
-`setup.native_agent_text`, from the profile's template); `setup.native_agents_dir` returns the profile's agents directory only
+`setup.native_agent_text`, from the profile's template); `setup.native_agents_dir` returns the
+profile's agents directory only
 when the catalog being written is the live `~/.config/delegate`, so a catalog in a
 temp directory gets a note instead of a file. The agent files are machine-local like
 the catalog, and a stow link left at a lane's path is removed before the write, so the
@@ -84,24 +265,85 @@ behavior. Catalog owns the bulk tier-line parser/application/order helpers;
 space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark moves
 down one Tier; Tier 1 requires Carry to switch off.
 
-- `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their efforts, and `--efforts <model>` for ready-to-paste lane stanzas per effort. Efforts come from `codex debug models`, `claude --help`, the agy slug suffix (one model per slug family) and the grok row of `catalog.HARNESS_EFFORTS`; a Haiku model gets none. It is the only thing that may say an effort exists. It also owns generation (ticket 33): `model_level` splits a slug into its level and version (`gpt-6-sol` and `gpt-5.6-sol` are both `gpt-sol`; the agy effort suffix comes off first); `mark_generation` marks a model superseded when the harness says so (codex's `upgrade`) or when the same level is listed at a higher version, and every model entry carries `level`, `version` and `superseded`; `lane_stem` names a new lane (`sol6`, `opus55`, `grok47`, and `grok47fast` for a level that extends a current level). `refresh_catalog(lanes_doc, discovery, published_models)` returns the refreshed document and the plan, in memory and writing nothing: a lane for every effort of every current-generation model of the harness's own vendor, a successor in its predecessor's place, superseded lanes gone, every new lane `UNPRICED`, and `ultra` off. Claude Code lists no model, so `claude_generation` reads a newer version of a level the catalog already runs out of the benchmark rows' published names. `map_lanes` recomputes the drift notices against the refreshed catalog, so the start page never calls a lane-less model one the wizard is about to give six lanes.
-- `scripts/effort.py`: `pack`/`extract`/`check` over a benchmark page, and `aa`, which reads Artificial Analysis rows straight out of the dataset every `/models/<slug>` page embeds, with no worker. `check` is the trust boundary: it rejects any number that is not on the page, and no worker or parser may originate a number or an identifier.
-- The carry page's domination rule is `bench.dominating_effort`: another effort of the same model, for no more money, beats the lane on more than half of the benchmarks one source scored both on. Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is a family key, not the model string (ticket 30): `bench.model_families(lanes_doc)` keys every harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed, because agy names each effort as its own model. The harness decides, never the spelling. That family rule has one implementation, `catalog.agy_family`, which discovery groups a harness listing with (`discover.group_agy_models`). `dominating_effort`, `dominating_row` and `_first_domination` take the map; without one every model is its own family. `setup_tui` re-exports the policy helpers.
-- `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`, `--probe`, `--dry-run`).
+- `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their
+  efforts, and `--efforts <model>` for ready-to-paste lane stanzas per effort. Efforts come from
+  `codex debug models`, `claude --help`, the agy slug suffix (one model per slug family) and the
+  grok row of `catalog.HARNESS_EFFORTS`; a Haiku model gets none. It is the only thing that may say
+  an effort exists. It also owns generation (ticket 33): `model_level` splits a slug into its level
+  and version (`gpt-6-sol` and `gpt-5.6-sol` are both `gpt-sol`; the agy effort suffix comes off
+  first); `mark_generation` marks a model superseded when the harness says so (codex's `upgrade`) or
+  when the same level is listed at a higher version, and every model entry carries `level`,
+  `version` and `superseded`; `lane_stem` names a new lane (`sol6`, `opus55`, `grok47`, and
+  `grok47fast` for a level that extends a current level). `refresh_catalog(lanes_doc, discovery,
+  published_models)` returns the refreshed document and the plan, in memory and writing nothing: a
+  lane for every effort of every current-generation model of the harness's own vendor, a successor
+  in its predecessor's place, superseded lanes gone, every new lane `UNPRICED`, and `ultra` off.
+  Claude Code lists no model, so `claude_generation` reads a newer version of a level the catalog
+  already runs out of the benchmark rows' published names. `map_lanes` recomputes the drift notices
+  against the refreshed catalog, so the start page never calls a lane-less model one the wizard is
+  about to give six lanes.
+- `scripts/effort.py`: `pack`/`extract`/`check` over a benchmark page, and `aa`, which reads
+  Artificial Analysis rows straight out of the dataset every `/models/<slug>` page embeds, with no
+  worker. `check` is the trust boundary: it rejects any number that is not on the page, and no
+  worker or parser may originate a number or an identifier.
+- The carry page's domination rule is `bench.dominating_effort`: another effort of the same model,
+  for no more money, beats the lane on more than half of the benchmarks one source scored both on.
+  Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is
+  a family key, not the model string (ticket 30): `bench.model_families(lanes_doc)` keys every
+  harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
+  because agy names each effort as its own model. The harness decides, never the spelling. That
+  family rule has one implementation, `catalog.agy_family`, which discovery groups a harness listing
+  with (`discover.group_agy_models`). `dominating_effort`, `dominating_row` and `_first_domination`
+  take the map; without one every model is its own family. `setup_tui` re-exports the policy
+  helpers.
+- `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
+  `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
-- `assets/probes/`: capability probe briefs for disposable browser (`disposable.md`) and agent profile (`agent-profile.md`).
-- `assets/codex-home/config.toml`: the template for delegate's own `CODEX_HOME`. `make delegate-codex-home` expands `@HOME@`, writes it to `~/.local/share/delegate/codex-home/`, and symlinks `~/.codex/auth.json` beside it. It holds one MCP server and `approvals_reviewer = "auto_review"`, which is required: `codex exec` runs at `approval_policy = "never"`, which would otherwise auto-reject the approval an MCP tool call raises.
-- `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.
-- `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays. Each script first moves to a fresh temporary directory with no Git root above it, so the invoking checkout's own `.delegate/routing.json` never reaches a test.
-- `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate rank|run|dispatch|status|log|runs|cost|catalog|setup`). A user's harness constraint is `--harness <h>` on `rank` and `run`; it replaced the four `delegate-<harness>` wrapper skills.
+- `assets/probes/`: capability probe briefs for disposable browser (`disposable.md`) and agent
+  profile (`agent-profile.md`).
+- `assets/codex-home/config.toml`: the template for delegate's own `CODEX_HOME`. `make
+  delegate-codex-home` expands `@HOME@`, writes it to `~/.local/share/delegate/codex-home/`, and
+  symlinks `~/.codex/auth.json` beside it. It holds one MCP server and `approvals_reviewer =
+  "auto_review"`, which is required: `codex exec` runs at `approval_policy = "never"`, which would
+  otherwise auto-reject the approval an MCP tool call raises.
+- `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out
+  of the relay's final message.
+- `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in
+  for the relays. Each script first moves to a fresh temporary directory with no Git root above it,
+  so the invoking checkout's own `.delegate/routing.json` never reaches a test.
+- `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate
+  rank|run|dispatch|status|log|runs|cost|catalog|setup`). A user's harness constraint is `--harness
+  <h>` on `rank` and `run`; it replaced the four `delegate-<harness>` wrapper skills.
 
 ## Read-only per harness
 
-`--read-only` is not one thing. The pinned relays map it per harness: codex gets a real read-only sandbox and its tools work; claude gets `--permission-mode plan` with its tools cut to `Read,Glob,Grep` (`--tools`), so no shell and no web — `Read` ran with no permission denial in both real read-only claude runs (2026-09-09), and `Glob` and `Grep` are not yet exercised; **grok is fixed as of the fork pin** — read-only is now `--sandbox read-only --always-approve`, which is kernel-enforced (Seatbelt/Landlock) and strictly stronger than the advisory plan mode it replaced. **agy is fixed as of the fork pin** — read-only runs under Antigravity's filesystem sandbox with tool auto-approval inside it (`--sandbox --dangerously-skip-permissions`), confining the run to its workspace. `--write` is no longer the workaround it was before 2026-09-10; do not reach for it to get agy's tools working. Note the ADS skill docs for agy still describe the old plan mode (ticket 14 follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_result` returns `blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; it recognises grok's event shape only (`gate_cancelled_tool`, fixture `tests/fixtures/dispatch/grok-gate-cancel/`).
+`--read-only` is not one thing. The pinned relays map it per harness: codex gets a real read-only
+sandbox and its tools work; claude gets `--permission-mode plan` with its tools cut to
+`Read,Glob,Grep` (`--tools`), so no shell and no web — `Read` ran with no permission denial in both
+real read-only claude runs (2026-09-09), and `Glob` and `Grep` are not yet exercised; **grok is
+fixed as of the fork pin** — read-only is now `--sandbox read-only --always-approve`, which is
+kernel-enforced (Seatbelt/Landlock) and strictly stronger than the advisory plan mode it replaced.
+**agy is fixed as of the fork pin** — read-only runs under Antigravity's filesystem sandbox with
+tool auto-approval inside it (`--sandbox --dangerously-skip-permissions`), confining the run to its
+workspace. `--write` is no longer the workaround it was before 2026-09-10; do not reach for it to
+get agy's tools working. Note the ADS skill docs for agy still describe the old plan mode (ticket 14
+follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_result` returns
+`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; it
+recognises grok's event shape only (`gate_cancelled_tool`, fixture
+`tests/fixtures/dispatch/grok-gate-cancel/`).
 
 ## Browser use per harness
 
-Browser use per harness, as proven on the Mac on 2026-09-12. **agy**: works, disposable browser, nothing to do. **codex**: works, through a home of delegate's own — `run_relay` sets `CODEX_HOME` to `~/.local/share/delegate/codex-home` when it exists and then drops `--ignore-user-config`, so the worker reads one MCP server and nothing else in `~/.codex`; without that home a run keeps the old isolation and has no browser (`codex_home()`, ticket 03). **grok**: works on a write run only. Its built-in `read-only` sandbox kills every stdio MCP server on macOS, `context7` as well as Playwright, and only a custom sandbox profile fixes it, which needs a relay change (ticket 04). **claude**: lanes are native since ticket 22, so the relay's MCP block is not on the path Orin uses; a native worker inherits this session's servers, and the session must restart before it sees a new one (ticket 02). The rest is open work in `.scratch/delegate-browser/issues/`.
+Browser use per harness, as proven on the Mac on 2026-09-12. **agy**: works, disposable browser,
+nothing to do. **codex**: works, through a home of delegate's own — `run_relay` sets `CODEX_HOME` to
+`~/.local/share/delegate/codex-home` when it exists and then drops `--ignore-user-config`, so the
+worker reads one MCP server and nothing else in `~/.codex`; without that home a run keeps the old
+isolation and has no browser (`codex_home()`, ticket 03). **grok**: works on a write run only. Its
+built-in `read-only` sandbox kills every stdio MCP server on macOS, `context7` as well as
+Playwright, and only a custom sandbox profile fixes it, which needs a relay change (ticket 04).
+**claude**: lanes are native since ticket 22, so the relay's MCP block is not on the path Orin uses;
+a native worker inherits this session's servers, and the session must restart before it sees a new
+one (ticket 02). The rest is open work in `.scratch/delegate-browser/issues/`.
 
 ## Benchmark data
 

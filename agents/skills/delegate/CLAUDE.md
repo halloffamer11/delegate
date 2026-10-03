@@ -4,6 +4,9 @@ External worker routing lives in this directory. Read `SKILL.md` first.
 
 ## Where detail lives
 
+- `references/routing.md`, `references/catalog.md`, `references/maintenance.md`: what
+  `SKILL.md` links to for the ranking rule, the catalog and the checks. Keep `SKILL.md`
+  to the workflow; detail goes one level down, in these.
 - `references/architecture.md`: what each script and asset owns, the project routing
   path, read-only and browser use per harness, and the benchmark sources. Read it before
   you change a script.
