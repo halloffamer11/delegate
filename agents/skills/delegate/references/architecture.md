@@ -269,15 +269,21 @@ down one Tier; Tier 1 requires Carry to switch off.
   efforts, and `--efforts <model>` for ready-to-paste lane stanzas per effort. Efforts come from
   `codex debug models`, `claude --help`, the agy slug suffix (one model per slug family) and the
   grok row of `catalog.HARNESS_EFFORTS`; a Haiku model gets none. It is the only thing that may say
-  an effort exists. It also owns generation (ticket 33): `model_level` splits a slug into its level
-  and version (`gpt-6-sol` and `gpt-5.6-sol` are both `gpt-sol`; the agy effort suffix comes off
-  first); `mark_generation` marks a model superseded when the harness says so (codex's `upgrade`) or
+  an effort exists. The effort words are `harnesses.EFFORTS`, one list every script derives from;
+  a word a harness lists that no lane on it may carry goes in the model's `unknown_efforts`
+  (`Harness.split_efforts`). It also owns generation (ticket 33): `model_level` splits a slug into
+  its level and version (`gpt-6-sol` and `gpt-5.6-sol` are both `gpt-sol`; the agy effort suffix
+  comes off first, and a trailing date stamp such as `-2026-11-01` is no part of the version);
+  `mark_generation` marks a model superseded when the harness says so (codex's `upgrade`) or
   when the same level is listed at a higher version, and every model entry carries `level`,
   `version` and `superseded`; `lane_stem` names a new lane (`sol6`, `opus55`, `grok47`, and
   `grok47fast` for a level that extends a current level). `refresh_catalog(lanes_doc, discovery,
   published_models)` returns the refreshed document and the plan, in memory and writing nothing: a
   lane for every effort of every current-generation model of the harness's own vendor, a successor
   in its predecessor's place, superseded lanes gone, every new lane `UNPRICED`, and `ultra` off.
+  A successor that takes no effort (Haiku) gets one lane at its predecessor's effort; models with
+  a predecessor are placed first, so a new level copies figures from them whatever the listing
+  order; an unknown effort word gets no lane and a line in the plan's `notices` instead.
   Claude Code lists no model, so `claude_generation` reads a newer version of a level the catalog
   already runs out of the benchmark rows' published names. `map_lanes` recomputes the drift notices
   against the refreshed catalog, so the start page never calls a lane-less model one the wizard is

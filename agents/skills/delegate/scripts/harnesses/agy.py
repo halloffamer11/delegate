@@ -2,7 +2,7 @@
 import json
 import re
 
-from .base import Harness
+from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness
 
 COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
                  "not a vendor bound")
@@ -10,14 +10,23 @@ COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
 # still carries it beside null figures; a read replaces both together.
 SUPERSEDED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
-# `gemini-3.8-flash-high` -> ("gemini-3.8-flash", "high")
-_SUFFIX = re.compile(r"^(.+)-(low|medium|high)$")
+# `gemini-3.8-flash-high` -> ("gemini-3.8-flash", "high"). Every effort word
+# delegate knows, longest first as `catalog.strip_effort_suffix` reads them, so
+# a `-xhigh` or `-max` slug joins its family instead of standing as a model of
+# its own.
+_EFFORT_WORDS = "|".join(EFFORTS_LONGEST_FIRST)
+_SUFFIX = re.compile(rf"^(.+)-({_EFFORT_WORDS})$")
+# `Gemini 3.8 Flash (High)` -> `Gemini 3.8 Flash`
+_DISPLAY_SUFFIX = re.compile(rf"\s*\((?:{_EFFORT_WORDS})\)\s*$", re.I)
 
 
 class Agy(Harness):
     name = "agy"
     # `agy --help`: `--effort ... (low|medium|high)`, and `agy models` lists a
     # -low, -medium and -high slug per Gemini Flash model (checked 2026-09-12).
+    # These are the efforts agy is known to offer; a family it lists at another
+    # effort (`-xhigh`) offers that one too, because the slug carries it
+    # (`offers_effort`).
     efforts = ("low", "medium", "high")
     effort_in_slug = True
     vendor = "gemini"
@@ -29,8 +38,10 @@ class Agy(Harness):
         """The agy slug family a model slug belongs to: (base, effort).
 
         agy carries the effort in the slug, so `gemini-3.8-flash-high` is the model
-        `gemini-3.8-flash` at effort high. A slug whose suffix is not an effort agy
-        offers is a family of its own, with no effort: `(slug, None)`.
+        `gemini-3.8-flash` at effort high. Any effort delegate knows counts, not
+        only the ones agy offered when it was checked: a family's efforts are
+        the suffixes agy lists. A slug with no effort suffix is a family of its
+        own, with no effort: `(slug, None)`.
 
         One rule in one place. Discovery groups a harness listing with it
         (`parse_models`) and the carry rule groups a lane's rows with it
@@ -39,7 +50,7 @@ class Agy(Harness):
         """
         text = slug or ""
         found = _SUFFIX.match(text)
-        if not found or found.group(2) not in self.efforts:
+        if not found:
             return text, None
         return found.group(1), found.group(2)
 
@@ -51,8 +62,8 @@ class Agy(Harness):
         slug: `gemini-3.8-flash-high`, `-medium` and `-low` are one model at
         three efforts, so they are reported as `gemini-3.8-flash` with efforts
         [low, medium, high] and `members` mapping each effort to the slug agy
-        accepts. A slug without an effort suffix agy offers is a family of one
-        with no efforts.
+        accepts. A slug without an effort suffix is a family of one with no
+        efforts.
         """
         return self.group(parse_listing(raw))
 
@@ -65,7 +76,7 @@ class Agy(Harness):
             if family is None:
                 display = item.get("display_name")
                 if effort and display:
-                    display = re.sub(r"\s*\((?:low|medium|high)\)\s*$", "", display, flags=re.I) or display
+                    display = _DISPLAY_SUFFIX.sub("", display) or display
                 family = {"slug": base, "display_name": display, "efforts": [], "members": {}}
                 families[base] = family
                 order.append(base)
@@ -78,7 +89,7 @@ class Agy(Harness):
         out = []
         for base in order:
             family = families[base]
-            family["efforts"].sort(key=self.efforts.index)
+            family["efforts"].sort(key=EFFORTS.index)
             out.append(family)
         return out
 

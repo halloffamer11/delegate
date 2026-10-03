@@ -323,6 +323,19 @@ def main():
                 {"lane": "codex", "r": 0.5, "reset_5h": "bad"}]}, f)
         assert_true(usage.load_cached(path) == {}, "cached viewers reject invalid display data")
 
+    # A figure past 100% used reads as nothing left, not as a negative
+    # fraction that would fail the whole document and turn every Gate off.
+    over = usage.lane("claude", "general", -0.04, 0.7, remaining_weekly_model=1.2)
+    assert_true(over["remaining_5h"] == 0.0 and over["r"] == 0.0
+                and over["remaining_weekly_model"] == 1.0,
+                f"remaining fractions must be held to 0..1: {over}")
+    over_doc = {"probed_at": time.time(), "lanes": [over, usage.lane("codex", None, 0.05, 0.05)]}
+    parsed = usage.observations(over_doc)
+    assert_true(parsed is not None and parsed["codex"]["r"] == 0.05,
+                "one overspent row must not unread every Meter")
+    assert_true(usage.remaining(None) is None and usage.remaining(0.5) == 0.5,
+                "a fraction inside 0..1, or none, is left as it is")
+
     print("PASS: all test_usage_reset tests passed")
     sys.exit(0)
 

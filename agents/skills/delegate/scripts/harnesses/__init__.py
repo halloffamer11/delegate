@@ -6,7 +6,7 @@ entry in REGISTRY. Everything else in delegate iterates the registry or asks
 """
 import shutil
 
-from .base import EFFORTS, Harness  # noqa: F401
+from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness  # noqa: F401
 from . import agy, claude, codex, grok, kiro
 
 REGISTRY = (claude.HARNESS, codex.HARNESS, agy.HARNESS, grok.HARNESS, kiro.HARNESS)

@@ -117,17 +117,11 @@ FLOOR_CEILING_DECL = re.compile(r"(?i)\b(floor|ceiling)\s*[:=]\s*\d+")
 # human can read and correct it: the optional lane field `published_as`.
 NORM_SEP = re.compile(r"[-_. ]+")
 # Longest first, so `-xhigh` is not read as `-high`. Every effort in EFFORTS
-# belongs here: a source names a row `gpt-6-astra-max` as readily as
-# `gpt-6-astra-high`, and while `-max` and `-ultra` were missing such a row
-# matched no lane model at all and the figure was dropped (ticket 17).
-MODEL_EFFORT_SUFFIXES = (
-    ("-xhigh", "xhigh"),
-    ("-medium", "medium"),
-    ("-ultra", "ultra"),
-    ("-high", "high"),
-    ("-max", "max"),
-    ("-low", "low"),
-)
+# belongs here, so the list is made from it: a source names a row
+# `gpt-6-astra-max` as readily as `gpt-6-astra-high`, and while `-max` and
+# `-ultra` were missing such a row matched no lane model at all and the figure
+# was dropped (ticket 17).
+MODEL_EFFORT_SUFFIXES = tuple((f"-{effort}", effort) for effort in harnesses.EFFORTS_LONGEST_FIRST)
 
 
 class CatalogError(Exception):
@@ -424,7 +418,9 @@ def validate_lanes(doc, source="lanes.json"):
                 f"{source}: lane '{lane_name}': effort must be one of {', '.join(EFFORTS)}, got {lane['effort']!r}"
             )
         offered = HARNESS_EFFORTS[harness]
-        if lane["effort"] not in offered:
+        # agy offers whatever effort the slug carries (`gemini-3.9-flash-xhigh`),
+        # beside the ones it is known to offer
+        if not harnesses.get(harness).offers_effort(lane["model"], lane["effort"]):
             raise CatalogError(
                 f"{source}: lane '{lane_name}': {harness} does not offer effort {lane['effort']!r}; "
                 f"{harness} offers {', '.join(offered)}"

@@ -992,4 +992,29 @@ except Exception as e:
     record("aa CLI: one command writes the packet, the rows and check's verdict", False, repr(e))
 
 
+# One effort list: a row's effort is a lane's effort, or `none`/`unspecified`.
+record(
+    "EFFORT_VALUES are the lane efforts with none and unspecified around them",
+    effort.EFFORT_VALUES == ("none", *effort.harnesses.EFFORTS, "unspecified")
+    and effort.AA_EFFORT_WORDS == effort.harnesses.EFFORTS,
+    repr(effort.EFFORT_VALUES),
+)
+
+# The default extract lane is read from the catalog, because the refresh renames
+# agy's lanes with each version; the old name stands in only without one.
+renamed = {"lanes": {
+    "sol-high@codex": {"harness": "codex", "enabled": True},
+    "flash39-low@agy": {"harness": "agy", "enabled": False},
+    "flash39-high@agy": {"harness": "agy"},
+}}
+with tempfile.TemporaryDirectory() as empty_config:
+    missing = effort.default_lane(config_dir=empty_config)
+record(
+    "the default extract lane is the catalog's first carried agy lane",
+    effort.default_lane(renamed) == "flash39-high@agy"
+    and effort.default_lane({"lanes": {"sol-high@codex": {"harness": "codex"}}}) == effort.DEFAULT_LANE
+    and missing == effort.DEFAULT_LANE == "flash-high@agy",
+    f"{effort.default_lane(renamed)} / {missing}",
+)
+
 sys.exit(1 if fails else 0)

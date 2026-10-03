@@ -282,6 +282,9 @@ def refresh_lines(refresh, width=80):
     orphans = [name for name in refresh.get("removed") or [] if name not in covered]
     if orphans:
         lines.append(list_line("Superseded Lanes removed", orphans, width))
+    # an effort a harness lists that no Lane may carry yet: named, not proposed
+    for notice in refresh.get("notices") or ():
+        lines.append(fit_line(notice, width))
     if not lines:
         return [fit_line("Catalog refresh: every model is the current generation", width)]
     return lines

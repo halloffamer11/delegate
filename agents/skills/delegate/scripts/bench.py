@@ -48,13 +48,16 @@ EPOCH_BENCHMARKS = (
     "Terminal Bench",
     "SWE-Bench verified",
 )
+# The efforts strong enough to stand for a model when no lane's effort has a
+# figure, strongest first. A subset of EFFORTS on purpose: a low-effort figure
+# would understate the model.
 EFFORT_FALLBACK = ("max", "xhigh", "high")
-# Every effort a lane can carry, strongest first: this has to cover
-# catalog.EFFORTS, because a source reports whatever the vendor exposes. While
-# it stopped at `xhigh` a max-effort figure could never be preferred, and the
+# Every effort a lane can carry, strongest first: catalog.EFFORTS reversed,
+# because a source reports whatever the vendor exposes. While it was a copy
+# that stopped at `xhigh` a max-effort figure could never be preferred, and the
 # distance between two efforts was measured on a scale missing its top half
 # (ticket 17).
-LANE_EFFORT_ORDER = ("ultra", "max", "xhigh", "high", "medium", "low")
+LANE_EFFORT_ORDER = tuple(reversed(EFFORTS))
 # When one effort has to stand for a model — the model-level figure, and the
 # `lane effort` a note names — it is the strongest effort a lane actually works
 # at. `ultra` is generated disabled and no source scores it, so it never stands

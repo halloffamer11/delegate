@@ -617,6 +617,16 @@ record(
     f"order={bench.LANE_EFFORT_ORDER} efforts={catalog.EFFORTS}",
 )
 
+# One effort list: the strongest-first order is EFFORTS reversed, and the
+# fallback is a subset of it in the same order, never words of its own.
+record(
+    "LANE_EFFORT_ORDER is EFFORTS reversed, and EFFORT_FALLBACK is a part of it",
+    bench.LANE_EFFORT_ORDER == tuple(reversed(catalog.EFFORTS))
+    and list(bench.EFFORT_FALLBACK)
+    == [e for e in bench.LANE_EFFORT_ORDER if e in bench.EFFORT_FALLBACK],
+    f"order={bench.LANE_EFFORT_ORDER} fallback={bench.EFFORT_FALLBACK}",
+)
+
 
 # --- carry policy: structured decisions beside collect() ----------------------
 CARRY_LANES = {
@@ -847,10 +857,13 @@ try:
         "the agy family rule has one implementation, in its adapter",
         AGY.family("gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
         and AGY.family("gemini-3.8-flash") == ("gemini-3.8-flash", None)
-        # xhigh, max and ultra are not agy efforts, so such a slug is not a family
-        and AGY.family("gpt-6-astra-xhigh") == ("gpt-6-astra-xhigh", None),
+        # any effort delegate knows is read off the slug, longest first, so an
+        # `-xhigh` slug joins its family; a suffix that is no effort does not
+        and AGY.family("gemini-3.9-flash-xhigh") == ("gemini-3.9-flash", "xhigh")
+        and AGY.family("gemini-3.9-flash-lite") == ("gemini-3.9-flash-lite", None),
         str([AGY.family(s) for s in
-             ("gemini-3.8-flash-high", "gemini-3.8-flash", "gpt-6-astra-xhigh")]),
+             ("gemini-3.8-flash-high", "gemini-3.8-flash", "gemini-3.9-flash-xhigh",
+              "gemini-3.9-flash-lite")]),
     )
 except Exception as e:
     record("the agy family rule has one implementation, in its adapter", False, repr(e))

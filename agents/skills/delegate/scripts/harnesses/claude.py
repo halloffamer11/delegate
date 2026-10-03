@@ -35,6 +35,7 @@ class Claude(Harness):
 
     def efforts_from_help(self, raw):
         """The efforts `claude --help` lists for `--effort`, in its order, or [].
+        A word outside EFFORTS is kept (`split_efforts` sorts it out).
 
         The values sit in parentheses in the flag's description, which wraps onto
         the lines after the flag (`--effort <level>  Effort level for the current
@@ -54,7 +55,11 @@ class Claude(Harness):
             if not found:
                 return []
             words = [w.strip().lower() for w in re.split(r"[,|/]", found.group(1))]
-            return [w for w in words if w in EFFORTS]
+            # a word delegate does not know yet stays in for the refresh to
+            # name, as long as the parentheses are the effort list at all
+            if not any(w in EFFORTS for w in words):
+                return []
+            return [w for w in words if w]
         return []
 
     def model_takes_effort(self, slug):
@@ -79,14 +84,22 @@ class Claude(Harness):
                             note=f"resets: 5h '{r5}', weekly '{rw}'")]
         # per-model weekly meters, e.g. "Current week (Fable): 86% used"
         for m in re.finditer(r"Current week \(([^)]+)\):\s*(\d+)% used(?: · resets ([^\n]+))?", text):
-            name = m.group(1)
-            if name.lower() == "all models": continue
+            name = model_meter_name(m.group(1))
+            if name == "all models": continue
             fm = 1 - int(m.group(2)) / 100.0
             wk = min(fw, fm) if fw is not None else fm
-            lanes.append(usage.lane(self.name, name.lower(), f5, wk, reset(r5), reset(m.group(3) or rw),
+            lanes.append(usage.lane(self.name, name, f5, wk, reset(r5), reset(m.group(3) or rw),
                                     note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'",
                                     remaining_weekly_model=fm))
         return lanes
+
+
+def model_meter_name(label):
+    """The Meter word for a `/usage` model label: `Fable` and `Fable 5.2` are
+    both `fable`, so a version in the label never moves the row off the
+    catalog's `claude-fable` Meter, whose Gate would then never see it."""
+    words = [w for w in label.lower().split() if not re.fullmatch(r"v?\d+(?:\.\d+)*", w)]
+    return " ".join(words) or label.lower().strip()
 
 
 def reset(text):

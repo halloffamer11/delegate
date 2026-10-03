@@ -2322,6 +2322,12 @@ try:
            == ["Catalog refresh: every model is the current generation"],
            repr(setup_tui.refresh_lines({"models": [], "new": [], "removed": []}, 80)))
 
+    notice = "codex lists effort 'extreme' for gpt-6.1-sol; delegate does not know it yet"
+    record("63d an effort the refresh could not propose is named on the start page",
+           setup_tui.refresh_lines({"models": [], "new": [], "removed": [], "notices": [notice]}, 10_000)
+           == [notice],
+           repr(setup_tui.refresh_lines({"models": [], "new": [], "removed": [], "notices": [notice]}, 10_000)))
+
     w = Wizard(copy.deepcopy(refreshed), copy.deepcopy(ROUTING), None, DISCOVERED,
                "/tmp/lanes.json", "/tmp/routing.json", "",
                discovery=discover.map_lanes(found, refreshed), refresh=plan,

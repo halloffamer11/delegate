@@ -166,8 +166,73 @@ def test_kiro():
     record("the refreshed catalog with Kiro's Lanes and Meter is valid", valid is True, valid)
 
 
+def test_effort_words():
+    """One effort list (base.EFFORTS): agy reads every effort word off a slug,
+    and a word no Lane may carry is set apart, not dropped."""
+    agy = harnesses.get("agy")
+    listing = ("Fetching available models...\n"
+               "gemini-3.9-flash-xhigh\tGemini 3.9 Flash (Xhigh)\n"
+               "gemini-3.9-flash-high\tGemini 3.9 Flash (High)\n"
+               "gemini-3.9-flash-max\tGemini 3.9 Flash (Max)\n"
+               "gemini-3.9-flash-low\tGemini 3.9 Flash (Low)\n")
+    families = agy.parse_models(listing)
+    record("agy groups an -xhigh or -max slug into its family, not a model of its own",
+           [f["slug"] for f in families] == ["gemini-3.9-flash"]
+           and families[0]["efforts"] == ["low", "high", "xhigh", "max"]
+           and families[0]["members"]["xhigh"] == "gemini-3.9-flash-xhigh"
+           and families[0]["display_name"] == "Gemini 3.9 Flash", repr(families))
+    record("agy offers an effort its slug names, beside the ones it is known to offer",
+           agy.offers_effort("gemini-3.9-flash-xhigh", "xhigh")
+           and not agy.offers_effort("gemini-3.9-flash-high", "xhigh")
+           and agy.offers_effort("gemini-3.9-flash-high", "high")
+           and not harnesses.get("codex").offers_effort("gpt-6-sol-xhigh", "extreme"))
+    record("every adapter's efforts are EFFORTS words, in EFFORTS order",
+           all(list(h.efforts) == [e for e in harnesses.EFFORTS if e in h.efforts]
+               for h in harnesses.REGISTRY),
+           repr([(h.name, h.efforts) for h in harnesses.REGISTRY]))
+    record("an effort word no Lane may carry is set apart, not dropped",
+           harnesses.get("codex").split_efforts(["low", "high", "extreme"]) == (["low", "high"], ["extreme"])
+           and harnesses.get("kiro").split_efforts(["high", "ultra"]) == (["high"], ["ultra"])
+           and agy.split_efforts(["xhigh", "turbo"]) == (["xhigh"], ["turbo"]))
+    claude = harnesses.get("claude")
+    help_text = "  --effort <level>  Effort level\n     (low, medium, high, xhigh, max, extreme)\n  --foo\n"
+    record("claude --help keeps an effort word delegate does not know yet",
+           claude.efforts_from_help(help_text) == ["low", "medium", "high", "xhigh", "max", "extreme"]
+           and claude.efforts_from_help("  --effort <level>  Effort (default: on)\n") == [],
+           repr(claude.efforts_from_help(help_text)))
+    kiro = harnesses.get("kiro")
+    listed = kiro.parse_models('[{"id": "m", "efforts": ["low", "high", "extreme"]}]')
+    record("kiro keeps a listed effort it does not run apart, for the refresh to name",
+           listed[0]["efforts"] == ["low", "high"] and listed[0]["unknown_efforts"] == ["extreme"],
+           repr(listed))
+
+
+def test_claude_model_meter():
+    """A version in a /usage model label does not move the row off its Meter."""
+    import json
+    import types
+    import usage
+    from harnesses import claude as claude_module
+    saved = usage.which, usage.run
+    text = ("Current session: 40% used\nCurrent week (all models): 30% used\n"
+            "Current week (Fable 5.2): 96% used\n")
+    try:
+        usage.which = lambda name: True
+        usage.run = lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps({"result": text}))
+        rows = harnesses.get("claude").probe()
+    finally:
+        usage.which, usage.run = saved
+    record("'Current week (Fable 5.2)' is the claude-fable Meter, as 'Fable' was",
+           [r["lane"] for r in rows] == ["claude-general", "claude-fable"]
+           and claude_module.model_meter_name("Fable") == "fable"
+           and claude_module.model_meter_name("Fable v6") == "fable",
+           repr([r["lane"] for r in rows]))
+
+
 if __name__ == "__main__":
     test_registry_is_the_list()
+    test_effort_words()
+    test_claude_model_meter()
     test_binary_need_not_be_the_name()
     test_family()
     test_run_args()

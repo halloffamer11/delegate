@@ -143,6 +143,22 @@ def ignored(lane_row, by_meter):
             and lane_row["harness"] not in orchestrators.native_harnesses())
 
 
+def unprobed_meters(catalog, obs_map):
+    """Catalog Meters a lane spends that got no probe row, though their
+    harness's probe read a figure for another Meter.
+
+    Such a Meter has an unknown Remaining, which the Gate never vetoes, so a
+    probe that renamed its row (`Current week (Fable 5.2)`) would switch its
+    Gate off without a word. A harness whose probe read nothing (absent, failed,
+    or with no usage source, as Kiro's) says so in its own row instead.
+    """
+    read = {L.get("harness") for L in obs_map.values()
+            if isinstance(L, dict) and L.get("r") is not None}
+    spent = {lane.get("meter") for lane in catalog["lanes"].values()}
+    return sorted(name for name, meter in catalog["meters"].items()
+                  if name in spent and name not in obs_map and meter.get("harness") in read)
+
+
 def usage_doc(refresh=False, max_age_min=None, routing=None):
     if refresh:
         return usage.acquire(refresh=True, max_age_min=max_age_min, timeout=180)
@@ -217,6 +233,9 @@ def cmd_limits(a):
         print(f"\nWeekly reset unread for: {', '.join(unknown)}.")
     if skipped and not a.all:
         print(f"\nIgnored, no lane spends them: {', '.join(skipped)}.")
+    unprobed = unprobed_meters(catalog, obs_map)
+    if unprobed:
+        print(f"\nNo probe row for: {', '.join(unprobed)}; the Gate never vetoes their lanes.")
     gate_pct = f"{int(round(gate * 100))}%"
     age_label = f"{age} min ago" if age is not None else "at an unknown time"
     if metering:

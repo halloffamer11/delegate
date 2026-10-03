@@ -51,6 +51,7 @@ class Kiro(Harness):
         an object holding one under `models`. Each entry's id, name and
         supported efforts are read from whichever documented-looking key holds
         them; a model whose entry names no effort takes the harness's efforts.
+        A listed word Kiro's `efforts` lacks goes in `unknown_efforts`.
         The router (`auto`) is left out."""
         doc = json.loads(raw)
         items = doc.get("models") if isinstance(doc, dict) else doc
@@ -68,9 +69,14 @@ class Kiro(Harness):
             slug = slug.strip()
             display = next((item[k] for k in NAME_KEYS if isinstance(item.get(k), str)), slug)
             listed = next((item[k] for k in EFFORT_KEYS if isinstance(item.get(k), list)), None)
+            words = [str(e).strip().lower() for e in listed or ()]
             efforts = (list(self.efforts) if listed is None
-                       else [e for e in self.efforts if e in listed])
-            models.append({"slug": slug, "display_name": display, "efforts": efforts})
+                       else [e for e in self.efforts if e in words])
+            # a word Kiro lists that no Lane on it may carry (`none`, or one
+            # delegate does not know yet) is kept for the refresh to name
+            unknown = [w for w in words if w and w not in self.efforts]
+            models.append({"slug": slug, "display_name": display, "efforts": efforts,
+                           "unknown_efforts": unknown})
         return models
 
 

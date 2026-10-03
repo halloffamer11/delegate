@@ -209,8 +209,26 @@ def run(cmd, timeout=60, stdin_data=None, cwd=None):
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
+def remaining(fraction):
+    """A Remaining fraction held to [0, 1], or None.
+
+    A vendor can print more than 100% used (an overage, or a rounding past the
+    cap), which reads as a negative fraction. One such row would fail
+    `observations` and take every Meter's figures, and so the Gate, with it;
+    an overspent Window has nothing left, so it reads 0.
+    """
+    if fraction is None or isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+        return fraction
+    if math.isnan(fraction):
+        return fraction
+    return min(1.0, max(0.0, fraction))
+
+
 def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
-    """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None."""
+    """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None.
+    A fraction outside 0..1 is held to it (`remaining`)."""
+    five_h, weekly = remaining(five_h), remaining(weekly)
+    remaining_weekly_model = remaining(remaining_weekly_model)
     row = {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
            "remaining_5h": five_h, "remaining_weekly": weekly,
            "remaining_weekly_model": remaining_weekly_model,

@@ -75,6 +75,7 @@ Exit status:
         "lane": "<lane_name>" | "none",
         "lanes": ["<lane_name>"],
         "efforts": ["<effort>"],
+        "unknown_efforts": ["<effort word no lane on the harness may carry>"],
         "reason": "<string>" | null,
         "level": "<slug with the version removed>",
         "version": [<int>],
@@ -138,6 +139,12 @@ HARNESS_VENDOR = {h.name: h.vendor for h in harnesses.REGISTRY}
 # A slug component that is a version: `6`, `5.6`, and the `5` `5` of
 # `claude-opus-5-5`.
 VERSION_PART = re.compile(r"^\d+(?:\.\d+)*$")
+# A date stamp at the end of a slug, as one part (`20251001`) or three
+# (`2026-11-01`). It dates a snapshot of a version and is no part of it, so
+# `gpt-6-sol-2026-11-01` is `gpt-sol` at (6,), not (6, 2026, 11, 1).
+DATE_PART = re.compile(r"^(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$")
+DATE_PARTS = (re.compile(r"^(?:19|20)\d\d$"), re.compile(r"^(?:0[1-9]|1[0-2])$"),
+              re.compile(r"^(?:0[1-9]|[12]\d|3[01])$"))
 
 # The words that name a whole family rather than one model. A new lane is named
 # after the model, so `gpt-6-sol` gives `sol6`; where the family word is the
@@ -193,17 +200,24 @@ def read_harness(harness, fixture_dir=None, runner=None):
     return raw, None
 
 
-def help_efforts(harness, fixture_dir=None, runner=None):
-    """(efforts, source) for a harness whose models the catalog names: the
-    efforts its list command's output names, else the registry's, and the
-    source says which."""
+def help_effort_words(harness, fixture_dir=None, runner=None):
+    """(efforts, unknown, source) for a harness whose models the catalog names:
+    the efforts its list command's output names, else the registry's; the words
+    it names that no Lane on it may carry (`Harness.split_efforts`); and the
+    source, which says where the efforts came from."""
     adapter = harnesses.get(harness)
     raw, err = read_harness(harness, fixture_dir=fixture_dir, runner=runner)
-    efforts = adapter.efforts_from_help(raw) if err is None else []
+    efforts, unknown = adapter.split_efforts(adapter.efforts_from_help(raw) if err is None else [])
     command = " ".join(adapter.list_command or [harness])
     if efforts:
-        return efforts, command
-    return list(HARNESS_EFFORTS[harness]), f"catalog.HARNESS_EFFORTS ({command} listed none)"
+        return efforts, unknown, command
+    return list(HARNESS_EFFORTS[harness]), unknown, f"catalog.HARNESS_EFFORTS ({command} listed none)"
+
+
+def help_efforts(harness, fixture_dir=None, runner=None):
+    """(efforts, source): `help_effort_words` without the unknown words."""
+    efforts, _unknown, source = help_effort_words(harness, fixture_dir=fixture_dir, runner=runner)
+    return efforts, source
 
 
 def model_takes_effort(harness, slug):
@@ -212,18 +226,28 @@ def model_takes_effort(harness, slug):
     return adapter is None or adapter.model_takes_effort(slug)
 
 
-def model_level(slug):
+def model_level(slug, harness=None):
     """(level, version) for a model slug: the slug with its version taken out,
     and that version as a tuple of whole numbers.
 
     `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`, at (6,) and (5, 6);
     `claude-opus-5-5` is `claude-opus` at (5, 5); a slug with no version is its
     own level, at (). The agy effort suffix comes off first, so one slug family
-    has one level (`catalog.slug_family`).
+    has one level (`catalog.slug_family`, or the harness's own rule when the
+    harness is named), and a trailing date stamp comes off next (`DATE_PART`):
+    `claude-haiku-4-5-20251001` is `claude-haiku` at (4, 5).
     """
-    base, _effort = catalog.slug_family(slug or "")
+    if harness is not None:
+        base, _effort = harnesses.family(harness, slug or "")
+    else:
+        base, _effort = catalog.slug_family(slug or "")
+    parts = base.split("-")
+    if len(parts) > 1 and DATE_PART.match(parts[-1]):
+        parts = parts[:-1]
+    elif len(parts) > 3 and all(rule.match(part) for rule, part in zip(DATE_PARTS, parts[-3:])):
+        parts = parts[:-3]
     words, version = [], []
-    for part in base.split("-"):
+    for part in parts:
         if VERSION_PART.match(part):
             version.extend(int(number) for number in part.split("."))
         else:
@@ -240,7 +264,7 @@ def mark_generation(models, harness):
     """
     newest = {}
     for item in models:
-        level, version = model_level(item["slug"])
+        level, version = model_level(item["slug"], harness)
         item["level"], item["version"] = level, list(version)
         item["superseded"] = None
         best = newest.get(level)
@@ -347,7 +371,7 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
             # This harness has no list command (Claude Code). Its models are
             # named by hand in the catalog and undiscoverable; never guess a
             # model list. One entry per model, holding every lane that runs it.
-            efforts, _source = help_efforts(harness, fixture_dir=fixture_dir, runner=runner)
+            efforts, unknown, _source = help_effort_words(harness, fixture_dir=fixture_dir, runner=runner)
             named = {}
             for lane_name, lane_def in lanes_dict.items():
                 if isinstance(lane_def, dict) and lane_def.get("harness") == harness:
@@ -365,6 +389,7 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                     "lane": ", ".join(lane_names),
                     "lanes": lane_names,
                     "efforts": list(efforts) if model_takes_effort(harness, slug) else [],
+                    "unknown_efforts": list(unknown) if model_takes_effort(harness, slug) else [],
                     "reason": "hand-named, undiscoverable",
                     "members": {},
                 }
@@ -390,7 +415,12 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
 
         discovered_slugs = set()
         mark_generation(raw_models, harness)
+        adapter = harnesses.get(harness)
         for item in raw_models:
+            # an effort word no Lane on this harness may carry is kept apart,
+            # so the refresh names it instead of proposing a Lane for it
+            efforts, unknown = adapter.split_efforts(item.get("efforts"))
+            unknown += [w for w in item.get("unknown_efforts") or () if w not in unknown]
             slug = item["slug"]
             display_name = item.get("display_name")
             # an agy family answers for every slug in it: a lane on
@@ -409,7 +439,8 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                 "display_name": display_name,
                 "lane": lane_str,
                 "lanes": matched_lanes,
-                "efforts": list(item.get("efforts") or []),
+                "efforts": efforts,
+                "unknown_efforts": unknown,
                 "reason": None,
                 "level": item["level"],
                 "version": item["version"],
@@ -528,6 +559,8 @@ def catalog_generation(harness, models, published_models):
             "lanes": [],
             # the level's efforts: one model of a level takes what the level takes
             "efforts": list(base["efforts"]) if model_takes_effort(harness, slug) else [],
+            "unknown_efforts": (list(base.get("unknown_efforts") or [])
+                                if model_takes_effort(harness, slug) else []),
             "reason": "named by the benchmark rows",
             "level": level,
             "version": list(version),
@@ -620,6 +653,12 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
     model reaches the screening page (ticket 35). It takes its predecessor's
     Tier, Order, Meter, weight and timeout, and not its `enabled`.
 
+    A model that takes no effort level (Claude's Haiku) still takes its
+    predecessor's place, in one lane at the effort its predecessor's lane
+    carries, which is how the catalog writes such a lane. An effort word the
+    harness lists that no lane on it may carry gets no lane; the plan's
+    `notices` name it instead, so the wizard can say so.
+
     Nothing is written: the wizard's confirm writes, and quitting writes
     nothing (ticket 33).
     """
@@ -651,15 +690,36 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
             if lane.get("harness") == item["harness"] and lane.get("model") in slugs:
                 leaving[name] = item
 
-    plan_models, new_lanes, successors = [], {}, {}
-    for item in own:
-        if item.get("superseded"):
-            continue
+    current = [item for item in own if not item.get("superseded")]
+    predecessors = [_predecessor(item, own, lanes) for item in current]
+    # A model that takes a predecessor's place goes first: its new lanes are
+    # what a model new to the harness copies its figures from when every lane
+    # the harness had is leaving, whatever order the harness lists them in.
+    work = sorted(range(len(current)), key=lambda index: predecessors[index] is None)
+
+    plan_by_index, new_by_index, successors, notices = {}, {}, {}, []
+    new_lanes = {}
+    for index in work:
+        item, predecessor = current[index], predecessors[index]
         harness = item["harness"]
+        adapter = harnesses.get(harness)
         stem = lane_stem(item["level"], tuple(item["version"]), levels[harness])
-        predecessor = _predecessor(item, own, lanes)
+        efforts, unknown = adapter.split_efforts(item.get("efforts"))
+        unknown += [word for word in item.get("unknown_efforts") or () if word not in unknown]
+        for word in unknown:
+            why = ("delegate does not know it yet" if word not in EFFORTS
+                   else f"delegate does not run {harness} at it yet")
+            notices.append(f"{harness} lists effort '{word}' for {item['slug']}; {why}")
+        no_effort = not efforts and not unknown
+        if no_effort and predecessor is not None:
+            # one lane, at the effort the predecessor's lane carries: a carried
+            # one if it has one
+            own_lanes = [lane for lane in lanes.values()
+                         if lane.get("harness") == harness and lane.get("model") in model_slugs(predecessor)]
+            carried = [lane for lane in own_lanes if lane.get("enabled") is not False]
+            efforts = [(carried or own_lanes)[0]["effort"]] if own_lanes else []
         added, replaced = [], []
-        for effort in item.get("efforts") or []:
+        for effort in efforts:
             model_text = lane_model(harness, item, effort)
             if (harness, model_text, effort) in by_key:
                 continue
@@ -708,12 +768,13 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 # is never carried (ticket 15).
                 record["enabled"] = False
             new_lanes[name] = record
+            new_by_index.setdefault(index, []).append(name)
             added.append(name)
             if pred_name:
                 successors.setdefault(pred_name, []).append(name)
                 replaced.append(pred_name)
         if added:
-            plan_models.append({
+            plan_by_index[index] = {
                 "harness": harness,
                 "model": item["slug"],
                 "predecessor": predecessor["slug"] if predecessor else None,
@@ -721,8 +782,13 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 "predecessor_stem": _lane_stem_of(replaced[0]) if replaced else None,
                 "new": added,
                 "replaced": replaced,
-            })
+            }
 
+    # the plan and the new lanes read in the harnesses' own listing order, not
+    # the order they were made in
+    plan_models = [plan_by_index[index] for index in sorted(plan_by_index)]
+    new_lanes = {lane_name: new_lanes[lane_name]
+                 for index in sorted(new_by_index) for lane_name in new_by_index[index]}
     ordered = {}
     for name, lane in lanes.items():
         if name in leaving:
@@ -737,6 +803,7 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
         "models": plan_models,
         "new": list(new_lanes),
         "removed": sorted(leaving),
+        "notices": notices,
     }
 
 

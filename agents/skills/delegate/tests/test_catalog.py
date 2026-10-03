@@ -2966,4 +2966,30 @@ with tempfile.TemporaryDirectory() as td:
     record("19.9 a project Class with no ceiling is rejected, by name",
            bool(msg and "triage" in msg and "ceiling" in msg), msg)
 
+# One effort list: the suffixes are EFFORTS longest first, not a copy of it.
+record(
+    "20.1 the effort suffixes are EFFORTS, longest first",
+    sorted(e for _, e in catalog.MODEL_EFFORT_SUFFIXES) == sorted(catalog.EFFORTS)
+    and all(suffix == f"-{e}" for suffix, e in catalog.MODEL_EFFORT_SUFFIXES)
+    and [len(e) for _, e in catalog.MODEL_EFFORT_SUFFIXES]
+    == sorted((len(e) for e in catalog.EFFORTS), reverse=True),
+    str(catalog.MODEL_EFFORT_SUFFIXES),
+)
+
+# agy carries the effort in the slug, so a slug agy lists at xhigh is a lane at
+# xhigh, though xhigh is not among the efforts agy was known to offer; an xhigh
+# effort on a slug that names high is still refused.
+xhigh = copy.deepcopy(lanes_sample)
+xhigh["lanes"]["flash39-xhigh@agy"] = dict(
+    xhigh["lanes"]["flash-high@agy"], model="gemini-3.9-flash-xhigh", effort="xhigh")
+mismatch = copy.deepcopy(lanes_sample)
+mismatch["lanes"]["flash-high@agy"]["effort"] = "xhigh"
+mismatch_msg = check_catalog_error(catalog.validate_lanes, mismatch)
+record(
+    "20.2 an agy lane may carry an effort its slug names, and only that one",
+    check_catalog_error(catalog.validate_lanes, xhigh) is None
+    and bool(mismatch_msg and "does not offer effort 'xhigh'" in mismatch_msg),
+    f"{check_catalog_error(catalog.validate_lanes, xhigh)} / {mismatch_msg}",
+)
+
 sys.exit(1 if fails else 0)
