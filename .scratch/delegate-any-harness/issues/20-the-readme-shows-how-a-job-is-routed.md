@@ -10,11 +10,11 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human, landed on `worktree/delegate-any-harness-20` 2026-10-03; one box waits on Orin: check the diagram on the PR page in light and dark themes.
+**Status:** landed 2026-10-03 on `worktree/delegate-any-harness-20` (PR #5). All boxes done.
 
 - [x] The format is chosen and the reason recorded here (Mermaid by default).
 - [x] The README shows the routing chain with each step's owning file, in the glossary's terms from `CONTEXT.md`.
-- [ ] The diagram renders on github.com (checked on the PR page) and in light and dark themes.
+- [x] The diagram renders on github.com (checked on the PR page) and in light and dark themes.
 - [x] Any rendered image is committed with its source and a one-line command that rebuilds it.
 
 ## Landed, 2026-10-03
@@ -26,5 +26,5 @@ light and dark themes both apply. No rendered image, so the last box needs nothi
 
 The table follows the code where the docs are loose: `rank.py` sorts an unknown Pace
 last before Tier, Project order lives in `.delegate/routing.json` (`project_order`),
-and a Native lane writes no `return.json`. No local Mermaid renderer was installed, so
-the render check is the PR page.
+and a Native lane writes no `return.json`. No local Mermaid renderer was installed. The
+render was checked on github.com on the branch's README, in light and dark themes.
