@@ -16,6 +16,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # `.delegate/routing.json`. Every path this file needs comes from HERE.
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
+# the wizard reads and empties dispatch's model queue (ticket 29): never the real one
+os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(_ISOLATED_CWD.name, "new-models.json")
+os.environ["DELEGATE_MODEL_SCAN"] = "off"
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SETUP_PY = os.path.join(DELEGATE_DIR, "setup.py")
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
@@ -836,7 +839,7 @@ def case_scan_and_propose_are_the_launch_steps():
           and note.startswith("Benchmark rows: Artificial Analysis from ")
           and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
           and rows[1] == "" and len(rows[0]) > 0
-          and doc == refreshed and plan_again == plan
+          and doc == refreshed and plan_again.pop("queued") == [] and plan_again == plan
           and mapped == discover.map_lanes(data, doc)
           and skipped == (frozen, None, "probe failed")
           and setup.collect_bench(args, doc, rows[0]) == (None, ""))

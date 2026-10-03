@@ -125,6 +125,7 @@ exec /usr/bin/git "$@"
     base_env["PATH"] = os.pathsep.join([fake_bin, "/bin", "/usr/bin"])
     base_env["DELEGATE_LEDGER"] = ledger_path
     base_env["DELEGATE_CACHE"] = cache_path
+    base_env["DELEGATE_MODEL_SCAN"] = "off"
     base_env["ADS_DIR"] = ads_dir
     base_env["DELEGATE_CODEX_HOME"] = codex_home_dir
     # The cases were written with Claude Code orchestrating, so that is the

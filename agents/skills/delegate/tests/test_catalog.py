@@ -990,7 +990,7 @@ with tempfile.TemporaryDirectory() as td:
     )
 
     catalog.write_json(project_path, {
-        "project_order": ["grok46-high@grok", "flash-high@agy"],
+        "project_order": ["grok46-high@grok", "terra-high@codex", "flash-high@agy"],
         "note": "unrelated project key survives",
     })
     effective = catalog.load_catalog(cwd=project_dir, config_dir=cfg_dir)
@@ -1002,7 +1002,7 @@ with tempfile.TemporaryDirectory() as td:
         )
     )
     record(
-        "8.6 named lanes precede global-Order and name fallbacks inside each Tier",
+        "8.6 named lanes keep their sequence, and lanes with no global Order follow by name",
         tier2 == [
             (1, "grok46-high@grok"),
             (2, "terra-high@codex"),
@@ -1011,10 +1011,27 @@ with tempfile.TemporaryDirectory() as td:
         ],
         repr(tier2),
     )
+    # Ticket 30: a Lane the project does not name takes its place by global
+    # Order. The project put C first; the wizard replaced B with B2, which
+    # took B's global order, and B2 lands where B sat rather than last.
+    successor_lanes = {"a@codex": {"order": 1}, "b2@codex": {"order": 2},
+                       "c@codex": {"order": 3}, "new@codex": {}}
+    placed = catalog._place_by_global_order(
+        ["c@codex", "a@codex"],
+        [("b2@codex", successor_lanes["b2@codex"]), ("new@codex", successor_lanes["new@codex"])],
+        successor_lanes)
+    first = catalog._place_by_global_order(
+        ["c@codex"], [("a@codex", successor_lanes["a@codex"])], successor_lanes)
+    record(
+        "8.6b an unnamed Lane takes its place by global Order, one with none goes last",
+        placed == ["c@codex", "a@codex", "b2@codex", "new@codex"]
+        and first == ["a@codex", "c@codex"],
+        repr((placed, first)),
+    )
     record(
         "8.6 effective Order has field sources and cannot change Tier or enabled",
         effective["sources"]["lanes.grok46-high@grok.order"] == project_path
-        and effective["sources"]["lanes.terra-high@codex.order"] == lanes_path
+        and effective["sources"]["lanes.luna-high@codex.order"] == lanes_path
         and effective["lanes"]["grok46-high@grok"]["tier"]
             == global_lanes["lanes"]["grok46-high@grok"]["tier"]
         and effective["lanes"]["grok46-high@grok"].get("enabled", True)
@@ -1710,7 +1727,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _real = make_edit_fixture(
         td,
-        project={"project_order": ["flash-high@agy"], "note": "other tiers stay"},
+        project={"project_order": ["flash-high@agy", "luna-low@codex"], "note": "other tiers stay"},
     )
     preview = catalog_edit.edit_catalog(
         "order",
@@ -1751,7 +1768,7 @@ with tempfile.TemporaryDirectory() as td:
         and lanes_doc["lanes"]["luna-low@codex"]["order"] == 1
         and lanes_doc["lanes"]["flash-high@agy"]["order"] == 2
         and "project_order" not in lanes_doc
-        and project_doc["project_order"] == ["flash-high@agy"]
+        and project_doc["project_order"] == ["flash-high@agy", "luna-low@codex"]
         and project_doc["note"] == "other tiers stay",
     )
 
@@ -1790,7 +1807,7 @@ with tempfile.TemporaryDirectory() as td:
     record(
         "10.6c project Order rewrites only the selected Tier and keeps global lanes",
         project_doc["project_order"]
-            == ["flash-high@agy", "terra-high@codex", "grok46-high@grok"]
+            == ["flash-high@agy", "luna-low@codex", "terra-high@codex", "grok46-high@grok"]
         and project_doc["note"] == "other tiers stay"
         and global_lanes["lanes"]["grok46-high@grok"]["order"] == 1
         and global_lanes["lanes"]["terra-high@codex"]["order"] == 2

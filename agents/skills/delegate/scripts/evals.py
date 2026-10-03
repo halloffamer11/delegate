@@ -177,6 +177,8 @@ class Sandbox:
         self.env["PATH"] = os.pathsep.join([bin_dir, "/bin", "/usr/bin"])
         self.env["DELEGATE_LEDGER"] = os.path.join(self.root, "ledger.jsonl")
         self.env["DELEGATE_CACHE"] = os.path.join(self.root, "usage.json")
+        # the offline world is stubs: no detached model scan runs against them
+        self.env["DELEGATE_MODEL_SCAN"] = "off"
         self.env["DELEGATE_CODEX_HOME"] = os.path.join(self.root, "codex-home")
         self.env["ADS_DIR"] = self.ads_dir
         self.bin_dir = bin_dir

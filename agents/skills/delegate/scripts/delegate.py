@@ -50,6 +50,7 @@ from harnesses import NAMES as HARNESSES, EFFORTS
 import catalog
 import events
 import harnesses
+import model_queue
 import orchestrators
 import rank
 import runs
@@ -142,15 +143,22 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         if harness_filter is not None:
             matches = [(n, d) for n, d in matches if d.get("harness") == harness_filter]
         if not matches:
+            # the next wizard run names it (ticket 29); a queue that cannot be
+            # written never changes this refusal
+            try:
+                model_queue.note([{"harness": harness_filter, "model": model_slug}], "asked")
+                queued = "; noted for the next delegate global"
+            except Exception:
+                queued = ""
             if harness_filter is not None:
                 listing = _lane_model_listing(lanes, harness_filter)
                 sys.stderr.write(
-                    f"delegate: no lane runs model '{model_slug}' on {harness_filter}; lanes on {harness_filter}: {listing}\n"
+                    f"delegate: no lane runs model '{model_slug}' on {harness_filter}{queued}; lanes on {harness_filter}: {listing}\n"
                 )
             else:
                 listing = _lane_model_listing(lanes)
                 sys.stderr.write(
-                    f"delegate: no lane runs model '{model_slug}'; lanes: {listing}\n"
+                    f"delegate: no lane runs model '{model_slug}'{queued}; lanes: {listing}\n"
                 )
             sys.exit(2)
         if len(matches) > 1:
@@ -644,6 +652,8 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     ads_d = resolved["ads_dir"]
 
     effective_leash = should_leash(class_, no_leash=no_leash, routing=resolved["routing"])
+    # at most once a day, a detached look for models the catalog lacks (ticket 29)
+    model_queue.kick(config_dir)
 
     # Step 2: Build the prompt
     prompt_bytes, _ = build_prompt(

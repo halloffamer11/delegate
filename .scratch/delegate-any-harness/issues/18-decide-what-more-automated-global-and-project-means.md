@@ -6,7 +6,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** needs-info, raised by Orin 2026-10-02
+**Status:** closed 2026-10-03. Orin picked "Queue + follow": dispatch queues models the catalog lacks for the next `delegate global` (ticket 29), and a project places new Lanes by global Order (ticket 30). Not picked: a catalog refresh on `make install` or `make update`.
 
-- [ ] Orin names the behaviours he wants.
-- [ ] Build tickets exist for each, and this ticket closes.
+- [x] Orin names the behaviours he wants.
+- [x] Build tickets exist for each, and this ticket closes.
