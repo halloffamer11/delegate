@@ -2848,7 +2848,7 @@ with tempfile.TemporaryDirectory() as which_tmp:
         "18. usage and catalog agree on which harness CLIs are installed",
         usage.which is catalog.cli_installed
         and answers == {"claude": (False, False), "codex": (False, False),
-                        "agy": (True, True), "grok": (False, False)}
+                        "agy": (True, True), "grok": (False, False), "kiro": (False, False)}
         and present == {"agy"}
         and [r.get("note") for r in absent_row] == ["absent"],
         f"answers={answers} present={present} codex_row={absent_row}",

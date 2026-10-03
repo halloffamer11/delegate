@@ -29,6 +29,14 @@ class Harness:
     # The first word of the harness's own vendor's model slugs. The refresh
     # proposes Lanes for the harness's own vendor's models only.
     vendor = None
+    # True for a harness that serves every vendor's models on its own Meter
+    # (Kiro): the refresh proposes Lanes for all of them.
+    any_vendor = False
+    # For a harness the catalog may have no Lane on yet: (meter name, meter
+    # record without `harness`) and the weight and timeout its first Lanes
+    # start from. None means the refresh adds no Lane until one exists.
+    starter_meter = None
+    starter_lane = None
     # The command that lists models (or, for a harness with no list command,
     # the one whose output the adapter reads its efforts from), and the
     # fixture file that stands in for its output in tests.

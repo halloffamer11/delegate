@@ -363,7 +363,7 @@ def case_plain_prints_the_start_facts():
         ok = (result.returncode == 0 and len(facts) >= 4
               and all(0 <= p < first_prompt for p in positions)
               and "Benchmark page: (not written)" in result.stdout
-              and any(line.startswith(("Model discovery", "Models with no lane", "Lanes with retired"))
+              and any(line.startswith(("Model discovery", "Models with no lane", "Lanes with retired", "Harness "))
                       for line in facts)
               and "Tier is capability" not in result.stdout)
         return ok, f"facts={facts} positions={positions} stdout={result.stdout[:500]!r}"
@@ -829,7 +829,8 @@ def case_scan_and_propose_are_the_launch_steps():
     discovered, data, rows, note, paths = setup.scan(args, copy.deepcopy(frozen), force=True)
     doc, plan_again, mapped = setup.propose_generation(copy.deepcopy(frozen), data, rows)
     skipped = setup.propose_generation(copy.deepcopy(frozen), "probe failed", rows)
-    ok = (discovered == set(catalog.HARNESSES) and isinstance(data, dict)
+    # the refresh fixture predates Kiro, so its machine has no Kiro listing
+    ok = (discovered == set(catalog.HARNESSES) - {"kiro"} and isinstance(data, dict)
           and note.startswith("Benchmark rows: Artificial Analysis from ")
           and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
           and rows[1] == "" and len(rows[0]) > 0

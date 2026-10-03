@@ -41,6 +41,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog  # noqa: E402
+import harnesses  # noqa: E402
 import orchestrators  # noqa: E402
 import rank  # noqa: E402
 
@@ -154,8 +155,8 @@ class Sandbox:
         self.meters = FIXTURE_METERS
 
         self.ads_dir = os.path.join(self.root, "ads")
-        for h in catalog.HARNESSES:
-            scripts = os.path.join(self.ads_dir, "skills", f"{h}-delegate", "scripts")
+        for h in harnesses.REGISTRY:
+            scripts = os.path.join(self.ads_dir, "skills", h.relay, "scripts")
             os.makedirs(scripts)
             shutil.copy(FAKE_RELAY, os.path.join(scripts, "relay.mjs"))
 
@@ -165,8 +166,8 @@ class Sandbox:
         pin = next(line.split("=", 1)[1].strip() for line in open(ADS_SH) if line.startswith("ADS_COMMIT="))
         real_git = shutil.which("git") or "/usr/bin/git"
         self._stub(bin_dir, "git", f'for a in "$@"; do [ "$a" = HEAD ] && {{ echo {pin}; exit 0; }}; done\nexec {real_git} "$@"\n')
-        for h in catalog.HARNESSES:
-            self._stub(bin_dir, h, "exit 0\n")
+        for h in harnesses.REGISTRY:
+            self._stub(bin_dir, h.binary, "exit 0\n")
         # Real node, sh and python3 stay reachable without exposing a real
         # harness CLI that shares their directory.
         for tool in ("node", "sh", "python3"):
@@ -203,7 +204,9 @@ class Sandbox:
         return args
 
     def installed(self, harness):
-        return shutil.which(harness, path=self.env.get("PATH")) is not None
+        adapter = harnesses.get(harness)
+        binary = adapter.binary if adapter is not None else harness
+        return shutil.which(binary, path=self.env.get("PATH")) is not None
 
     def orchestrator_env(self, profile):
         """The env an orchestrator's shell gives delegate: no other
@@ -285,9 +288,9 @@ def ping_one(sandbox, harness):
     return "pass", f"{lane} answered pong ({run_dir})", run_dir
 
 
-def eval_ping(sandbox, harnesses):
+def eval_ping(sandbox, names):
     results = {}
-    for h in harnesses:
+    for h in names:
         results[h] = ping_one(sandbox, h)
     return results
 
@@ -398,13 +401,13 @@ def main(argv=None):
     parser.add_argument("--keep", action="store_true", help="keep the sandbox directory")
     args = parser.parse_args(argv)
 
-    harnesses = args.harness or list(catalog.HARNESSES)
+    names = args.harness or list(catalog.HARNESSES)
     sandbox = Sandbox(args.offline, keep=args.keep)
     try:
         if args.eval == "ping":
-            return print_results("ping", eval_ping(sandbox, harnesses))
-        names = args.harness or [n for n, p in orchestrators.load().items() if p.get("launch")]
-        return print_results("orchestrate", eval_orchestrate(sandbox, names))
+            return print_results("ping", eval_ping(sandbox, names))
+        launchable = args.harness or [n for n, p in orchestrators.load().items() if p.get("launch")]
+        return print_results("orchestrate", eval_orchestrate(sandbox, launchable))
     finally:
         sandbox.close()
 

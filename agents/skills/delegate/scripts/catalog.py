@@ -2428,7 +2428,10 @@ def edit_catalog(
     picks_before, leaders_before = _rank_preview(before_cat, meters_doc, present_set)
     picks_after, leaders_after = _rank_preview(after_cat, meters_doc, present_set)
     observations, missing = _observations_report(meters_doc, before_cat["meters"])
-    unavailable = sorted(h for h in HARNESSES if h not in present_set)
+    # a harness this catalog runs no Lane on cannot change a Pick, so its
+    # absence is not news
+    in_catalog = {lane.get("harness") for lane in (after_cat.get("lanes") or {}).values()}
+    unavailable = sorted(h for h in HARNESSES if h not in present_set and h in in_catalog)
 
     changed = _changed_fields(
         op,

@@ -925,7 +925,8 @@ record(
     remapped["unmapped"] == []
     and not any(line.startswith("Models with no lane")
                 for line in setup_tui.discovery_notices(remapped, 10_000))
-    and setup_tui.discovery_notices(remapped, 10_000) == ["Model discovery: no drift"],
+    # the fixture machine has no Kiro CLI, which is the one thing worth saying
+    and setup_tui.discovery_notices(remapped, 10_000) == ["Harness kiro: missing"],
     repr(setup_tui.discovery_notices(remapped, 10_000)),
 )
 

@@ -6,7 +6,7 @@ remaining subscription usage.
 ## Delegate: who runs a job
 
 **Harness**:
-A CLI that runs models: `claude`, `codex`, `agy`, or `grok`.
+A CLI that runs models: `claude`, `codex`, `agy`, `grok`, or `kiro` (its CLI is `kiro-cli`, and it serves several vendors' models on one Meter).
 
 **Orchestrator harness**:
 The harness that runs the session that plans, dispatches, and checks results. Any harness that can run a shell and read files can be one; delegate detects it (or takes `--orchestrator`) and never assumes it.

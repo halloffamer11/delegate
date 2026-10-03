@@ -30,6 +30,7 @@ COURIER_MD = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents", "cou
 RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
 
 sys.path.insert(0, DELEGATE_DIR)
+import harnesses  # noqa: E402
 import delegate  # noqa: E402
 
 
@@ -66,8 +67,8 @@ def setup_env(root_dir):
     shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), os.path.join(config_dir, "routing.json"))
 
     ads_dir = os.path.join(root_dir, "ads")
-    for h in ("claude", "codex", "agy", "grok"):
-        scripts_dir = os.path.join(ads_dir, "skills", f"{h}-delegate", "scripts")
+    for h in harnesses.REGISTRY:
+        scripts_dir = os.path.join(ads_dir, "skills", h.relay, "scripts")
         os.makedirs(scripts_dir, exist_ok=True)
         shutil.copy(FAKE_RELAY_SRC, os.path.join(scripts_dir, "relay.mjs"))
         os.chmod(os.path.join(scripts_dir, "relay.mjs"), 0o755)
@@ -91,7 +92,7 @@ exec /usr/bin/git "$@"
 ''' % pinned_ads_commit())
     os.chmod(git_script, 0o755)
 
-    for h in ("claude", "codex", "agy", "grok"):
+    for h in (h.binary for h in harnesses.REGISTRY):
         stub = os.path.join(fake_bin, h)
         with open(stub, "w") as f:
             f.write("#!/bin/sh\nexit 0\n")
@@ -1251,6 +1252,32 @@ def main():
         record("31e. CLAUDECODE alone runs a claude lane natively",
                res31e.returncode == 0 and res31e.stdout.startswith("delegate: native lane=opus-high@claude"),
                f"rc={res31e.returncode} stdout={res31e.stdout} stderr={res31e.stderr}")
+
+        # 31f. a Kiro Lane dispatches through kiro-delegate with the model and
+        # effort (any-harness ticket 15); offline, through the fake relay
+        kiro_env = dict(t_env)
+        kiro_env["config_dir"] = os.path.join(os.path.dirname(t_env["config_dir"]), "config-kiro")
+        shutil.copytree(t_env["config_dir"], kiro_env["config_dir"])
+        lanes_kiro = json.load(open(os.path.join(kiro_env["config_dir"], "lanes.json")))
+        lanes_kiro["meters"]["kiro"] = {"harness": "kiro", "plan": "Kiro Pro", "price_month": 20,
+                                       "probe": "usage.py"}
+        lanes_kiro["lanes"]["opus55-high@kiro"] = {
+            "harness": "kiro", "model": "claude-opus-5.5", "effort": "high", "meter": "kiro",
+            "meter_weight": 1, "timeout": "30m",
+            "price": {"in": None, "cache_read": None, "cache_write": None, "out": None},
+            "tier": 3, "basis": "test"}
+        with open(os.path.join(kiro_env["config_dir"], "lanes.json"), "w") as f:
+            json.dump(lanes_kiro, f)
+        b31f = make_brief("b31f.md", f"fake-relay: status=completed final={done_final}\nBrief 31f.")
+        res31f = run_dispatch(kiro_env, ["--lane", "opus55-high@kiro", "--class", "impl", "--brief", b31f,
+                                         "--cwd", cwd])
+        dir31f = parse_run_dir_from_stdout(res31f.stdout)
+        argv31f = json.load(open(os.path.join(dir31f, "argv.json"))) if dir31f else []
+        record("31f. a kiro lane dispatches through its relay with model, effort and --read-only",
+               res31f.returncode == 0 and "status=done" in res31f.stdout
+               and all(x in argv31f for x in ["--model", "claude-opus-5.5", "--effort", "high",
+                                               "--timeout", "30m", "--read-only"]),
+               f"rc={res31f.returncode} stdout={res31f.stdout} stderr={res31f.stderr} argv={argv31f}")
 
         # -------------------------------------------------------------
         # 32. prompt.md preamble permits disposable browser and forbids other network writes

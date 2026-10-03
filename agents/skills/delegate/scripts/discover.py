@@ -142,7 +142,7 @@ VERSION_PART = re.compile(r"^\d+(?:\.\d+)*$")
 # The words that name a whole family rather than one model. A new lane is named
 # after the model, so `gpt-6-sol` gives `sol6`; where the family word is the
 # model's own name, as grok's is, the name keeps it and gives `grok47`.
-VENDOR_WORDS = tuple(h.vendor for h in harnesses.REGISTRY)
+VENDOR_WORDS = tuple(h.vendor for h in harnesses.REGISTRY if h.vendor)
 
 # An ultra lane is generated off and says why: no source scores it, and its
 # automatic task delegation contradicts the worker preamble (ticket 15).
@@ -480,6 +480,10 @@ def own_vendor(model):
     either: the other vendors' models agy serves are somebody else's business.
     """
     slug = model.get("slug") or ""
+    adapter = harnesses.get(model.get("harness"))
+    if adapter is not None and adapter.any_vendor:
+        # Kiro serves every vendor's models on its own Meter: all are its own
+        return bool(model.get("level"))
     return bool(model.get("level")) and slug.split("-")[0] == HARNESS_VENDOR.get(model.get("harness"))
 
 
@@ -583,6 +587,21 @@ def _donor(harness, effort, lanes, new_lanes, leaving):
     return candidates[0] if candidates else (None, None)
 
 
+def _starter(harness, doc):
+    """(where the figures came from, a donor-shaped record) for the first Lane
+    on a harness whose adapter declares a starter, adding its Meter to the
+    document when the catalog has none; None for any other harness."""
+    adapter = harnesses.get(harness)
+    if adapter is None or adapter.starter_meter is None or adapter.starter_lane is None:
+        return None
+    meter_name, meter = adapter.starter_meter
+    meters = doc.setdefault("meters", {})
+    if meter_name not in meters:
+        meters[meter_name] = {"harness": harness, **copy.deepcopy(meter)}
+    return f"the {harness} adapter's starter", {"meter": meter_name, "tier": 1,
+                                                 **copy.deepcopy(adapter.starter_lane)}
+
+
 def _lane_stem_of(lane_name):
     """`sol` from `sol-high@codex`: what the start page prints as `sol-*@codex`."""
     return lane_name.rsplit("@", 1)[0].rsplit("-", 1)[0]
@@ -658,8 +677,12 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 source_name, source = _donor(harness, effort, lanes, new_lanes, set(leaving))
                 basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
             if source is None:
-                # nothing on this harness to copy a weight or a timeout from
-                continue
+                starter = _starter(harness, doc)
+                if starter is None:
+                    # nothing on this harness to copy a weight or a timeout from
+                    continue
+                source_name, source = starter
+                basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
             record = {
                 "harness": harness,
                 "model": model_text,

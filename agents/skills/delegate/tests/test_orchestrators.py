@@ -36,7 +36,7 @@ def write_profile(d, name, doc):
 
 
 def test_shipped():
-    record("claude and codex profiles ship", {"claude", "codex"} <= set(SHIPPED), sorted(SHIPPED))
+    record("claude, codex and kiro profiles ship", {"claude", "codex", "kiro"} <= set(SHIPPED), sorted(SHIPPED))
     record("only claude runs a Lane in-process",
            orchestrators.native_harnesses(SHIPPED) == {"claude"})
     record("every shipped launch puts the prompt in its argv",
@@ -52,7 +52,7 @@ def test_resolution():
          {"CLAUDECODE": "1", "DELEGATE_ORCHESTRATOR": "codex"}, "codex"),
         ("--orchestrator beats both", "claude", {"DELEGATE_ORCHESTRATOR": "codex"}, "claude"),
         ("none is the default path, even inside Claude Code", "none", {"CLAUDECODE": "1"}, None),
-        ("an unknown name is the default path", "kiro", {}, None),
+        ("an unknown name is the default path", "nosuch", {}, None),
     ]
     for label, name, env, want in cases:
         got = orchestrators.resolve(name, env=env, profiles=SHIPPED)

@@ -2961,20 +2961,22 @@ except Exception as e:
 
 
 try:
-    # the harnesses page counts its body in the table's room: at 80x16 every
+    # the harnesses page counts its body in the table's room: at 80 by 12
+    # rows plus one per harness (16 with four, 17 with Kiro's five) every
     # harness shows, and the legend gives way first
     w, _r, _p = scanned_wizard(rescan=lambda: None)
     w.handle("enter")
     v = w.view(80)
-    grid = screen(v, 80, 16)
+    rows = 12 + len(catalog.HARNESSES)
+    grid = screen(v, 80, rows)
     shown = [line.split()[0] for line in grid if line.split() and line.split()[0] in catalog.HARNESSES]
-    roomy = screen(v, 80, 24)
-    record("79 the harnesses page at 80x16 shows every harness row, and its body",
+    roomy = screen(v, 80, 25)
+    record("79 the harnesses page at 80 by 12 + harnesses rows shows every harness row, and its body",
            len(v["body"]) == 2 and shown == list(catalog.HARNESSES)
            and grid[setup_tui.TOP].startswith("Scanned at launch")
            and not any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in grid)
-           and grid[16 - 3].startswith("any key")
-           and not grid[2].rstrip().endswith("of 4")
+           and grid[rows - 3].startswith("any key")
+           and not grid[2].rstrip().endswith(f"of {len(catalog.HARNESSES)}")
            # with room, the legend is back
            and any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in roomy),
            repr(grid))

@@ -7,9 +7,9 @@ entry in REGISTRY. Everything else in delegate iterates the registry or asks
 import shutil
 
 from .base import EFFORTS, Harness  # noqa: F401
-from . import agy, claude, codex, grok
+from . import agy, claude, codex, grok, kiro
 
-REGISTRY = (claude.HARNESS, codex.HARNESS, agy.HARNESS, grok.HARNESS)
+REGISTRY = (claude.HARNESS, codex.HARNESS, agy.HARNESS, grok.HARNESS, kiro.HARNESS)
 NAMES = tuple(h.name for h in REGISTRY)
 _BY_NAME = {h.name: h for h in REGISTRY}
 
