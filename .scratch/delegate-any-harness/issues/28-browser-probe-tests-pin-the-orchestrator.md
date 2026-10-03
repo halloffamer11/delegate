@@ -20,13 +20,16 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02 after `make test` failed on omarchy.
+**Status:** landed 2026-10-03. `test_env` drops `CLAUDECODE`, sets `DELEGATE_ORCHESTRATOR=claude` and its own
+`DELEGATE_ORCHESTRATORS_DIR`. Reproduced the failure with `env -u CLAUDECODE`, then `make test` passed from a
+plain shell, inside Claude Code and with `DELEGATE_ORCHESTRATOR=codex`. The other `os.environ` copies under
+`tests/` and `tools/` (bench, report, catalog, delegate command) run nothing that calls `orchestrators.resolve()`.
 
-- [ ] `test_browser_probes.py` pins the orchestrator the way `test_dispatch.py` does: no
+- [x] `test_browser_probes.py` pins the orchestrator the way `test_dispatch.py` does: no
       `CLAUDECODE` from the host, `DELEGATE_ORCHESTRATOR=claude`, and its own
       `DELEGATE_ORCHESTRATORS_DIR`.
-- [ ] `make test` gives the same result from a plain shell, from inside Claude Code, and with
+- [x] `make test` gives the same result from a plain shell, from inside Claude Code, and with
       `DELEGATE_ORCHESTRATOR=codex` set in the host.
-- [ ] No other test under `agents/skills/delegate/tests/` or `tools/` copies `os.environ` into a
+- [x] No other test under `agents/skills/delegate/tests/` or `tools/` copies `os.environ` into a
       run that resolves an orchestrator without pinning it; fix each one found.
-- [ ] `make test` passes on 3.9 and 3.13.
+- [x] `make test` passes on 3.9 and 3.13.
