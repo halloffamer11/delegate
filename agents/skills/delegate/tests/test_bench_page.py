@@ -31,6 +31,7 @@ REAL_LANES = os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
+import carry
 import bench_page
 import catalog
 import harnesses
@@ -311,7 +312,7 @@ except Exception as e:
 # --- the page is the evidence for the pre-screen, so it has to say the same -----
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
-    proposals = setup_tui.propose_enabled(ASTRA, SWEEP)
+    proposals = carry.decisions(ASTRA, SWEEP)
     off = sorted(name for name, decision in proposals.items()
                  if not decision["enabled"] and setup_tui.is_dominated_reason(decision))
     struck = [p for p in board_named(data_of(page), "Terminal-Bench 4.0")["points"] if p["kind"] == "lane_off"]
@@ -870,7 +871,7 @@ try:
             lane["effort"] = effort
             doc["lanes"][f"fable-{effort}@claude"] = lane
         doc["lanes"]["flash-low@agy"] = dict(LANES["lanes"]["flash-high@agy"], model="gemini-3.8-flash-low", effort="low")
-        lanes = [{"name": n, "group": setup_tui.model_group(doc["lanes"][n]), "effort": doc["lanes"][n]["effort"]}
+        lanes = [{"name": n, "group": carry.model_of(doc["lanes"][n]), "effort": doc["lanes"][n]["effort"]}
                  for n in sorted(doc["lanes"])]
         ordered = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy", "flash-low@agy"]
         tiers = {"sol-high@codex": 4, "fable-low@claude": 3, "fable-max@claude": 1, "flash-low@agy": 1}

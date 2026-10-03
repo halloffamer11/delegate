@@ -24,6 +24,7 @@ PRICE_KEY = '"price": {'
 
 sys.path.insert(0, DELEGATE_DIR)
 import bench
+import carry
 import catalog
 import discover
 import harnesses
@@ -492,9 +493,10 @@ with open(os.path.join(REFRESH_DIR, "aa-accepted.json"), encoding="utf-8") as f:
     frozen_rows = json.load(f)
 published = sorted({r["model"] for r in frozen_rows if r.get("source") == "aa"})
 
-levels = {slug: discover.model_level(slug) for slug in (
-    "gpt-6-sol", "gpt-5.6-sol", "claude-opus-5-5", "claude-opus-5", "grok-4.7",
-    "grok-4.7-build-fast", "gemini-3.8-flash-high", "gemini-3.1-pro-low",
+levels = {slug: discover.model_level(slug, harness) for slug, harness in (
+    ("gpt-6-sol", "codex"), ("gpt-5.6-sol", "codex"), ("claude-opus-5-5", "claude"),
+    ("claude-opus-5", "claude"), ("grok-4.7", "grok"), ("grok-4.7-build-fast", "grok"),
+    ("gemini-3.8-flash-high", "agy"), ("gemini-3.1-pro-low", "agy"),
 )}
 record(
     "a model's level is its slug without the version",
@@ -639,7 +641,7 @@ record(
 # lane may make it: a new lane records no `enabled` at all, and ultra reads as
 # ultra (ticket 35).
 new_reasons = {name: bench.carry_reason(decision)
-               for name, decision in bench.propose_enabled(refreshed, frozen_rows).items()
+               for name, decision in carry.decisions(refreshed, frozen_rows).items()
                if name in set(plan["new"])}
 record(
     "no new lane's carry reason claims catalog state the file does not hold",
@@ -779,8 +781,9 @@ record(
     f"{sorted(haiku)} {valid_or_error(haiku_doc)}",
 )
 
-dated = {slug: discover.model_level(slug) for slug in (
-    "gpt-6-sol-2026-11-01", "gpt-6-sol-20261101", "claude-haiku-4-5-20251001")}
+dated = {slug: discover.model_level(slug, harness) for slug, harness in (
+    ("gpt-6-sol-2026-11-01", "codex"), ("gpt-6-sol-20261101", "codex"),
+    ("claude-haiku-4-5-20251001", "claude"))}
 _, dated_doc, dated_plan = refresh_with(codex_add(("gpt-6-sol-2026-11-01", ["high"]),
                                                   ("gpt-6.1-sol", ["high"])))
 record(

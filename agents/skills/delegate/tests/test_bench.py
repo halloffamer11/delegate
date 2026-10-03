@@ -21,6 +21,8 @@ BENCH_PY = os.path.join(DELEGATE_DIR, "bench.py")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench  # noqa: E402  (after sys.path, as the other test files do)
+import published_names  # noqa: E402
+import carry  # noqa: E402
 import harnesses  # noqa: E402
 AGY = harnesses.get("agy")
 
@@ -658,7 +660,7 @@ try:
         carry_row("low", "b1", 0.7, 0.5), carry_row("low", "b2", 0.1, 0.5),
         carry_row("low", "b3", 0.1, 0.5),
     ]
-    proposals = bench.propose_enabled(CARRY_LANES, rows)
+    proposals = carry.decisions(CARRY_LANES, rows)
     high, medium, low = (proposals[f"luna-{e}@codex"] for e in ("high", "medium", "low"))
     record(
         "dominating_effort is same-source majority, returned as kind/source/competitor",
@@ -681,7 +683,7 @@ try:
         carry_row("medium", "index", 50.0, 1.0, composite=True),
         carry_row("high", "index", 40.0, 2.0, composite=True),
     ]
-    high = bench.propose_enabled(CARRY_LANES, rows)["luna-high@codex"]
+    high = carry.decisions(CARRY_LANES, rows)["luna-high@codex"]
     record(
         "the AA composite is shown and never counted in domination",
         high["kind"] == "not_dominated" and high["enabled"] is True,
@@ -691,13 +693,13 @@ except Exception as e:
     record("the AA composite is shown and never counted in domination", False, repr(e))
 
 try:
-    none_rows = bench.propose_enabled(CARRY_LANES, None)
-    empty_rows = bench.propose_enabled(CARRY_LANES, [])
+    none_rows = carry.decisions(CARRY_LANES, None)
+    empty_rows = carry.decisions(CARRY_LANES, [])
     record(
         "unavailable evidence and an empty proposal remain distinct",
         all(d["kind"] == "unavailable" for d in none_rows.values())
-        and bench.evidence_unavailable(None, none_rows)
-        and not bench.evidence_unavailable([], empty_rows)
+        and carry.evidence_unavailable(None, none_rows)
+        and not carry.evidence_unavailable([], empty_rows)
         and all(d["kind"] == "no_rows" for d in empty_rows.values())
         and bench.carry_reason(none_rows["luna-low@codex"]) == "no per-effort data"
         and bench.carry_reason(empty_rows["luna-low@codex"]) == "no rows for this lane",
@@ -715,8 +717,8 @@ try:
         carry_row("high", "b", 5.0, 2.0, source="t"),
         carry_row("medium", "b", 5.0, 1.5, source="t"),
     ]
-    tied_p = bench.propose_enabled(CARRY_LANES, tied)
-    cheap_p = bench.propose_enabled(CARRY_LANES, cheaper)
+    tied_p = carry.decisions(CARRY_LANES, tied)
+    cheap_p = carry.decisions(CARRY_LANES, cheaper)
     record(
         "equal score at equal cost does not dominate; a cheaper equal score does",
         tied_p["luna-high@codex"]["kind"] == "not_dominated"
@@ -775,7 +777,7 @@ try:
         agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
         agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
     ]
-    proposals = bench.propose_enabled(AGY_CARRY_LANES, rows)
+    proposals = carry.decisions(AGY_CARRY_LANES, rows)
     high = proposals["flash-high@agy"]
     record(
         "an agy effort is dominated by another effort of the same slug family",
@@ -792,7 +794,7 @@ except Exception as e:
 
 try:
     rows = [agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0)]
-    proposals = bench.propose_enabled(AGY_CARRY_LANES, rows)
+    proposals = carry.decisions(AGY_CARRY_LANES, rows)
     record(
         "two agy efforts sharing no benchmark propose nothing",
         proposals["flash-high@agy"]["kind"] == "not_dominated"
@@ -804,15 +806,15 @@ except Exception as e:
     record("two agy efforts sharing no benchmark propose nothing", False, repr(e))
 
 try:
-    families = bench.model_families(AGY_CARRY_LANES)
-    guard_families = bench.model_families(GUARD_LANES)
+    families = carry.families(AGY_CARRY_LANES)
+    guard_families = carry.families(GUARD_LANES)
     guard_rows = [
         agy_row("low", "b1", 0.90, 0.5, model="gpt-6-edge-low"),
         agy_row("low", "b2", 0.90, 0.5, model="gpt-6-edge-low"),
         agy_row("high", "b1", 0.50, 2.0, model="gpt-6-edge-high"),
         agy_row("high", "b2", 0.50, 2.0, model="gpt-6-edge-high"),
     ]
-    guard = bench.propose_enabled(GUARD_LANES, guard_rows)
+    guard = carry.decisions(GUARD_LANES, guard_rows)
     record(
         "every harness but agy keys the carry rule on the model string",
         families == {"gemini-3.8-flash-low": "gemini-3.8-flash",
@@ -832,19 +834,19 @@ except Exception as e:
     record("every harness but agy keys the carry rule on the model string", False, repr(e))
 
 try:
-    resolved, _unmatched = bench.resolve_effort_rows(AGY_CARRY_LANES, [
+    resolved, _unmatched = published_names.resolve_effort_rows(AGY_CARRY_LANES, [
         agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
         agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
     ])
-    certain = bench.certain_effort_rows(resolved)
-    families = bench.model_families(AGY_CARRY_LANES)
+    certain = carry.certain_effort_rows(resolved)
+    families = carry.families(AGY_CARRY_LANES)
     target = next(r for r in certain if r["effort"] == "high" and r["benchmark"] == "b1")
-    other = bench.dominating_row(target, certain, families)
+    other = carry.dominating_row(target, certain, families)
     record(
         "dominating_row gives the agy competitor's point on the row's own board",
         other is not None and other["effort"] == "medium" and other["benchmark"] == "b1"
         and other["model"] == "gemini-3.8-flash-medium"
-        and bench.dominating_row(target, certain) is None,
+        and carry.dominating_row(target, certain) is None,
         str(other),
     )
 except Exception as e:

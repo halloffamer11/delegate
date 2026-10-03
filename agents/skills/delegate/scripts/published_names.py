@@ -106,3 +106,34 @@ def resolve_published_model(published, lanes_doc, effort=None):
         if len(at_effort) == 1:
             return at_effort.pop()
     return None
+
+
+def resolve_effort_rows(lanes_doc, effort_rows):
+    """Returns (rows keyed by catalog model, published names that name no lane).
+
+    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
+    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
+    comparison below is against `lane["model"]`, so each row is re-keyed to the
+    lane model its printed name denotes, and the catalog owns that mapping
+    (`published_names.resolve_published_model`). A row naming no lane model is dropped
+    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
+    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
+    all is what a human needs to spot a `published_as` they still owe us.
+    """
+    resolved, unmatched = [], []
+    for row in effort_rows or []:
+        if not isinstance(row, dict):
+            continue
+        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
+        if model is None:
+            name = row.get("model")
+            if isinstance(name, str) and name.strip() and name not in unmatched:
+                unmatched.append(name)
+            continue
+        if model == row.get("model"):
+            resolved.append(row)
+        else:
+            copied = dict(row)
+            copied["model"] = model
+            resolved.append(copied)
+    return resolved, unmatched

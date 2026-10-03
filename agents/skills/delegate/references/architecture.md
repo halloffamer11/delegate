@@ -142,8 +142,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes`
   (only the figures measured at that lane's own effort, with `mean`/`n` over those).
   `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the
-  page both read it from there. Carry and display-order policy live beside `collect`:
-  `dominating_effort`, `propose_enabled`, `group_lanes`, `lane_order`. `propose_enabled` returns
+  page both read it from there. Display order lives beside `collect` (`group_lanes`,
+  `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
+  `scripts/carry.py` (ticket 27): `families()`, `beats()` and `decisions()`, which returns
   structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
   `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
   reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares
@@ -189,8 +190,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   which is never in the repo: each machine keeps its own (Orin, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
-  opens, which reads its attribution, its domination rule and its lane order (`bench.lane_order`,
-  `group_lanes`, `propose_enabled`) from `bench.py` rather than deciding any of them again. HTML
+  opens, which reads its attribution and its lane order (`bench.lane_order`, `group_lanes`) from
+  `bench.py` and its domination rule (`carry.decisions`, `carry.dominating_row`) from `carry.py`
+  rather than deciding any of them again. HTML
   carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline
   JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with
   its own filters and the frontier of what is shown, and only lays out what Python decided. Each
@@ -314,16 +316,17 @@ down one Tier; Tier 1 requires Carry to switch off.
   Artificial Analysis rows straight out of the dataset every `/models/<slug>` page embeds, with no
   worker. `check` is the trust boundary: it rejects any number that is not on the page, and no
   worker or parser may originate a number or an identifier.
-- The carry page's domination rule is `bench.dominating_effort`: another effort of the same model,
-  for no more money, beats the lane on more than half of the benchmarks one source scored both on.
+- The carry page's domination rule is `carry.dominating_effort`: another effort of the same model,
+  for no more money (`carry.beats`, which the Tier proposal's cost frontier also uses), beats the
+  lane on more than half of the benchmarks one source scored both on.
   Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is
-  a family key, not the model string (ticket 30): `bench.model_families(lanes_doc)` keys every
+  a family key, not the model string (ticket 30): `carry.families(lanes_doc)` keys every
   harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
   because agy names each effort as its own model. The harness decides, never the spelling. That
   family rule has one implementation, the adapter's `family` (`harnesses/agy.py`, reached through
-  `harnesses.family` and `harnesses.slug_family`), which the agy adapter's `group` also groups its
-  model listing with. `dominating_effort`, `dominating_row` and `_first_domination` take the map;
-  without one every model is its own family. `setup_tui` re-exports the policy helpers.
+  `harnesses.family`, and per Lane through `carry.model_of`, which also groups the pages' rows),
+  which the agy adapter's `group` also groups its model listing with. `dominating_effort`,
+  `dominating_row` and `first_domination` take the map; without one every model is its own family.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
   `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.

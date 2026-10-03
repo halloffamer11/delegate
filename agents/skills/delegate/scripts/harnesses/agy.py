@@ -49,7 +49,7 @@ class Agy(Harness):
 
         One rule in one place. Discovery groups a harness listing with it
         (`parse_models`) and the carry rule groups a lane's rows with it
-        (`bench.model_families`), so the wizard can never disagree with the models
+        (`carry.families`), so the wizard can never disagree with the models
         discovery reported (ticket 30).
         """
         text = slug or ""

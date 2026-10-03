@@ -118,7 +118,6 @@ def test_family():
     record("a harness with the effort in the slug splits it off; others never do",
            harnesses.family("agy", "gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
            and harnesses.family("codex", "gpt-6-sol-high") == ("gpt-6-sol-high", None)
-           and harnesses.slug_family("gemini-3.8-flash-low") == ("gemini-3.8-flash", "low")
            and agy.lane_model({"slug": "gemini-3.8-flash", "members": {"low": "gemini-3.8-flash-low"}}, "low")
            == "gemini-3.8-flash-low")
 

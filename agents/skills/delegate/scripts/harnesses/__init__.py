@@ -65,17 +65,6 @@ def family(harness, slug):
     return h.family(slug) if h is not None else (slug or "", None)
 
 
-def slug_family(slug):
-    """(base, effort) for a slug of unknown harness: the first family any
-    effort-in-slug harness finds in it, else (slug, None)."""
-    for h in REGISTRY:
-        if h.effort_in_slug:
-            base, effort = h.family(slug)
-            if effort is not None:
-                return base, effort
-    return slug or "", None
-
-
 def lane_name(stem, effort, harness):
     """`<stem>-<effort>@<harness>`: the one spelling of a Lane name. `effort`
     None means `stem` already carries it (`sol-high`)."""

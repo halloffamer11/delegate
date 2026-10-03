@@ -32,6 +32,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import bench  # noqa: E402
+import carry  # noqa: E402
 import published_names  # noqa: E402
 
 FRONTIER = "frontier"
@@ -76,15 +77,6 @@ def band(score, thresholds):
     return max(cleared, default=1)
 
 
-def _beats(other, lane):
-    """Whether `other` beats `lane` on both axes: no lower score for no more
-    cost, better on one. An unknown cost never beats and is never beaten."""
-    if other["cost"] is None or lane["cost"] is None:
-        return False
-    return (other["score"] >= lane["score"] and other["cost"] <= lane["cost"]
-            and (other["score"] > lane["score"] or other["cost"] < lane["cost"]))
-
-
 def propose(lanes_doc, effort_rows, settings, names=None):
     """{lane: proposal} for each scored Lane among `names` (default all).
 
@@ -105,7 +97,7 @@ def propose(lanes_doc, effort_rows, settings, names=None):
         keep = {}
         for name in candidates:
             beater = next((other for other in candidates
-                           if other != name and _beats(scores[other], scores[name])), None)
+                           if other != name and carry.beats(scores[other], scores[name], cost="cost")), None)
             if beater is None:
                 keep[name] = FRONTIER
             elif tier == 1:

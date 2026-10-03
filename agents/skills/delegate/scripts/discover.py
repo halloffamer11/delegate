@@ -198,21 +198,18 @@ def model_takes_effort(harness, slug):
     return adapter is None or adapter.model_takes_effort(slug)
 
 
-def model_level(slug, harness=None):
+def model_level(slug, harness):
     """(level, version) for a model slug: the slug with its version taken out,
     and that version as a tuple of whole numbers.
 
     `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`, at (6,) and (5, 6);
     `claude-opus-5-5` is `claude-opus` at (5, 5); a slug with no version is its
-    own level, at (). The agy effort suffix comes off first, so one slug family
-    has one level (`harnesses.slug_family`, or the harness's own rule when the
-    harness is named), and a trailing date stamp comes off next (`DATE_PART`):
+    own level, at (). The harness's own effort rule comes off first
+    (`harnesses.family`), so one agy slug family has one level, and a trailing
+    date stamp comes off next (`DATE_PART`):
     `claude-haiku-4-5-20251001` is `claude-haiku` at (4, 5).
     """
-    if harness is not None:
-        base, _effort = harnesses.family(harness, slug or "")
-    else:
-        base, _effort = harnesses.slug_family(slug or "")
+    base, _effort = harnesses.family(harness, slug or "")
     parts = base.split("-")
     if len(parts) > 1 and DATE_PART.match(parts[-1]):
         parts = parts[:-1]

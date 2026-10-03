@@ -26,6 +26,7 @@ FIXTURES_DISCOVER = os.path.join(FIXTURES, "discover")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
+import carry
 import catalog
 import published_names
 import harnesses
@@ -1118,7 +1119,7 @@ try:
     doc = astra_lanes()
     lane_models = {lane["model"] for lane in doc["lanes"].values()}
     resolved = {(r["model"], published_names.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
-    _rows, unmatched = setup_tui.resolve_effort_rows(doc, AA_ROWS)
+    _rows, unmatched = published_names.resolve_effort_rows(doc, AA_ROWS)
     w = wizard(lanes=doc, effort_rows=AA_ROWS)
     w.handle("enter")
     w.handle("enter")
@@ -1689,7 +1690,7 @@ def groups_of(names, doc):
     """The model groups in the order they appear, each with its efforts."""
     out = []
     for name in names:
-        group = setup_tui.model_group(doc["lanes"][name])
+        group = carry.model_of(doc["lanes"][name])
         if not out or out[-1][0] != group:
             out.append((group, []))
         out[-1][1].append(doc["lanes"][name]["effort"])
@@ -1698,11 +1699,8 @@ def groups_of(names, doc):
 
 try:
     record("policy helpers on setup_tui are aliases of bench",
-           setup_tui.propose_enabled is bench.propose_enabled
-           and setup_tui.group_lanes is bench.group_lanes
-           and setup_tui.lane_order is bench.lane_order
-           and setup_tui.dominating_effort is bench.dominating_effort
-           and setup_tui.model_group is bench.model_group)
+           setup_tui.group_lanes is bench.group_lanes
+           and setup_tui.lane_order is bench.lane_order)
 except Exception as e:
     record("policy helpers on setup_tui are aliases of bench", False, repr(e))
 
@@ -1716,8 +1714,8 @@ try:
            grouped == ["fable-max@claude", "fable-low@claude", "sol-high@codex", "sol-low@codex",
                        "flash-high@agy", "flash-low@agy"]
            # an agy slug family is one model
-           and setup_tui.model_group(doc["lanes"]["flash-low@agy"]) == setup_tui.model_group(doc["lanes"]["flash-high@agy"])
-           and setup_tui.model_group(doc["lanes"]["sol-low@codex"]) != setup_tui.model_group(doc["lanes"]["luna-low@codex"])
+           and carry.model_of(doc["lanes"]["flash-low@agy"]) == carry.model_of(doc["lanes"]["flash-high@agy"])
+           and carry.model_of(doc["lanes"]["sol-low@codex"]) != carry.model_of(doc["lanes"]["luna-low@codex"])
            and [setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")]
            == sorted(setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")),
            repr(grouped))
@@ -1731,17 +1729,17 @@ try:
     w = wizard(lanes=doc)
     w.handle("enter")
     w.handle("enter")
-    carry = [r["cells"][1] for r in w.view()["rows"]]
-    carry_groups = groups_of(carry, doc)
+    carry_rows = [r["cells"][1] for r in w.view()["rows"]]
+    carry_groups = groups_of(carry_rows, doc)
     w.handle("enter")
     t4 = [r["cells"][1] for r in w.view()["rows"]]
     t4_groups = groups_of(t4, doc)
     # sol-high leads the benchmark order and fable's measured lane is fable-max,
     # so the sol group comes first and every group is whole, most effort first
-    sol, flash, fable = (setup_tui.model_group(doc["lanes"][n])
+    sol, flash, fable = (carry.model_of(doc["lanes"][n])
                          for n in ("sol-high@codex", "flash-high@agy", "fable-max@claude"))
     record("44 the carry page and the tier pages group by model, efforts most to least",
-           carry[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"]
+           carry_rows[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"]
            and len({g for g, _ in carry_groups}) == len(carry_groups)
            and dict(carry_groups)[sol] == ["ultra", "high", "low"]
            and dict(carry_groups)[flash] == ["high", "low"]
@@ -1750,7 +1748,7 @@ try:
            and dict(t4_groups)[fable] == ["max", "xhigh", "high", "medium", "low"]
            and "sol-ultra@codex" not in t4
            and all(eff == sorted(eff, key=setup_tui.effort_rank) for _g, eff in t4_groups),
-           repr((carry, t4)))
+           repr((carry_rows, t4)))
     # the review page is by tier and in Orin's order, so the model grouping
     # does not apply there (ticket 28): with no lines and no catalog order a
     # tier starts in benchmark order
@@ -2632,8 +2630,8 @@ try:
     ready_after = w.rescan_ready()
     rows = {row["cells"][0]: row["cells"] for row in after["rows"]}
     w.handle("enter")
-    carry = w.view()
-    carried = [r["cells"][1] for r in carry["rows"] if r["marked"]]
+    carry_view = w.view()
+    carried = [r["cells"][1] for r in carry_view["rows"] if r["marked"]]
     w.handle("enter")
     tier4 = [r["cells"][1] for r in w.view()["rows"] if r["marked"]]
     # a scrub that fails is a message and changes nothing
@@ -2823,16 +2821,16 @@ try:
         calls.append(1)
         raise RuntimeError("not reached")
 
-    carry, _r, _p = scanned_wizard(rescan=counted)
-    carry.handle("enter"); carry.handle("enter")
-    carry.handle("x")
-    carry.handle("b")
-    lanes_before = copy.deepcopy(carry.lanes_doc)
-    enabled_before = dict(carry._enabled)
-    carry.handle("r")
-    refused_carry = (carry.message == setup_tui.RESCAN_REFUSED and carry.screen == "discovery"
-                     and calls == [] and carry._enabled == enabled_before
-                     and carry.lanes_doc == lanes_before and carry.scanned == "at launch")
+    carry_wizard, _r, _p = scanned_wizard(rescan=counted)
+    carry_wizard.handle("enter"); carry_wizard.handle("enter")
+    carry_wizard.handle("x")
+    carry_wizard.handle("b")
+    lanes_before = copy.deepcopy(carry_wizard.lanes_doc)
+    enabled_before = dict(carry_wizard._enabled)
+    carry_wizard.handle("r")
+    refused_carry = (carry_wizard.message == setup_tui.RESCAN_REFUSED and carry_wizard.screen == "discovery"
+                     and calls == [] and carry_wizard._enabled == enabled_before
+                     and carry_wizard.lanes_doc == lanes_before and carry_wizard.scanned == "at launch")
     # a Tier choice: a lane unmarked on the tier 4 page
     tier, _r, _p = scanned_wizard(rescan=counted)
     tier.handle("enter"); tier.handle("enter"); tier.handle("enter")
@@ -2873,7 +2871,7 @@ try:
            and undone.scanned == "at 14:07" and trip.scanned == "at 14:07"
            and len(ok_calls) == 2 and len(setup_tui.RESCAN_REFUSED) <= 79
            and "quit and start again" in setup_tui.RESCAN_REFUSED,
-           repr((carry.message, tier.message, trip_screen, trip_back, trip.message,
+           repr((carry_wizard.message, tier.message, trip_screen, trip_back, trip.message,
                  undone.message, ok_calls)))
 except Exception as e:
     record("75 r once a carry or Tier choice exists does nothing", False, repr(e))
@@ -2923,7 +2921,7 @@ try:
            w._proposals == fresh._proposals and w._reasons == fresh._reasons
            and w._unmatched == fresh._unmatched
            and old != (w._proposals, w._reasons, w._unmatched)
-           and any(p["kind"] == setup_tui.KIND_DOMINATED for p in w._proposals.values())
+           and any(p["kind"] == carry.KIND_DOMINATED for p in w._proposals.values())
            and w._enabled == fresh._enabled,
            repr((w._reasons, fresh._reasons)))
 except Exception as e:

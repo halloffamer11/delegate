@@ -29,13 +29,13 @@ from datetime import datetime, timezone
 
 import catalog
 import published_names
-import harnesses  # noqa: E402
-# Reconciling a source's printed model name against a lane model is the
-# catalog's own knowledge; both this report and the setup pre-screen read it
-# from there rather than keeping a second copy.
+import carry  # noqa: E402
+# Reconciling a source's printed model name against a lane model is
+# `published_names`'s; both this report and the carry pre-screen read it from
+# there rather than keeping a second copy.
 from catalog import CatalogError
 from harnesses import EFFORTS
-from published_names import normalize_name, resolve_published_model, strip_effort_suffix
+from published_names import resolve_published_model, strip_effort_suffix
 
 EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
 DEFAULT_OUT_DIR = "~/.cache/delegate/bench/"
@@ -346,7 +346,7 @@ def effort_attributes(measured_effort, lane_effort):
     matching nothing, because a source that did not state an effort has not
     said which lane it measured. The report, the wizard and the page all read
     it from here, so the page can never disagree with the decision the wizard
-    offers (the reason `dominating_row` is exported rather than copied).
+    offers (the reason `carry.dominating_row` is shared rather than copied).
     """
     if not lane_effort:
         return False
@@ -735,20 +735,6 @@ NO_DATA_REASON = "no per-effort data"
 NOT_DOMINATED_REASON = "not dominated"
 ULTRA_REASON = "ultra, never carried"
 
-KIND_DOMINATED = "dominated"
-KIND_RECORDED = "recorded"
-KIND_ULTRA = "ultra"
-KIND_UNAVAILABLE = "unavailable"
-KIND_NO_ROWS = "no_rows"
-KIND_NOT_DOMINATED = "not_dominated"
-
-
-def model_group(lane):
-    """The model a lane is grouped under. An agy slug family
-    (`gemini-3.8-flash-high`, `-low`) is one model at several efforts, so the
-    effort suffix comes off first (ticket 26)."""
-    return strip_effort_suffix(normalize_name((lane or {}).get("model")))[0]
-
 
 def effort_rank(effort):
     """Most effort first: ultra, max, xhigh, high, medium, low; a stranger last."""
@@ -770,7 +756,7 @@ def group_lanes(names, lanes_doc):
     lanes = (lanes_doc or {}).get("lanes") or {}
     groups = {}
     for name in names:
-        groups.setdefault(model_group(lanes.get(name)), []).append(name)
+        groups.setdefault(carry.model_of(lanes.get(name)), []).append(name)
     out = []
     for members in groups.values():
         out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
@@ -785,8 +771,8 @@ def bench_order_key(bench, name, lanes_doc=None):
     mean = rec.get("mean") if rec else None
     if mean is None and rec:
         lanes = (lanes_doc or {}).get("lanes") or {}
-        group = model_group(lanes.get(name))
-        has_epoch = any(model_group(lane) == group
+        group = carry.model_of(lanes.get(name))
+        has_epoch = any(carry.model_of(lane) == group
                         and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
                         for other, lane in lanes.items())
         if not has_epoch:
@@ -818,7 +804,7 @@ def is_dominated_reason(why):
     A decision dict is accepted so old callers can pass either form.
     """
     if isinstance(why, dict):
-        return why.get("kind") == KIND_DOMINATED
+        return why.get("kind") == carry.KIND_DOMINATED
     return isinstance(why, str) and " wins on " in why
 
 
@@ -827,73 +813,22 @@ def recorded_reason(enabled):
     return f"{'on' if enabled else 'off'} in the catalog"
 
 
-def carry_decision(lane, enabled, kind, source=None, competitor=None):
-    """One structured carry verdict. Renderers turn this into wording."""
-    return {
-        "lane": lane,
-        "enabled": enabled,
-        "kind": kind,
-        "source": source,
-        "competitor": competitor,
-    }
-
-
 def carry_reason(decision):
     """Display prose for one carry decision. HTML must not parse this back."""
     if not isinstance(decision, dict):
         return NOT_DOMINATED_REASON
     kind = decision.get("kind")
-    if kind == KIND_DOMINATED:
+    if kind == carry.KIND_DOMINATED:
         return dominated_reason(decision.get("competitor"), decision.get("source"))
-    if kind == KIND_RECORDED:
+    if kind == carry.KIND_RECORDED:
         return recorded_reason(bool(decision.get("enabled")))
-    if kind == KIND_ULTRA:
+    if kind == carry.KIND_ULTRA:
         return ULTRA_REASON
-    if kind == KIND_UNAVAILABLE:
+    if kind == carry.KIND_UNAVAILABLE:
         return NO_DATA_REASON
-    if kind == KIND_NO_ROWS:
+    if kind == carry.KIND_NO_ROWS:
         return NO_ROWS_REASON
     return NOT_DOMINATED_REASON
-
-
-def evidence_unavailable(effort_rows, proposals=None):
-    """True when there was no per-effort evidence, as distinct from an empty proposal."""
-    if effort_rows is None:
-        return True
-    if not proposals:
-        return False
-    return all(d.get("kind") == KIND_UNAVAILABLE for d in proposals.values())
-
-
-def resolve_effort_rows(lanes_doc, effort_rows):
-    """Returns (rows keyed by catalog model, published names that name no lane).
-
-    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
-    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
-    comparison below is against `lane["model"]`, so each row is re-keyed to the
-    lane model its printed name denotes, and the catalog owns that mapping
-    (`published_names.resolve_published_model`). A row naming no lane model is dropped
-    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
-    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
-    all is what a human needs to spot a `published_as` they still owe us.
-    """
-    resolved, unmatched = [], []
-    for row in effort_rows or []:
-        if not isinstance(row, dict):
-            continue
-        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
-        if model is None:
-            name = row.get("model")
-            if isinstance(name, str) and name.strip() and name not in unmatched:
-                unmatched.append(name)
-            continue
-        if model == row.get("model"):
-            resolved.append(row)
-        else:
-            copied = dict(row)
-            copied["model"] = model
-            resolved.append(copied)
-    return resolved, unmatched
 
 
 def unmatched_message(unmatched, width=79):
@@ -915,192 +850,6 @@ def unmatched_message(unmatched, width=79):
         return f"{count} published {phrase} no lane; each is too long to print here"
     more = len(unmatched) - len(shown)
     return head + ", ".join(shown) + (f" +{more} more" if more else "")
-
-
-def certain_effort_rows(effort_rows):
-    """Rows that may dominate. Uncertain rows inform nothing: they must not
-    dominate another lane, and they are not evidence against the lane they name.
-
-    A row at an effort no lane can select is dropped for the same reason. The
-    benchmark harnesses drive the API enum, which runs `none` to `max`, so every
-    published sweep carries a `none` row — and no lane can be configured at
-    `none`. Letting one dominate would switch off a real lane on the strength of
-    a setting that cannot be chosen, which is exactly what it did to
-    luna-low@codex: equal score to `none` at a tenth of a cent more.
-
-    A `composite` row is a reader's figure, not evidence: Artificial Analysis
-    does not publish the weighting of its Intelligence Index, so it is shown and
-    never counted.
-    """
-    certain = []
-    for row in effort_rows or []:
-        if not isinstance(row, dict) or row.get("uncertain") or row.get("composite"):
-            continue
-        if not row.get("model") or not row.get("effort"):
-            continue
-        if row["effort"] not in EFFORTS:
-            continue
-        score, cost = row.get("score"), row.get("cost_usd")
-        if isinstance(score, bool) or isinstance(cost, bool):
-            continue
-        if not isinstance(score, (int, float)) or not isinstance(cost, (int, float)):
-            continue
-        certain.append(row)
-    return certain
-
-
-def model_families(lanes_doc):
-    """{lane model: the family key "the same model" means for the carry rule}.
-
-    On most harnesses a model is its own family, so the key is the model string
-    and the rule is what it always was. A harness that carries the effort in the
-    slug (agy) names each effort as its own model (`gemini-3.8-flash-low`,
-    `-medium`, `-high`), so under the model string no such lane ever had
-    "another effort of the same model" and the rule could never propose a flash
-    lane off — ticket 19 recorded that as a limit. There the key is the slug
-    with its trailing effort removed: the adapter's `family`, the same grouping
-    discovery reports the harness's models under (ticket 30).
-
-    The harness decides, never the spelling, so a slug on another harness that
-    happens to end in an effort word is still one model of its own.
-    """
-    families = {}
-    for lane in (lanes_doc.get("lanes") or {}).values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if not isinstance(model, str) or not model.strip():
-            continue
-        adapter = harnesses.get(lane.get("harness"))
-        if adapter is not None and adapter.effort_in_slug:
-            families[model] = adapter.family(model)[0]
-        elif model not in families:
-            families[model] = model
-    return families
-
-
-def family_of(model, families=None):
-    """The family key a model compares under, or the model itself when the
-    caller passed no map: without one every model is its own family, which is
-    what every harness but agy does anyway."""
-    return (families or {}).get(model, model)
-
-
-def _beats(other, row):
-    """At least the score for no more money, and strictly better in one of the two."""
-    return (other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]
-            and (other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]))
-
-
-def dominating_effort(model, effort, source, certain, families=None):
-    """The effort of `model` that dominates `effort` inside one source, or None.
-
-    Dominated means another effort of the same model beats it on more than half
-    of the benchmarks that source scored both on. A source with one benchmark —
-    Terminal-Bench, SWE Refactor Bench — comes down to that one comparison.
-    Artificial Analysis scores eight components off the same runs, and losing
-    one noisy component in eight is not reason enough to switch a lane off: on
-    the live page of 2026-09-11 that reading proposed twelve lanes off, nine of
-    them on a single component.
-
-    "The same model" is the family key `families` gives, so an agy slug family
-    compares against itself; without a map every model is its own family.
-    """
-    family = family_of(model, families)
-    mine, theirs = {}, {}
-    for row in certain:
-        if family_of(row.get("model"), families) != family or row.get("source") != source:
-            continue
-        if row.get("effort") == effort:
-            mine.setdefault(row.get("benchmark"), row)
-        else:
-            theirs.setdefault(row["effort"], {}).setdefault(row.get("benchmark"), row)
-    for other_effort, board in theirs.items():
-        shared = [benchmark for benchmark in mine if benchmark in board]
-        wins = sum(1 for benchmark in shared if _beats(board[benchmark], mine[benchmark]))
-        if shared and 2 * wins > len(shared):
-            return other_effort
-    return None
-
-
-def dominating_row(row, certain, families=None):
-    """The dominating effort's point on this row's own board, or None.
-
-    The judgement belongs to the effort over its whole source
-    (`dominating_effort`), so every point of a dominated effort is marked on
-    every board of that source, including a board where it happens to score
-    higher: the lane is off over the source, not over one chart.
-
-    Public because the benchmark page draws this rule: a point it shows hollow
-    has to be a point the pre-screen switched a lane off over, and two
-    implementations of one rule would eventually disagree in front of a human
-    trying to check the wizard's arithmetic. The page passes the same `families`
-    the pre-screen uses, so an agy competitor is found under its own slug.
-    """
-    other = dominating_effort(row.get("model"), row.get("effort"), row.get("source"),
-                              certain, families)
-    if other is None:
-        return None
-    family = family_of(row.get("model"), families)
-    board = (row.get("source"), row.get("benchmark"))
-    return next((r for r in certain
-                 if family_of(r.get("model"), families) == family and r.get("effort") == other
-                 and (r.get("source"), r.get("benchmark")) == board), None)
-
-
-def _first_domination(lane, certain, families=None):
-    """(effort, source) of the first source in which another effort dominates
-    this lane, else None."""
-    family = family_of(lane["model"], families)
-    sources = []
-    for row in certain:
-        if (family_of(row.get("model"), families) == family
-                and row.get("effort") == lane["effort"]):
-            if row.get("source") not in sources:
-                sources.append(row.get("source"))
-    for source in sources:
-        other = dominating_effort(lane["model"], lane["effort"], source, certain, families)
-        if other is not None:
-            return other, source
-    return None
-
-
-def propose_enabled(lanes_doc, effort_rows):
-    """Ticket-15 pre-screen rule. Returns {name: carry_decision}."""
-    rows, _unmatched = resolve_effort_rows(lanes_doc, effort_rows)
-    certain = certain_effort_rows(rows)
-    families = model_families(lanes_doc)
-    supplied = effort_rows is not None
-    out = {}
-    for name, lane in lanes_doc["lanes"].items():
-        if lane.get("effort") == "ultra":
-            out[name] = carry_decision(name, False, KIND_ULTRA)
-            continue
-        if "enabled" in lane:
-            # An explicit `enabled` is a decision the human already recorded. The
-            # pre-screen proposes for lanes that have no decision yet; it does not
-            # undo one. Silently switching a lane back on would put it in front of
-            # the ranker again without anyone saying so.
-            enabled = bool(lane["enabled"])
-            out[name] = carry_decision(name, enabled, KIND_RECORDED)
-            continue
-        found = _first_domination(lane, certain, families)
-        if found is not None:
-            other, source = found
-            out[name] = carry_decision(name, False, KIND_DOMINATED, source=source, competitor=other)
-            continue
-        if not supplied:
-            out[name] = carry_decision(name, True, KIND_UNAVAILABLE)
-        elif not any(
-            not row.get("uncertain")
-            and family_of(row.get("model"), families) == family_of(lane["model"], families)
-            and row.get("effort") == lane["effort"]
-            for row in rows
-        ):
-            out[name] = carry_decision(name, True, KIND_NO_ROWS)
-        else:
-            out[name] = carry_decision(name, True, KIND_NOT_DOMINATED)
-    return out
 
 
 def collect(lanes_doc, epoch_csv=None, effort_rows=None):
