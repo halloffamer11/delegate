@@ -10,9 +10,21 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02
+**Status:** ready-for-human, landed on `worktree/delegate-any-harness-20` 2026-10-03; one box waits on Orin: check the diagram on the PR page in light and dark themes.
 
-- [ ] The format is chosen and the reason recorded here (Mermaid by default).
-- [ ] The README shows the routing chain with each step's owning file, in the glossary's terms from `CONTEXT.md`.
+- [x] The format is chosen and the reason recorded here (Mermaid by default).
+- [x] The README shows the routing chain with each step's owning file, in the glossary's terms from `CONTEXT.md`.
 - [ ] The diagram renders on github.com (checked on the PR page) and in light and dark themes.
-- [ ] Any rendered image is committed with its source and a one-line command that rebuilds it.
+- [x] Any rendered image is committed with its source and a one-line command that rebuilds it.
+
+## Landed, 2026-10-03
+
+Built by a named dispatch to `sol61-medium@codex`, then edited by the session so each
+diagram step names its owning file. Format: Mermaid, one flowchart plus an ownership
+table. It renders natively on github.com, diffs as text, and sets no colors, so GitHub's
+light and dark themes both apply. No rendered image, so the last box needs nothing.
+
+The table follows the code where the docs are loose: `rank.py` sorts an unknown Pace
+last before Tier, Project order lives in `.delegate/routing.json` (`project_order`),
+and a Native lane writes no `return.json`. No local Mermaid renderer was installed, so
+the render check is the PR page.
