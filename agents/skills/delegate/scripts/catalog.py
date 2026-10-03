@@ -683,6 +683,9 @@ def validate_routing(doc, source="routing.json", partial=False):
     allowed_top = {"version", "classes", "margin", "gate", "meters", "overflow", "note"}
     if partial:
         allowed_top.add("project_order")
+    else:
+        # the wizard's Tier proposal rule, this machine's (ticket 17)
+        allowed_top.add("tier_proposal")
     for k in doc:
         if k not in allowed_top:
             raise CatalogError(
@@ -786,10 +789,56 @@ def validate_routing(doc, source="routing.json", partial=False):
                     f"of non-empty lane-name strings, got entry {lane_name!r}"
                 )
 
+    if "tier_proposal" in doc:
+        validate_tier_proposal(doc["tier_proposal"], source=source)
+
     if "note" in doc and not isinstance(doc["note"], str):
         raise CatalogError(f"{source}: key 'note': note must be a string")
 
     return doc
+
+
+def validate_tier_proposal(doc, source="routing.json"):
+    """The wizard's Tier proposal rule: which benchmark's score bands slice,
+    each Tier's threshold on it, and whether a Tier keeps every harness."""
+    where = f"{source}: key 'tier_proposal'"
+    if not isinstance(doc, dict):
+        raise CatalogError(f"{where}: must be an object with source, benchmark, thresholds, diversity")
+    for k in doc:
+        if k not in ("source", "benchmark", "thresholds", "diversity", "note"):
+            raise CatalogError(f"{where}: unknown field '{k}'")
+    for k in ("source", "benchmark"):
+        if not isinstance(doc.get(k), str) or not doc[k].strip():
+            raise CatalogError(f"{where}: {k} must be a non-empty string, got {doc.get(k)!r}")
+    thresholds = doc.get("thresholds")
+    if not isinstance(thresholds, dict) or set(thresholds) != {"2", "3", "4"}:
+        raise CatalogError(
+            f"{where}: thresholds must give tiers \"2\", \"3\" and \"4\" a score each, got {thresholds!r}")
+    previous = None
+    for tier in ("2", "3", "4"):
+        value = thresholds[tier]
+        if type(value) is bool or not isinstance(value, (int, float)):
+            raise CatalogError(f"{where}: thresholds.{tier} must be a number, got {value!r}")
+        if previous is not None and value < previous:
+            raise CatalogError(
+                f"{where}: thresholds.{tier} ({value}) is below thresholds.{int(tier) - 1} "
+                f"({previous}); a higher Tier needs at least the score of the one below")
+        previous = value
+    if type(doc.get("diversity")) is not bool:
+        raise CatalogError(f"{where}: diversity must be true or false, got {doc.get('diversity')!r}")
+    if "note" in doc and not isinstance(doc["note"], str):
+        raise CatalogError(f"{where}: note must be a string")
+    return doc
+
+
+def tier_proposal_settings(routing):
+    """The Tier proposal rule in effect: the routing's own, else the sample
+    catalog's (assets/samples/routing.json)."""
+    if isinstance(routing, dict) and "tier_proposal" in routing:
+        return copy.deepcopy(routing["tier_proposal"])
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets",
+                           "samples", "routing.json"), encoding="utf-8") as f:
+        return json.load(f)["tier_proposal"]
 
 
 def merge_routing(global_doc, project_doc=None, global_source="routing.json", project_source=None):

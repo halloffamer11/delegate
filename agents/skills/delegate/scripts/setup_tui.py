@@ -40,6 +40,7 @@ from bench import (
 )
 import harnesses as harness_registry  # noqa: E402
 import catalog  # noqa: E402
+import tier_proposal  # noqa: E402
 from catalog import (
     CLASSES,
     HARNESSES,
@@ -716,6 +717,35 @@ class Wizard:
         self._settle()
         return summary
 
+    def tier_proposals(self):
+        """{lane: proposal} for the carried Lanes with a score on the chosen
+        benchmark (ticket 17). A proposal is shown, never applied, until `p`."""
+        settings = catalog.tier_proposal_settings(self.routing_doc)
+        return tier_proposal.propose(self.lanes_doc, self.effort_rows, settings,
+                                     names=self._carried())
+
+    def take_proposals(self):
+        """`p` on a tier page: every carried Lane with a proposal takes its
+        proposed Tier, in the proposal's order; a Lane with no score keeps the
+        Tier it has. Nothing is written until the confirm page's `y`."""
+        proposals = self.tier_proposals()
+        if not proposals:
+            self.message = "p: no carried lane has a score on the chosen benchmark; nothing changed"
+            return
+        for name, proposal in proposals.items():
+            self._assigned[name] = proposal["tier"]
+        self._marks = {
+            tier: {name for name, assigned in self._assigned.items()
+                   if assigned == tier and self._enabled[name]}
+            for tier in range(1, 5)
+        }
+        ordered = tier_proposal.proposal_lines(proposals).split()[::2]
+        self._line_order = {name: index for index, name in enumerate(ordered)}
+        self._tier_order = {tier: [] for tier in range(1, 5)}
+        unscored = len(self._carried()) - len(proposals)
+        self.message = (f"p: took the proposed Tier for {plural(len(proposals), 'lane')}"
+                        + (f"; {plural(unscored, 'lane')} with no score kept theirs" if unscored else ""))
+
     def _paste_tier_lines(self):
         """`v` on the review page: the clipboard's lines, or a message saying
         why nothing changed."""
@@ -849,6 +879,8 @@ class Wizard:
                     self._enter_tier(self.tier - 1)
                 else:
                     self._enter_review()
+            elif key == "p":
+                self.take_proposals()
             elif key == "b" and self.focus:
                 return
             elif key == "b" and self.tier < 4:
@@ -1437,13 +1469,18 @@ class Wizard:
             if aa_names:
                 columns.extend([*aa_names, "AA $/task", "AA mean rank"])
             active = self._tier_names()
+            proposals = self.tier_proposals()
+            if proposals:
+                columns.insert(4, "proposed")
             rows = []
             for index, name in enumerate(active):
                 lane = self.lanes_doc["lanes"][name]
                 marked = name in self._marks[self.tier]
+                proposed = ([tier_proposal.describe(proposals[name]) if name in proposals else ""]
+                            if proposals else [])
                 rows.append({
                     "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
-                              *self._bench_cells(name, epoch_names, aa_names)],
+                              *proposed, *self._bench_cells(name, epoch_names, aa_names)],
                     "marked": marked, "dimmed": False,
                     "cursor": index == self.cursor,
                     "tag": "",
@@ -1455,7 +1492,9 @@ class Wizard:
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
                 # truncated footer loses the keys.
-                legend=[*self._tier_legend(), *(
+                legend=[*(tier_proposal.legend(catalog.tier_proposal_settings(self.routing_doc), proposals)
+                          if proposals else []),
+                        *self._tier_legend(), *(
                     ["Unmarking moves a Lane down one Tier; Enter reviews the changes."]
                     if self.focus and self.tier > 1 else [])],
             )
@@ -2019,7 +2058,7 @@ def run_curses(wizard):
                        10: "enter", 13: "enter", curses.KEY_ENTER: "enter",
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
                        ord("+"): "plus", ord("="): "plus", ord("-"): "minus",
-                       ord("o"): "o", ord("O"): "o", ord("v"): "v", ord("V"): "v",
+                       ord("o"): "o", ord("O"): "o", ord("v"): "v", ord("V"): "v", ord("p"): "p",
                        ord("x"): "x", ord("X"): "x",
                        # the review page moves the lane itself (ticket 28)
                        ord("J"): "lane-down", ord("K"): "lane-up",

@@ -24,5 +24,16 @@
   },
   "margin": 0.2,
   "gate": 0.1,
+  "tier_proposal": {
+    "source": "aa",
+    "benchmark": "Artificial Analysis Intelligence Index",
+    "thresholds": {
+      "2": 30,
+      "3": 40,
+      "4": 50
+    },
+    "diversity": true,
+    "note": "the wizard proposes each carried Lane's Tier from these score bands; Orin keeps or changes each proposal"
+  },
   "note": "floor is the default tier; ceiling is the maximum tier. override per project: e.g. {\"classes\": {\"scout\": {\"floor\": 3}}}"
 }
