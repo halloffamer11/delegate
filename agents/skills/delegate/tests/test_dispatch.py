@@ -24,12 +24,13 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
-COURIER_MD = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents", "courier.md"))
+COURIER_MD = os.path.join(HERE, "..", "assets", "orchestrators", "claude", "courier.md")
 # Relay output copied from real runs, trimmed of paths and signatures. Each
 # directory is a run directory as the relay leaves it, before map_result.
 RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
 
 sys.path.insert(0, DELEGATE_DIR)
+import harnesses  # noqa: E402
 import delegate  # noqa: E402
 
 
@@ -66,8 +67,8 @@ def setup_env(root_dir):
     shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), os.path.join(config_dir, "routing.json"))
 
     ads_dir = os.path.join(root_dir, "ads")
-    for h in ("claude", "codex", "agy", "grok"):
-        scripts_dir = os.path.join(ads_dir, "skills", f"{h}-delegate", "scripts")
+    for h in harnesses.REGISTRY:
+        scripts_dir = os.path.join(ads_dir, "skills", h.relay, "scripts")
         os.makedirs(scripts_dir, exist_ok=True)
         shutil.copy(FAKE_RELAY_SRC, os.path.join(scripts_dir, "relay.mjs"))
         os.chmod(os.path.join(scripts_dir, "relay.mjs"), 0o755)
@@ -91,7 +92,7 @@ exec /usr/bin/git "$@"
 ''' % pinned_ads_commit())
     os.chmod(git_script, 0o755)
 
-    for h in ("claude", "codex", "agy", "grok"):
+    for h in (h.binary for h in harnesses.REGISTRY):
         stub = os.path.join(fake_bin, h)
         with open(stub, "w") as f:
             f.write("#!/bin/sh\nexit 0\n")
@@ -125,6 +126,12 @@ exec /usr/bin/git "$@"
     base_env["DELEGATE_CACHE"] = cache_path
     base_env["ADS_DIR"] = ads_dir
     base_env["DELEGATE_CODEX_HOME"] = codex_home_dir
+    # The cases were written with Claude Code orchestrating, so that is the
+    # profile they run under unless one names another. The host's own markers
+    # and profiles never reach them.
+    base_env.pop("CLAUDECODE", None)
+    base_env["DELEGATE_ORCHESTRATOR"] = "claude"
+    base_env["DELEGATE_ORCHESTRATORS_DIR"] = os.path.join(root_dir, "orchestrators")
 
     return {
         "config_dir": config_dir,
@@ -191,27 +198,17 @@ def run_dispatch(t_env, args, extra_env=None, orchestrator=None):
     env = dict(t_env["env"])
     if extra_env:
         env.update(extra_env)
+    cmd = [
+        sys.executable,
+        DELEGATE_PY,
+        "dispatch",
+        "--config-dir", t_env["config_dir"],
+        "--ads-dir", t_env["ads_dir"],
+        "--runs-dir", t_env["runs_dir"],
+        "--no-probe",
+    ] + args
     if orchestrator is not None:
-        cmd = [
-            sys.executable,
-            "-c",
-            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; delegate.ORCHESTRATOR = {orchestrator!r}; sys.exit(delegate.main())",
-            "dispatch",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
-    else:
-        cmd = [
-            sys.executable,
-            DELEGATE_PY,
-            "dispatch",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
+        cmd += ["--orchestrator", orchestrator]
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
@@ -219,27 +216,17 @@ def run_run(t_env, args, extra_env=None, orchestrator=None):
     env = dict(t_env["env"])
     if extra_env:
         env.update(extra_env)
+    cmd = [
+        sys.executable,
+        DELEGATE_PY,
+        "run",
+        "--config-dir", t_env["config_dir"],
+        "--ads-dir", t_env["ads_dir"],
+        "--runs-dir", t_env["runs_dir"],
+        "--no-probe",
+    ] + args
     if orchestrator is not None:
-        cmd = [
-            sys.executable,
-            "-c",
-            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; delegate.ORCHESTRATOR = {orchestrator!r}; sys.exit(delegate.main())",
-            "run",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
-    else:
-        cmd = [
-            sys.executable,
-            DELEGATE_PY,
-            "run",
-            "--config-dir", t_env["config_dir"],
-            "--ads-dir", t_env["ads_dir"],
-            "--runs-dir", t_env["runs_dir"],
-            "--no-probe",
-        ] + args
+        cmd += ["--orchestrator", orchestrator]
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
@@ -959,6 +946,55 @@ def main():
         record("27. --no-leash scout prompt lacks leash, dispatch.json leash=False", ok27, f"rc={res27.returncode}")
 
         # -------------------------------------------------------------
+        # 27a. the leash is the Class's routing field: a catalog that sets
+        #      scout's leash false drops it, and one written before the key
+        #      existed (impl with no `leash`) keeps the shipped impl's false.
+        # -------------------------------------------------------------
+        leash_env = dict(t_env)
+        leash_env["config_dir"] = os.path.join(os.path.dirname(t_env["config_dir"]), "config-leash")
+        shutil.copytree(t_env["config_dir"], leash_env["config_dir"])
+        leash_routing_path = os.path.join(leash_env["config_dir"], "routing.json")
+        leash_routing = json.load(open(leash_routing_path))
+        leash_routing["classes"]["scout"]["leash"] = False
+        leash_routing["classes"]["impl"].pop("leash", None)
+        with open(leash_routing_path, "w") as f:
+            json.dump(leash_routing, f)
+        seen27a = {}
+        for cls in ("scout", "impl", "review"):
+            b27a = make_brief(f"b27a-{cls}.md", f"fake-relay: status=completed final={done_final}\nBrief 27a.")
+            res27a = run_dispatch(leash_env, ["--lane", "terra-high@codex", "--class", cls, "--brief", b27a, "--cwd", cwd])
+            dir27a = parse_run_dir_from_stdout(res27a.stdout)
+            if res27a.returncode != 0 or dir27a is None:
+                seen27a[cls] = f"rc={res27a.returncode} err={res27a.stderr[-300:]}"
+                continue
+            prompt27a = open(os.path.join(dir27a, "prompt.md"), "r", encoding="utf-8").read()
+            disp27a = json.load(open(os.path.join(dir27a, "dispatch.json")))
+            seen27a[cls] = (leash_sentence in prompt27a, disp27a.get("leash"))
+        record("27a. routing classes.<name>.leash decides the leash; a missing key keeps the shipped one",
+               seen27a == {"scout": (False, False), "impl": (False, False), "review": (True, True)},
+               repr(seen27a))
+
+        # -------------------------------------------------------------
+        # 27b. run --harness: the user's constraint runs that harness's Pick, and
+        #      a harness that is not installed starts nothing (any-harness 12).
+        # -------------------------------------------------------------
+        b27b = make_brief("b27b.md", f"fake-relay: status=completed final={done_final}\nBrief 27b.")
+        meters27b = os.path.join(HERE, "fixture", "meters.json")
+        res27b = run_run(t_env, ["impl", "--brief", b27b, "--cwd", cwd, "--meters", meters27b,
+                                 "--harness", "grok"])
+        dir27b = parse_run_dir_from_stdout(res27b.stdout)
+        lane27b = json.load(open(os.path.join(dir27b, "dispatch.json")))["lane"] if dir27b else None
+        record("27b. run --harness grok runs a grok Lane", res27b.returncode == 0 and lane27b == "grok46-high@grok",
+               f"rc={res27b.returncode} lane={lane27b} out={res27b.stdout[-300:]} err={res27b.stderr[-300:]}")
+        runs_before27c = set(os.listdir(t_env["runs_dir"]))
+        res27c = run_run(t_env, ["impl", "--brief", b27b, "--cwd", cwd, "--meters", meters27b,
+                                 "--harnesses", "codex,agy", "--harness", "grok"])
+        record("27c. run --harness refuses a harness that is not installed and starts nothing",
+               res27c.returncode == 2 and "harness 'grok' is not installed" in res27c.stderr
+               and set(os.listdir(t_env["runs_dir"])) == runs_before27c,
+               f"rc={res27c.returncode} err={res27c.stderr}")
+
+        # -------------------------------------------------------------
         # 28. A tool cancelled at the permission gate is blocked, not partial
         #     (ticket 14). Fixture: grok46-high@grok, 2026-09-09, read-only
         #     under --permission-mode plan. The relay said completed and the
@@ -1039,14 +1075,18 @@ def main():
         res29 = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29, "--cwd", cwd])
         runs_after29 = set(os.listdir(t_env["runs_dir"]))
         new_runs29 = list(runs_after29 - runs_before29)
+        lines29 = res29.stdout.strip().splitlines()
+        # the native line, then the profile's one-line spawn instruction
         ok29 = (
             res29.returncode == 0 and
-            len(new_runs29) == 1 and
-            res29.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high prompt=")
+            len(new_runs29) == 1 and len(lines29) == 2 and
+            lines29[0].startswith("delegate: native lane=opus-high@claude agent=lane-opus-high prompt=") and
+            lines29[1].startswith("delegate: spawn: spawn lane-opus-high with the Agent tool") and
+            lines29[0].split("prompt=")[-1] in lines29[1]
         )
         if ok29:
             dir29 = os.path.join(t_env["runs_dir"], new_runs29[0])
-            prompt_in_stdout = res29.stdout.strip().split("prompt=")[-1]
+            prompt_in_stdout = lines29[0].split("prompt=")[-1]
             expected_prompt = os.path.abspath(os.path.join(dir29, "prompt.md"))
             ok29 = (
                 prompt_in_stdout == expected_prompt and
@@ -1099,7 +1139,7 @@ def main():
         # its background command writes: the agy override warning (24) comes
         # first and is not the result; the native line (29) is not a result.
         courier_md = open(COURIER_MD).read()
-        greps = re.findall(r"grep -m1 -E '([^']+)'", courier_md)
+        greps = re.findall(r"grep -m[12] -E '([^']+)'", courier_md)
         finish_re, native_re = (greps + [None, None])[:2]
 
         def courier_log(args):
@@ -1184,7 +1224,7 @@ def main():
         runs_after30 = set(os.listdir(t_env["runs_dir"]))
         new_runs30 = list(runs_after30 - runs_before30)
         lines30 = [ln for ln in res30.stdout.strip().splitlines() if ln.strip()]
-        last_line30 = lines30[-1] if lines30 else ""
+        last_line30 = next((ln for ln in lines30 if ln.startswith("delegate: native")), "")
         ok30 = (
             res30.returncode == 0 and
             len(new_runs30) == 1 and
@@ -1221,6 +1261,52 @@ def main():
             dir31 = os.path.join(t_env["runs_dir"], new_runs31[0])
             ok31 = os.path.exists(os.path.join(dir31, "argv.json")) and os.path.exists(os.path.join(dir31, "relay.stdout"))
         record("31. ORCHESTRATOR=codex sends claude lane through fake relay", ok31, f"rc={res31.returncode} stdout={res31.stdout}")
+
+        # 31b-31e. the orchestrator is never assumed: none, an unknown name or
+        # nothing detected relays a claude Lane; CLAUDECODE alone detects Claude Code
+        def relayed(res):
+            return (res.returncode == 0 and "delegate-metrics:" in res.stdout
+                    and "delegate: native" not in res.stdout)
+        no_orch_env = {"DELEGATE_ORCHESTRATOR": ""}
+        for tag, orch, extra in (("31b. --orchestrator none", "none", None),
+                                 ("31c. an unknown orchestrator", "kiro", None),
+                                 ("31d. nothing detected", None, no_orch_env)):
+            b = make_brief(f"b{tag[:3]}.md", f"fake-relay: status=completed final={done_final}\nBrief {tag}.")
+            res = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b, "--cwd", cwd],
+                               extra_env=extra, orchestrator=orch)
+            record(f"{tag} relays a claude lane", relayed(res), f"rc={res.returncode} stdout={res.stdout} stderr={res.stderr}")
+        b31e = make_brief("b31e.md", "Brief 31e.")
+        res31e = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b31e, "--cwd", cwd],
+                              extra_env={"DELEGATE_ORCHESTRATOR": "", "CLAUDECODE": "1"})
+        record("31e. CLAUDECODE alone runs a claude lane natively",
+               res31e.returncode == 0 and res31e.stdout.startswith("delegate: native lane=opus-high@claude"),
+               f"rc={res31e.returncode} stdout={res31e.stdout} stderr={res31e.stderr}")
+
+        # 31f. a Kiro Lane dispatches through kiro-delegate with the model and
+        # effort (any-harness ticket 15); offline, through the fake relay
+        kiro_env = dict(t_env)
+        kiro_env["config_dir"] = os.path.join(os.path.dirname(t_env["config_dir"]), "config-kiro")
+        shutil.copytree(t_env["config_dir"], kiro_env["config_dir"])
+        lanes_kiro = json.load(open(os.path.join(kiro_env["config_dir"], "lanes.json")))
+        lanes_kiro["meters"]["kiro"] = {"harness": "kiro", "plan": "Kiro Pro", "price_month": 20,
+                                       "probe": "usage.py"}
+        lanes_kiro["lanes"]["opus55-high@kiro"] = {
+            "harness": "kiro", "model": "claude-opus-5.5", "effort": "high", "meter": "kiro",
+            "meter_weight": 1, "timeout": "30m",
+            "price": {"in": None, "cache_read": None, "cache_write": None, "out": None},
+            "tier": 3, "basis": "test"}
+        with open(os.path.join(kiro_env["config_dir"], "lanes.json"), "w") as f:
+            json.dump(lanes_kiro, f)
+        b31f = make_brief("b31f.md", f"fake-relay: status=completed final={done_final}\nBrief 31f.")
+        res31f = run_dispatch(kiro_env, ["--lane", "opus55-high@kiro", "--class", "impl", "--brief", b31f,
+                                         "--cwd", cwd])
+        dir31f = parse_run_dir_from_stdout(res31f.stdout)
+        argv31f = json.load(open(os.path.join(dir31f, "argv.json"))) if dir31f else []
+        record("31f. a kiro lane dispatches through its relay with model, effort and --read-only",
+               res31f.returncode == 0 and "status=done" in res31f.stdout
+               and all(x in argv31f for x in ["--model", "claude-opus-5.5", "--effort", "high",
+                                               "--timeout", "30m", "--read-only"]),
+               f"rc={res31f.returncode} stdout={res31f.stdout} stderr={res31f.stderr} argv={argv31f}")
 
         # -------------------------------------------------------------
         # 32. prompt.md preamble permits disposable browser and forbids other network writes

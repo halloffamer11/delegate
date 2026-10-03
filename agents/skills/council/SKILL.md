@@ -1,6 +1,6 @@
 ---
 name: council
-description: Convene a multi-model council — sealed memos from independent harnesses, adjudicated by the routing lead — for a critical decision. Explicitly invoked only.
+description: Convene a multi-model council — sealed memos from independent harnesses, adjudicated by the routing lead — for a critical decision. Runs only when the user explicitly invokes /council; never use it on your own initiative.
 disable-model-invocation: true
 ---
 
@@ -23,7 +23,7 @@ One brief, received identically by every panelist:
   hint of your own current lean.
 
 ## 2. Compose the panel
-- Run `python3 ~/.claude/skills/delegate/scripts/usage.py --pretty` for real availability and `python3 ~/.claude/skills/delegate/scripts/catalog.py show` for the lanes.
+- Run `delegate status` for real availability and `delegate catalog show` for the lanes.
 - Panelists: available harnesses serving models from different families.
   Exclude your own model family — no agent grades its own work.
 - Quorum: ≥2 model families besides the lead's.
@@ -34,15 +34,16 @@ One brief, received identically by every panelist:
 
 ## 3. Collect sealed memos
 Invoke each panelist under the delegate skill's rules (read-only, headless,
-temp-file prompts, hard timeout). Same brief to all; no panelist sees
+temp-file prompts, hard timeout). The user's /council is the explicit request
+delegate needs for these runs; a council never delegates anything beyond them. Same brief to all; no panelist sees
 another's memo in the sealed round. Required memo schema:
 recommendation · key assumptions · failure modes · confidence ·
 what would change my mind.
 
 ## 4. Adjudicate
-Adjudicator: the lane that `python3 ~/.claude/skills/delegate/scripts/rank.py review`
+Adjudicator: the lane that `delegate rank review`
 picks (reached via the delegate skill if that is not you). Ask the ranker rather
-than reading `~/.config/delegate/lanes.json` yourself, so this stays correct as
+than reading the catalog's `lanes.json` yourself, so this stays correct as
 the selection rule changes.
 - Judge against the brief's success criteria, never by vote count.
 - Name each real disagreement as a crux: what it turns on, what evidence

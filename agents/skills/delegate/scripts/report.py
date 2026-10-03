@@ -38,6 +38,11 @@ try:
 except ImportError:
     from . import usage
 
+try:
+    import orchestrators
+except ImportError:
+    from . import orchestrators
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
 CACHE = usage.get_cache_path()
@@ -129,10 +134,29 @@ def model_cell(lane_row, by_meter):
 
 
 def ignored(lane_row, by_meter):
-    """A meter no lane can spend, on a harness that is not this session, is ignored
-    on purpose — agy's Claude/GPT group after Opus was dropped. Derived, not listed:
-    add a lane on that meter to the catalog and it returns to the table."""
-    return not by_meter.get(lane_row["lane"]) and lane_row["harness"] != "claude"
+    """A meter no lane can spend, on a harness no orchestrator runs in-process, is
+    ignored on purpose — agy's Claude/GPT group after Opus was dropped. A harness
+    an orchestrator profile runs natively keeps its Meters: the session itself
+    spends them. Derived, not listed: add a lane on that meter to the catalog and
+    it returns to the table."""
+    return (not by_meter.get(lane_row["lane"])
+            and lane_row["harness"] not in orchestrators.native_harnesses())
+
+
+def unprobed_meters(catalog, obs_map):
+    """Catalog Meters a lane spends that got no probe row, though their
+    harness's probe read a figure for another Meter.
+
+    Such a Meter has an unknown Remaining, which the Gate never vetoes, so a
+    probe that renamed its row (`Current week (Fable 5.2)`) would switch its
+    Gate off without a word. A harness whose probe read nothing (absent, failed,
+    or with no usage source, as Kiro's) says so in its own row instead.
+    """
+    read = {L.get("harness") for L in obs_map.values()
+            if isinstance(L, dict) and L.get("r") is not None}
+    spent = {lane.get("meter") for lane in catalog["lanes"].values()}
+    return sorted(name for name, meter in catalog["meters"].items()
+                  if name in spent and name not in obs_map and meter.get("harness") in read)
 
 
 def usage_doc(refresh=False, max_age_min=None, routing=None):
@@ -209,6 +233,9 @@ def cmd_limits(a):
         print(f"\nWeekly reset unread for: {', '.join(unknown)}.")
     if skipped and not a.all:
         print(f"\nIgnored, no lane spends them: {', '.join(skipped)}.")
+    unprobed = unprobed_meters(catalog, obs_map)
+    if unprobed:
+        print(f"\nNo probe row for: {', '.join(unprobed)}; the Gate never vetoes their lanes.")
     gate_pct = f"{int(round(gate * 100))}%"
     age_label = f"{age} min ago" if age is not None else "at an unknown time"
     if metering:

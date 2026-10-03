@@ -132,6 +132,22 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out, _ = run(["limits", "--max-age-min", "600", "--all"] + cfg, env)
     check("--all brings the ignored meter back", "| agy-claude-gpt" in out
           and "Ignored, no lane" not in out, out)
+    check("every Meter a lane spends has a probe row, so none is named as missing",
+          "No probe row for" not in out, out)
+
+    # A probe that renames a Meter's row (`Current week (Fable 5.2)`) leaves the
+    # catalog Meter with no row, an unknown Remaining the Gate never vetoes; the
+    # limits page says so rather than staying quiet.
+    renamed_cache = os.path.join(tmp, "usage-renamed.json")
+    with open(cache) as f:
+        renamed_doc = json.load(f)
+    renamed_doc["lanes"] = [dict(L, lane="claude-fable 5.2") if L["lane"] == "claude-fable" else L
+                            for L in renamed_doc["lanes"]]
+    with open(renamed_cache, "w") as f:
+        json.dump(renamed_doc, f)
+    rc, out, _ = run(["limits", "--max-age-min", "600"] + cfg, {**env, "DELEGATE_CACHE": renamed_cache})
+    check("a catalog Meter with no probe row is named, beside a harness that did read",
+          "No probe row for: claude-fable; the Gate never vetoes their lanes." in out, out)
 
     rc, out, _ = run(["runs"] + cfg, env)
     check("empty ledger says so", "No runs logged yet." in out, out)

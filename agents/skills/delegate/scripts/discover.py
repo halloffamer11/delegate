@@ -30,8 +30,9 @@ Efforts per harness (ticket 19):
   - agy: in the slug. `gemini-3.8-flash-high`, `-medium` and `-low` are one
     model family, `gemini-3.8-flash`, with efforts high, medium and low, and
     a stanza for one of them names the suffixed slug.
-  - grok: `catalog.HARNESS_EFFORTS["grok"]`; `grok --help` lists no values and
-    the CLI accepts any, so only the effort a lane has run at is offered.
+  - grok: the grok adapter's `efforts` (scripts/harnesses/grok.py, which
+    `catalog.HARNESS_EFFORTS` copies); `grok --help` lists no values and the
+    CLI accepts any, so only the effort a lane has run at is offered.
 
 Drift detection:
   - Slugs with no lane: models offered by a present harness that have no
@@ -75,6 +76,7 @@ Exit status:
         "lane": "<lane_name>" | "none",
         "lanes": ["<lane_name>"],
         "efforts": ["<effort>"],
+        "unknown_efforts": ["<effort word no lane on the harness may carry>"],
         "reason": "<string>" | null,
         "level": "<slug with the version removed>",
         "version": [<int>],
@@ -117,39 +119,38 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
+import harnesses
 from catalog import CatalogError, EFFORTS, HARNESS_EFFORTS, load_catalog
 
-# Harness evaluation order: harnesses with discover commands first, then claude
-DISCOVER_HARNESSES = ("codex", "agy", "grok", "claude")
+# Harness evaluation order: harnesses with a model list first, then those whose
+# models the catalog names by hand. Every per-harness fact below comes from the
+# registry (scripts/harnesses/).
+DISCOVER_HARNESSES = harnesses.discovery_order()
 
-FIXTURE_FILES = {
-    "codex": "codex-debug-models.json",
-    "agy": "agy-models.txt",
-    "grok": "grok-models.txt",
-    "claude": "claude-help.txt",
-}
+FIXTURE_FILES = {h.name: h.fixture_file for h in harnesses.REGISTRY}
 
-HARNESS_COMMANDS = {
-    "codex": ["codex", "debug", "models"],
-    "agy": ["agy", "models"],
-    "grok": ["grok", "models"],
-    "claude": ["claude", "--help"],
-}
+HARNESS_COMMANDS = {h.name: list(h.list_command) for h in harnesses.REGISTRY if h.list_command}
 
 # Each harness runs its own vendor's models. agy also serves other vendors'
 # models (`claude-sonnet-4-6`, `gpt-oss-120b-medium`); they stay in the report,
 # and the refresh leaves them alone — a lane on somebody else's model through
 # agy is not what this catalog is for (ticket 33).
-HARNESS_VENDOR = {"codex": "gpt", "claude": "claude", "agy": "gemini", "grok": "grok"}
+HARNESS_VENDOR = {h.name: h.vendor for h in harnesses.REGISTRY}
 
 # A slug component that is a version: `6`, `5.6`, and the `5` `5` of
 # `claude-opus-5-5`.
 VERSION_PART = re.compile(r"^\d+(?:\.\d+)*$")
+# A date stamp at the end of a slug, as one part (`20251001`) or three
+# (`2026-11-01`). It dates a snapshot of a version and is no part of it, so
+# `gpt-6-sol-2026-11-01` is `gpt-sol` at (6,), not (6, 2026, 11, 1).
+DATE_PART = re.compile(r"^(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$")
+DATE_PARTS = (re.compile(r"^(?:19|20)\d\d$"), re.compile(r"^(?:0[1-9]|1[0-2])$"),
+              re.compile(r"^(?:0[1-9]|[12]\d|3[01])$"))
 
 # The words that name a whole family rather than one model. A new lane is named
 # after the model, so `gpt-6-sol` gives `sol6`; where the family word is the
 # model's own name, as grok's is, the name keeps it and gives `grok47`.
-VENDOR_WORDS = ("gpt", "claude", "gemini", "grok")
+VENDOR_WORDS = tuple(h.vendor for h in harnesses.REGISTRY if h.vendor)
 
 # An ultra lane is generated off and says why: no source scores it, and its
 # automatic task delegation contradicts the worker preamble (ticket 15).
@@ -159,107 +160,6 @@ ULTRA_BASIS = (
     "('Do not delegate, spawn subagents, or call other agents'); "
     "meter_weight is a property of the plan, not the model (no benchmark can supply it)"
 )
-
-# Claude models that take no effort level at all. The Claude Code docs
-# (https://code.claude.com/docs/en/model-config, checked 2026-09-12) list the models that take effort and say "Models not
-# listed here do not support effort"; Haiku is not listed. Matched as a word in
-# the model slug.
-CLAUDE_MODELS_WITHOUT_EFFORT = ("haiku",)
-
-
-def parse_codex_output(text):
-    """Parses JSON output from `codex debug models`.
-
-    Only models whose visibility is 'list' are reported. Models with
-    visibility 'hide' (such as gpt-reserve and codex-auto-review) are
-    internal or automated and are not offered to human users; excluding
-    them is deliberate.
-    """
-    doc = json.loads(text)
-    if not isinstance(doc, dict) or "models" not in doc:
-        raise ValueError("missing 'models' array in JSON output")
-
-    models = []
-    for item in doc["models"]:
-        if not isinstance(item, dict):
-            continue
-        # Deliberately exclude hidden/internal models
-        if item.get("visibility") != "list":
-            continue
-        slug = item.get("slug")
-        if not slug:
-            continue
-        efforts = []
-        for level in item.get("supported_reasoning_levels", []):
-            if isinstance(level, dict) and "effort" in level:
-                efforts.append(level["effort"])
-        models.append({
-            "slug": slug,
-            "display_name": item.get("display_name"),
-            "efforts": efforts,
-            "supported_reasoning_levels": item.get("supported_reasoning_levels", []),
-            # codex names the replacement of a model it is retiring; that is the
-            # harness saying the model is superseded (ticket 33)
-            "upgrade": item.get("upgrade"),
-        })
-    return models
-
-
-def parse_agy_output(text):
-    """Parses plain text output from `agy models`.
-
-    A first line 'Fetching available models...' is skipped;
-    each model line is formatted as '<slug>\t<display name>'.
-    """
-    models = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("Fetching available models"):
-            continue
-        if "\t" in line:
-            parts = line.split("\t", 1)
-            slug = parts[0].strip()
-            display_name = parts[1].strip() if len(parts) > 1 else None
-        else:
-            parts = line.split(None, 1)
-            slug = parts[0].strip()
-            display_name = parts[1].strip() if len(parts) > 1 else None
-        if slug:
-            models.append({
-                "slug": slug,
-                "display_name": display_name,
-            })
-    return models
-
-
-def parse_grok_output(text):
-    """Parses plain text prose from `grok models`.
-
-    Extracts slugs from bullet lines under 'Available models:',
-    stripping leading bullets ('*', '-') and ' (default)' suffix.
-    """
-    models = []
-    in_available = False
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("Available models:"):
-            in_available = True
-            continue
-        if in_available:
-            m = re.match(r"^[\*\-]\s+(.*?)(?:\s+\(default\))?$", line)
-            if m:
-                slug = m.group(1).strip()
-                if slug:
-                    models.append({
-                        "slug": slug,
-                        "display_name": slug,
-                    })
-    return models
-
 
 def read_harness(harness, fixture_dir=None, runner=None):
     """The raw text a harness command prints, from a runner, a fixture, or the
@@ -301,96 +201,54 @@ def read_harness(harness, fixture_dir=None, runner=None):
     return raw, None
 
 
-def parse_claude_help(text):
-    """The efforts `claude --help` lists for `--effort`, in its order, or [].
-
-    The values sit in parentheses in the flag's description, which wraps onto
-    the lines after the flag (`--effort <level>  Effort level for the current
-    session` then `(low, medium, high, xhigh, max)`), so the description runs
-    until the next line that starts a flag.
-    """
-    lines = (text or "").splitlines()
-    for index, line in enumerate(lines):
-        if not re.match(r"\s*--effort\b", line):
-            continue
-        description = [line]
-        for following in lines[index + 1:]:
-            if re.match(r"\s*-", following):
-                break
-            description.append(following)
-        found = re.search(r"\(([^()]*)\)", " ".join(description))
-        if not found:
-            return []
-        words = [w.strip().lower() for w in re.split(r"[,|/]", found.group(1))]
-        return [w for w in words if w in EFFORTS]
-    return []
-
-
-def claude_efforts(fixture_dir=None, runner=None):
-    """(efforts, source) for the claude harness: `claude --help` when it lists
-    them, else the harness table, and the source says which."""
-    raw, err = read_harness("claude", fixture_dir=fixture_dir, runner=runner)
-    efforts = parse_claude_help(raw) if err is None else []
+def help_effort_words(harness, fixture_dir=None, runner=None):
+    """(efforts, unknown, source) for a harness whose models the catalog names:
+    the efforts its list command's output names, else the registry's; the words
+    it names that no Lane on it may carry (`Harness.split_efforts`); and the
+    source, which says where the efforts came from."""
+    adapter = harnesses.get(harness)
+    raw, err = read_harness(harness, fixture_dir=fixture_dir, runner=runner)
+    efforts, unknown = adapter.split_efforts(adapter.efforts_from_help(raw) if err is None else [])
+    command = " ".join(adapter.list_command or [harness])
     if efforts:
-        return efforts, "claude --help"
-    return list(HARNESS_EFFORTS["claude"]), "catalog.HARNESS_EFFORTS (claude --help listed none)"
+        return efforts, unknown, command
+    return list(HARNESS_EFFORTS[harness]), unknown, f"catalog.HARNESS_EFFORTS ({command} listed none)"
+
+
+def help_efforts(harness, fixture_dir=None, runner=None):
+    """(efforts, source): `help_effort_words` without the unknown words."""
+    efforts, _unknown, source = help_effort_words(harness, fixture_dir=fixture_dir, runner=runner)
+    return efforts, source
 
 
 def model_takes_effort(harness, slug):
     """False for a model its harness runs with no effort level at all."""
-    if harness != "claude":
-        return True
-    words = re.split(r"[^a-z0-9]+", (slug or "").lower())
-    return not any(word in words for word in CLAUDE_MODELS_WITHOUT_EFFORT)
+    adapter = harnesses.get(harness)
+    return adapter is None or adapter.model_takes_effort(slug)
 
 
-def group_agy_models(raw_models):
-    """One entry per agy slug family, in listed order.
-
-    agy carries the effort in the slug: `gemini-3.8-flash-high`, `-medium` and
-    `-low` are one model at three efforts, so they are reported as
-    `gemini-3.8-flash` with efforts [low, medium, high] and `members` mapping
-    each effort to the slug agy accepts. A slug without an effort suffix agy
-    offers is a family of one with no efforts.
-    """
-    families, order = {}, []
-    for item in raw_models:
-        slug = item["slug"]
-        base, effort = catalog.agy_family(slug)
-        family = families.get(base)
-        if family is None:
-            display = item.get("display_name")
-            if effort and display:
-                display = re.sub(r"\s*\((?:low|medium|high)\)\s*$", "", display, flags=re.I) or display
-            family = {"slug": base, "display_name": display, "efforts": [], "members": {}}
-            families[base] = family
-            order.append(base)
-        if effort:
-            if effort not in family["efforts"]:
-                family["efforts"].append(effort)
-            family["members"][effort] = slug
-        else:
-            family["members"][None] = slug
-    out = []
-    for base in order:
-        family = families[base]
-        family["efforts"].sort(key=HARNESS_EFFORTS["agy"].index)
-        out.append(family)
-    return out
-
-
-def model_level(slug):
+def model_level(slug, harness=None):
     """(level, version) for a model slug: the slug with its version taken out,
     and that version as a tuple of whole numbers.
 
     `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`, at (6,) and (5, 6);
     `claude-opus-5-5` is `claude-opus` at (5, 5); a slug with no version is its
     own level, at (). The agy effort suffix comes off first, so one slug family
-    has one level (`catalog.agy_family`).
+    has one level (`catalog.slug_family`, or the harness's own rule when the
+    harness is named), and a trailing date stamp comes off next (`DATE_PART`):
+    `claude-haiku-4-5-20251001` is `claude-haiku` at (4, 5).
     """
-    base, _effort = catalog.agy_family(slug or "")
+    if harness is not None:
+        base, _effort = harnesses.family(harness, slug or "")
+    else:
+        base, _effort = catalog.slug_family(slug or "")
+    parts = base.split("-")
+    if len(parts) > 1 and DATE_PART.match(parts[-1]):
+        parts = parts[:-1]
+    elif len(parts) > 3 and all(rule.match(part) for rule, part in zip(DATE_PARTS, parts[-3:])):
+        parts = parts[:-3]
     words, version = [], []
-    for part in base.split("-"):
+    for part in parts:
         if VERSION_PART.match(part):
             version.extend(int(number) for number in part.split("."))
         else:
@@ -407,7 +265,7 @@ def mark_generation(models, harness):
     """
     newest = {}
     for item in models:
-        level, version = model_level(item["slug"])
+        level, version = model_level(item["slug"], harness)
         item["level"], item["version"] = level, list(version)
         item["superseded"] = None
         best = newest.get(level)
@@ -449,25 +307,18 @@ def lane_stem(level, version, levels=()):
 def query_harness(harness, fixture_dir=None, runner=None):
     """Queries a single harness for its available models.
 
-    Returns (models_list, error_string). Every model carries `efforts`; an agy
-    model is a slug family (`group_agy_models`).
+    Returns (models_list, error_string). Every model carries `efforts`; on a
+    harness whose effort is in the slug a model is a slug family.
     """
     raw, err = read_harness(harness, fixture_dir=fixture_dir, runner=runner)
     if err is not None:
         return [], err
 
+    adapter = harnesses.get(harness)
+    if adapter is None or adapter.catalog_models:
+        return [], f"no model list for harness '{harness}'"
     try:
-        if harness == "codex":
-            return parse_codex_output(raw), None
-        elif harness == "agy":
-            return group_agy_models(parse_agy_output(raw)), None
-        elif harness == "grok":
-            models = parse_grok_output(raw)
-            for model in models:
-                model["efforts"] = list(HARNESS_EFFORTS["grok"])
-            return models, None
-        else:
-            return [], f"unknown harness '{harness}'"
+        return adapter.parse_models(raw), None
     except Exception as e:
         return [], f"unparseable output: {e}"
 
@@ -484,7 +335,8 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
         if fixture_dir is not None:
             present = {
                 h for h in DISCOVER_HARNESSES
-                if h == "claude" or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
+                if harnesses.get(h).catalog_models
+                or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
             }
         else:
             present = catalog.installed_harnesses(DISCOVER_HARNESSES)
@@ -516,34 +368,35 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
             }
             continue
 
-        if harness == "claude":
-            # Claude has no list command. Claude models are named by hand in
-            # the catalog and undiscoverable; never guess a Claude model list.
-            # One entry per model, holding every lane that runs it.
-            efforts, _source = claude_efforts(fixture_dir=fixture_dir, runner=runner)
-            claude_models = {}
+        if harnesses.get(harness).catalog_models:
+            # This harness has no list command (Claude Code). Its models are
+            # named by hand in the catalog and undiscoverable; never guess a
+            # model list. One entry per model, holding every lane that runs it.
+            efforts, unknown, _source = help_effort_words(harness, fixture_dir=fixture_dir, runner=runner)
+            named = {}
             for lane_name, lane_def in lanes_dict.items():
-                if isinstance(lane_def, dict) and lane_def.get("harness") == "claude":
-                    claude_models.setdefault(lane_def.get("model", ""), []).append(lane_name)
-            harnesses_doc["claude"] = {
+                if isinstance(lane_def, dict) and lane_def.get("harness") == harness:
+                    named.setdefault(lane_def.get("model", ""), []).append(lane_name)
+            harnesses_doc[harness] = {
                 "status": "ok",
                 "error": None,
-                "discovered_count": len(claude_models),
+                "discovered_count": len(named),
             }
-            claude_doc = [
+            named_doc = [
                 {
-                    "harness": "claude",
+                    "harness": harness,
                     "slug": slug,
                     "display_name": None,
                     "lane": ", ".join(lane_names),
                     "lanes": lane_names,
-                    "efforts": list(efforts) if model_takes_effort("claude", slug) else [],
+                    "efforts": list(efforts) if model_takes_effort(harness, slug) else [],
+                    "unknown_efforts": list(unknown) if model_takes_effort(harness, slug) else [],
                     "reason": "hand-named, undiscoverable",
                     "members": {},
                 }
-                for slug, lane_names in claude_models.items()
+                for slug, lane_names in named.items()
             ]
-            models_doc.extend(mark_generation(claude_doc, "claude"))
+            models_doc.extend(mark_generation(named_doc, harness))
             continue
 
         raw_models, err = query_harness(harness, fixture_dir=fixture_dir, runner=runner)
@@ -563,7 +416,12 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
 
         discovered_slugs = set()
         mark_generation(raw_models, harness)
+        adapter = harnesses.get(harness)
         for item in raw_models:
+            # an effort word no Lane on this harness may carry is kept apart,
+            # so the refresh names it instead of proposing a Lane for it
+            efforts, unknown = adapter.split_efforts(item.get("efforts"))
+            unknown += [w for w in item.get("unknown_efforts") or () if w not in unknown]
             slug = item["slug"]
             display_name = item.get("display_name")
             # an agy family answers for every slug in it: a lane on
@@ -582,7 +440,8 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                 "display_name": display_name,
                 "lane": lane_str,
                 "lanes": matched_lanes,
-                "efforts": list(item.get("efforts") or []),
+                "efforts": efforts,
+                "unknown_efforts": unknown,
                 "reason": None,
                 "level": item["level"],
                 "version": item["version"],
@@ -628,17 +487,16 @@ UNPRICED_NOTE = (
     "never copied from another model."
 )
 
-# One published name for one claude model: `Claude Opus 5.5`. Claude Code names
-# no model, so the benchmark rows are the only list of them there is.
-PUBLISHED_CLAUDE = re.compile(r"claude\s+([A-Za-z]+)\s+([0-9]+(?:\.[0-9]+)*)", re.I)
+def named_by_hand(harness):
+    """True for a harness with no model list, whose models the catalog names."""
+    adapter = harnesses.get(harness)
+    return adapter is not None and adapter.catalog_models
 
 
 def lane_model(harness, model, effort):
-    """The model string a lane on this model at this effort carries. agy names
-    the effort in the slug, so the family says which slug an effort takes."""
-    if harness == "agy":
-        return (model.get("members") or {}).get(effort, model["slug"])
-    return model["slug"]
+    """The model string a lane on this model at this effort carries. A harness
+    that names the effort in the slug says which slug an effort takes."""
+    return harnesses.get(harness).lane_model(model, effort)
 
 
 def model_slugs(model):
@@ -654,17 +512,24 @@ def own_vendor(model):
     either: the other vendors' models agy serves are somebody else's business.
     """
     slug = model.get("slug") or ""
+    adapter = harnesses.get(model.get("harness"))
+    if adapter is not None and adapter.any_vendor:
+        # Kiro serves every vendor's models on its own Meter: all are its own
+        return bool(model.get("level"))
     return bool(model.get("level")) and slug.split("-")[0] == HARNESS_VENDOR.get(model.get("harness"))
 
 
-def claude_generation(models, published_models):
-    """The claude models the refresh works from, newest version per level.
+def catalog_generation(harness, models, published_models):
+    """The models of a harness with no model list that the refresh works from,
+    newest version per level.
 
-    Claude Code lists no model, so the benchmark rows name them: a published
-    `Claude <Level> <version>` denotes `claude-<level>-<major>[-<minor>]`, and
-    only for a level the catalog already runs on the claude harness. A level
+    Such a harness (Claude Code) lists no model, so the benchmark rows name
+    them: a published name the adapter's `published_name` matches, such as
+    `Claude <Level> <version>`, denotes `<vendor>-<level>-<major>[-<minor>]`,
+    and only for a level the catalog already runs on that harness. A level
     keeps its catalog model until a newer version of it is named (ticket 33).
     """
+    adapter = harnesses.get(harness)
     out = [copy.deepcopy(item) for item in models]
     current = {}
     for item in out:
@@ -673,10 +538,10 @@ def claude_generation(models, published_models):
             current[item["level"]] = item
     newer = {}
     for name in published_models or ():
-        found = PUBLISHED_CLAUDE.fullmatch(str(name).strip())
+        found = adapter.published_name.fullmatch(str(name).strip()) if adapter.published_name else None
         if not found:
             continue
-        level = f"claude-{found.group(1).lower()}"
+        level = f"{adapter.vendor}-{found.group(1).lower()}"
         version = tuple(int(number) for number in found.group(2).split("."))
         base = current.get(level)
         if base is None or version <= tuple(base["version"]):
@@ -688,13 +553,15 @@ def claude_generation(models, published_models):
         slug = "-".join([*level.split("-"), *text.split(".")])
         base["superseded"] = f"{slug} is newer"
         out.append({
-            "harness": "claude",
+            "harness": harness,
             "slug": slug,
             "display_name": None,
             "lane": "none",
             "lanes": [],
             # the level's efforts: one model of a level takes what the level takes
-            "efforts": list(base["efforts"]) if model_takes_effort("claude", slug) else [],
+            "efforts": list(base["efforts"]) if model_takes_effort(harness, slug) else [],
+            "unknown_efforts": (list(base.get("unknown_efforts") or [])
+                                if model_takes_effort(harness, slug) else []),
             "reason": "named by the benchmark rows",
             "level": level,
             "version": list(version),
@@ -729,11 +596,11 @@ def _free_name(stem, effort, harness, *taken):
     can collide; a counter after the stem is the smallest thing that separates
     them and stays the same on every run.
     """
-    name = f"{stem}-{effort}@{harness}"
+    name = harnesses.lane_name(stem, effort, harness)
     counter = 1
     while any(name in names for names in taken):
         counter += 1
-        name = f"{stem}{counter}-{effort}@{harness}"
+        name = harnesses.lane_name(f"{stem}{counter}", effort, harness)
     return name
 
 
@@ -754,9 +621,24 @@ def _donor(harness, effort, lanes, new_lanes, leaving):
     return candidates[0] if candidates else (None, None)
 
 
+def _starter(harness, doc):
+    """(where the figures came from, a donor-shaped record) for the first Lane
+    on a harness whose adapter declares a starter, adding its Meter to the
+    document when the catalog has none; None for any other harness."""
+    adapter = harnesses.get(harness)
+    if adapter is None or adapter.starter_meter is None or adapter.starter_lane is None:
+        return None
+    meter_name, meter = adapter.starter_meter
+    meters = doc.setdefault("meters", {})
+    if meter_name not in meters:
+        meters[meter_name] = {"harness": harness, **copy.deepcopy(meter)}
+    return f"the {harness} adapter's starter", {"meter": meter_name, "tier": 1,
+                                                 **copy.deepcopy(adapter.starter_lane)}
+
+
 def _lane_stem_of(lane_name):
     """`sol` from `sol-high@codex`: what the start page prints as `sol-*@codex`."""
-    return lane_name.rsplit("@", 1)[0].rsplit("-", 1)[0]
+    return harnesses.split_lane(lane_name)[0].rsplit("-", 1)[0]
 
 
 def refresh_catalog(lanes_doc, discovery, published_models=()):
@@ -772,15 +654,25 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
     model reaches the screening page (ticket 35). It takes its predecessor's
     Tier, Order, Meter, weight and timeout, and not its `enabled`.
 
+    A model that takes no effort level (Claude's Haiku) still takes its
+    predecessor's place, in one lane at the effort its predecessor's lane
+    carries, which is how the catalog writes such a lane. An effort word the
+    harness lists that no lane on it may carry gets no lane; the plan's
+    `notices` name it instead, so the wizard can say so.
+
     Nothing is written: the wizard's confirm writes, and quitting writes
     nothing (ticket 33).
     """
     doc = copy.deepcopy(lanes_doc)
     lanes = doc.get("lanes") or {}
     models = [item for item in (discovery.get("models") or []) if isinstance(item, dict)]
-    models = ([item for item in models if item.get("harness") != "claude"]
-              + claude_generation([item for item in models if item.get("harness") == "claude"],
-                                  published_models))
+    named_by_hand = [h.name for h in harnesses.REGISTRY if h.catalog_models]
+    models = [item for item in models if item.get("harness") not in named_by_hand]
+    for harness in named_by_hand:
+        models += catalog_generation(
+            harness, [item for item in discovery.get("models") or []
+                      if isinstance(item, dict) and item.get("harness") == harness],
+            published_models)
     own = [item for item in models if own_vendor(item)]
 
     levels = {}
@@ -799,15 +691,36 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
             if lane.get("harness") == item["harness"] and lane.get("model") in slugs:
                 leaving[name] = item
 
-    plan_models, new_lanes, successors = [], {}, {}
-    for item in own:
-        if item.get("superseded"):
-            continue
+    current = [item for item in own if not item.get("superseded")]
+    predecessors = [_predecessor(item, own, lanes) for item in current]
+    # A model that takes a predecessor's place goes first: its new lanes are
+    # what a model new to the harness copies its figures from when every lane
+    # the harness had is leaving, whatever order the harness lists them in.
+    work = sorted(range(len(current)), key=lambda index: predecessors[index] is None)
+
+    plan_by_index, new_by_index, successors, notices = {}, {}, {}, []
+    new_lanes = {}
+    for index in work:
+        item, predecessor = current[index], predecessors[index]
         harness = item["harness"]
+        adapter = harnesses.get(harness)
         stem = lane_stem(item["level"], tuple(item["version"]), levels[harness])
-        predecessor = _predecessor(item, own, lanes)
+        efforts, unknown = adapter.split_efforts(item.get("efforts"))
+        unknown += [word for word in item.get("unknown_efforts") or () if word not in unknown]
+        for word in unknown:
+            why = ("delegate does not know it yet" if word not in EFFORTS
+                   else f"delegate does not run {harness} at it yet")
+            notices.append(f"{harness} lists effort '{word}' for {item['slug']}; {why}")
+        no_effort = not efforts and not unknown
+        if no_effort and predecessor is not None:
+            # one lane, at the effort the predecessor's lane carries: a carried
+            # one if it has one
+            own_lanes = [lane for lane in lanes.values()
+                         if lane.get("harness") == harness and lane.get("model") in model_slugs(predecessor)]
+            carried = [lane for lane in own_lanes if lane.get("enabled") is not False]
+            efforts = [(carried or own_lanes)[0]["effort"]] if own_lanes else []
         added, replaced = [], []
-        for effort in item.get("efforts") or []:
+        for effort in efforts:
             model_text = lane_model(harness, item, effort)
             if (harness, model_text, effort) in by_key:
                 continue
@@ -825,8 +738,12 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 source_name, source = _donor(harness, effort, lanes, new_lanes, set(leaving))
                 basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
             if source is None:
-                # nothing on this harness to copy a weight or a timeout from
-                continue
+                starter = _starter(harness, doc)
+                if starter is None:
+                    # nothing on this harness to copy a weight or a timeout from
+                    continue
+                source_name, source = starter
+                basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
             record = {
                 "harness": harness,
                 "model": model_text,
@@ -852,12 +769,13 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 # is never carried (ticket 15).
                 record["enabled"] = False
             new_lanes[name] = record
+            new_by_index.setdefault(index, []).append(name)
             added.append(name)
             if pred_name:
                 successors.setdefault(pred_name, []).append(name)
                 replaced.append(pred_name)
         if added:
-            plan_models.append({
+            plan_by_index[index] = {
                 "harness": harness,
                 "model": item["slug"],
                 "predecessor": predecessor["slug"] if predecessor else None,
@@ -865,8 +783,13 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 "predecessor_stem": _lane_stem_of(replaced[0]) if replaced else None,
                 "new": added,
                 "replaced": replaced,
-            })
+            }
 
+    # the plan and the new lanes read in the harnesses' own listing order, not
+    # the order they were made in
+    plan_models = [plan_by_index[index] for index in sorted(plan_by_index)]
+    new_lanes = {lane_name: new_lanes[lane_name]
+                 for index in sorted(new_by_index) for lane_name in new_by_index[index]}
     ordered = {}
     for name, lane in lanes.items():
         if name in leaving:
@@ -881,6 +804,7 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
         "models": plan_models,
         "new": list(new_lanes),
         "removed": sorted(leaving),
+        "notices": notices,
     }
 
 
@@ -906,7 +830,7 @@ def map_lanes(discovery, lanes_doc):
     # lane of its that is not on it is a lane on a retired model
     slugs = {
         name: set() for name, info in (result.get("harnesses") or {}).items()
-        if isinstance(info, dict) and info.get("status") == "ok" and name != "claude"
+        if isinstance(info, dict) and info.get("status") == "ok" and not named_by_hand(name)
     }
     unmapped = []
     for item in result.get("models") or []:
@@ -917,7 +841,7 @@ def map_lanes(discovery, lanes_doc):
         matched = [name for slug in sorted(members) for name in lane_map.get((harness, slug), [])]
         item["lane"] = ", ".join(matched) if matched else "none"
         item["lanes"] = matched
-        if (not matched and harness != "claude"
+        if (not matched and not named_by_hand(harness)
                 and own_vendor(item) and not item.get("superseded")):
             unmapped.append({
                 "harness": harness,
@@ -927,7 +851,7 @@ def map_lanes(discovery, lanes_doc):
     retired = []
     for lane_name, lane in (lanes_doc.get("lanes") or {}).items():
         harness = lane.get("harness")
-        if harness == "claude" or harness not in slugs:
+        if named_by_hand(harness) or harness not in slugs:
             continue
         if lane.get("model") not in slugs[harness]:
             retired.append({"lane": lane_name, "harness": harness, "model": lane.get("model")})
@@ -993,7 +917,7 @@ def derive_short_name(slug):
     """Derives a short model identifier from a model slug.
     Returns (short_name, derivation_explanation)."""
     parts = slug.split("-")
-    prefixes = {"gpt", "claude", "gemini", "grok"}
+    prefixes = set(VENDOR_WORDS)
     # If the slug has hyphen-separated parts, check if last component is a distinctive alphabetic name
     if len(parts) > 1 and parts[-1].isalpha() and parts[-1].lower() not in prefixes:
         return parts[-1].lower(), f"last component of slug '{slug}' after '-'"
@@ -1012,11 +936,11 @@ def generate_efforts_stanzas(harness, slug, efforts):
     short_name, derivation = derive_short_name(slug)
     stanzas = {}
     for effort in efforts:
-        lane_name = f"{short_name}-{effort}@{harness}"
+        lane_name = harnesses.lane_name(short_name, effort, harness)
         stanza = {
             "harness": harness,
-            # agy accepts the effort only as part of the slug
-            "model": f"{slug}-{effort}" if harness == "agy" else slug,
+            # a harness whose effort is in the slug accepts it only there
+            "model": f"{slug}-{effort}" if harnesses.get(harness).effort_in_slug else slug,
             "effort": effort,
             "meter": "TODO: meter",
             "meter_weight": "TODO: meter_weight",
@@ -1072,7 +996,8 @@ def handle_efforts(target_model, cat=None, present=None, fixture_dir=None, runne
         if fixture_dir is not None:
             present = {
                 h for h in DISCOVER_HARNESSES
-                if h == "claude" or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
+                if harnesses.get(h).catalog_models
+                or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
             }
         else:
             present = catalog.installed_harnesses(DISCOVER_HARNESSES)
@@ -1088,17 +1013,17 @@ def handle_efforts(target_model, cat=None, present=None, fixture_dir=None, runne
     for harness in DISCOVER_HARNESSES:
         if harness not in present:
             continue
-        if harness == "claude":
-            efforts, _source = claude_efforts(fixture_dir=fixture_dir, runner=runner)
+        if named_by_hand(harness):
+            efforts, _source = help_efforts(harness, fixture_dir=fixture_dir, runner=runner)
             models = []
             for lane_def in lanes_dict.values():
-                if isinstance(lane_def, dict) and lane_def.get("harness") == "claude":
+                if isinstance(lane_def, dict) and lane_def.get("harness") == harness:
                     m = lane_def.get("model")
                     if m and not any(cm["slug"] == m for cm in models):
                         models.append({
                             "slug": m,
                             "display_name": None,
-                            "efforts": list(efforts) if model_takes_effort("claude", m) else [],
+                            "efforts": list(efforts) if model_takes_effort(harness, m) else [],
                         })
         else:
             models, err = query_harness(harness, fixture_dir=fixture_dir, runner=runner)
@@ -1115,15 +1040,20 @@ def handle_efforts(target_model, cat=None, present=None, fixture_dir=None, runne
                     found_model_dict = m
                     break
 
-    if found_model_dict is None and "claude" in present and target_model.lower().startswith("claude-"):
-        # A Claude model no lane runs yet. It is not guessed: the operator named
-        # it, and Claude has no list command to check the name against.
-        efforts, _source = claude_efforts(fixture_dir=fixture_dir, runner=runner)
-        found_harness = "claude"
+    for harness in DISCOVER_HARNESSES:
+        adapter = harnesses.get(harness)
+        if (found_model_dict is not None or not adapter.catalog_models or harness not in present
+                or not target_model.lower().startswith(f"{adapter.vendor}-")):
+            continue
+        # A model of a harness with no list command that no lane runs yet. It
+        # is not guessed: the operator named it, and the harness has no list
+        # command to check the name against.
+        efforts, _source = help_efforts(harness, fixture_dir=fixture_dir, runner=runner)
+        found_harness = harness
         found_model_dict = {
             "slug": target_model,
             "display_name": None,
-            "efforts": list(efforts) if model_takes_effort("claude", target_model) else [],
+            "efforts": list(efforts) if model_takes_effort(harness, target_model) else [],
         }
 
     if found_model_dict is not None:
@@ -1162,7 +1092,7 @@ def handle_efforts(target_model, cat=None, present=None, fixture_dir=None, runne
             else:
                 print(f"discover: harness '{found_harness}' does not offer reasoning effort levels for model '{target_model}'.")
                 if not model_takes_effort(found_harness, target_model):
-                    print("Claude Code's docs (https://code.claude.com/docs/en/model-config) say Haiku supports no effort level.")
+                    print(harnesses.get(found_harness).no_effort_note)
                 print(f"Available models on {found_harness}: {avail_str}")
             return 0
 

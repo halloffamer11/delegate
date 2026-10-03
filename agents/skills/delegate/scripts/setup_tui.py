@@ -38,6 +38,9 @@ from bench import (
     resolve_effort_rows,
     unmatched_message,
 )
+import harnesses as harness_registry  # noqa: E402
+import catalog  # noqa: E402
+import tier_proposal  # noqa: E402
 from catalog import (
     CLASSES,
     HARNESSES,
@@ -105,28 +108,34 @@ CLASSES_DEF = definition("classes", "each class has a floor and a ceiling tier, 
 CONFIRM_OFF_DEF = definition("off", "written with enabled: false; on lanes omit the key")
 # The harness page counts claude's models, but Claude Code lists none: the
 # count is the catalog's own (`discover.discover`).
-CLAUDE_COUNT_LEGEND = "claude lists no model; its count is the catalog's own"
+def count_legend(harness):
+    """The discovery page's note under a harness that lists no model."""
+    return f"{harness} lists no model; its count is the catalog's own"
 
 
-def class_descriptions(path=None):
+def class_descriptions(path=None, extra=()):
     """{class: its first sentence} from the Class guide, `assets/classes.md`,
     for the routing page's group rows. The guide is the one place a class is
     described, so nothing here paraphrases it: the sentence is quoted, less its
     full stop. A guide that cannot be read gives every class "" and the page
-    still draws; the guide is an aid to the routing page, not a gate."""
-    try:
-        with open(path or catalog_guide_path(), "r", encoding="utf-8") as f:
-            text = f.read()
-    except (OSError, UnicodeDecodeError):
-        return {name: "" for name in CLASSES}
+    still draws; the guide is an aid to the routing page, not a gate. `extra`
+    are overlay guides (this machine's classes.md) whose sections describe the
+    Classes a catalog adds; a missing one is skipped."""
     out = {name: "" for name in CLASSES}
+    text = ""
+    for guide in [path or catalog_guide_path(), *extra]:
+        try:
+            with open(guide, "r", encoding="utf-8") as f:
+                text += "\n" + f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
     current = None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("## "):
             current = line[3:].strip()
             continue
-        if current in out and line and not out[current]:
+        if current is not None and line and not out.get(current):
             head = line.split(". ", 1)[0]
             out[current] = head[:-1] if head.endswith(".") else head
     return out
@@ -257,14 +266,15 @@ def refresh_lines(refresh, width=80):
         return []
     lines = []
     for item in refresh.get("models") or []:
-        family = f"{item['stem']}-*@{item['harness']}"
+        family = harness_registry.lane_name(item["stem"], "*", item["harness"])
         count = plural(len(item["new"]), "Lane")
         if item.get("predecessor"):
             replaced = len(set(item["replaced"]))
             tail = count if replaced == len(item["new"]) else f"{count} for {replaced}"
             lines.append(fit_line(
                 f"{item['predecessor']} → {item['model']}: {family} replace "
-                f"{item['predecessor_stem']}-*@{item['harness']} ({tail})", width))
+                f"{harness_registry.lane_name(item['predecessor_stem'], '*', item['harness'])} "
+                f"({tail})", width))
         else:
             lines.append(fit_line(f"new {item['model']}: {family} ({count})", width))
     # a superseded lane with no successor at its effort leaves with no line of
@@ -273,6 +283,9 @@ def refresh_lines(refresh, width=80):
     orphans = [name for name in refresh.get("removed") or [] if name not in covered]
     if orphans:
         lines.append(list_line("Superseded Lanes removed", orphans, width))
+    # an effort a harness lists that no Lane may carry yet: named, not proposed
+    for notice in refresh.get("notices") or ():
+        lines.append(fit_line(notice, width))
     if not lines:
         return [fit_line("Catalog refresh: every model is the current generation", width)]
     return lines
@@ -322,8 +335,10 @@ class Wizard:
                  clock=None, class_guide=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
-        self._original_routing = copy.deepcopy(routing_doc)
-        self.routing_doc = copy.deepcopy(routing_doc)
+        # every shipped Class is on the routing page, with the default Range
+        # when the catalog gives it none, then the Classes it adds (ticket 16)
+        self._original_routing = catalog.with_default_classes(routing_doc)
+        self.routing_doc = catalog.with_default_classes(routing_doc)
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
@@ -335,7 +350,8 @@ class Wizard:
         self._clock = clock or (lambda: time.strftime("%H:%M"))
         self.scanned = "at launch"
         # the routing page's class descriptions, from the Class guide
-        self.class_guide = class_descriptions() if class_guide is None else class_guide
+        self.class_guide = (class_descriptions(extra=[os.path.join(os.path.dirname(routing_path), "classes.md")])
+                            if class_guide is None else class_guide)
         self.focus = None if focus in (None, "start") else focus
         self.screen = "start"
         self.tier = None
@@ -705,6 +721,35 @@ class Wizard:
         self._settle()
         return summary
 
+    def tier_proposals(self):
+        """{lane: proposal} for the carried Lanes with a score on the chosen
+        benchmark (ticket 17). A proposal is shown, never applied, until `p`."""
+        settings = catalog.tier_proposal_settings(self.routing_doc)
+        return tier_proposal.propose(self.lanes_doc, self.effort_rows, settings,
+                                     names=self._carried())
+
+    def take_proposals(self):
+        """`p` on a tier page: every carried Lane with a proposal takes its
+        proposed Tier, in the proposal's order; a Lane with no score keeps the
+        Tier it has. Nothing is written until the confirm page's `y`."""
+        proposals = self.tier_proposals()
+        if not proposals:
+            self.message = "p: no carried lane has a score on the chosen benchmark; nothing changed"
+            return
+        for name, proposal in proposals.items():
+            self._assigned[name] = proposal["tier"]
+        self._marks = {
+            tier: {name for name, assigned in self._assigned.items()
+                   if assigned == tier and self._enabled[name]}
+            for tier in range(1, 5)
+        }
+        ordered = tier_proposal.ordered(proposals)
+        self._line_order = {name: index for index, name in enumerate(ordered)}
+        self._tier_order = {tier: [] for tier in range(1, 5)}
+        unscored = len(self._carried()) - len(proposals)
+        self.message = (f"p: took the proposed Tier for {plural(len(proposals), 'lane')}"
+                        + (f"; {plural(unscored, 'lane')} with no score kept theirs" if unscored else ""))
+
     def _paste_tier_lines(self):
         """`v` on the review page: the clipboard's lines, or a message saying
         why nothing changed."""
@@ -838,6 +883,8 @@ class Wizard:
                     self._enter_tier(self.tier - 1)
                 else:
                     self._enter_review()
+            elif key == "p":
+                self.take_proposals()
             elif key == "b" and self.focus:
                 return
             elif key == "b" and self.tier < 4:
@@ -871,8 +918,8 @@ class Wizard:
                 self._enter_tier(1)
             return
         if self.screen == "routing":
-            count = len(CLASSES) * 2 + 3
-            meters_idx = len(CLASSES) * 2 + 2
+            count = len(self.classes) * 2 + 3
+            meters_idx = len(self.classes) * 2 + 2
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
             elif key == "down":
@@ -882,17 +929,17 @@ class Wizard:
                     self._set_meters(not self._meters_on())
                 elif key in ("plus", "minus"):
                     delta = 1 if key == "plus" else -1
-                    if self.cursor < len(CLASSES) * 2:
+                    if self.cursor < len(self.classes) * 2:
                         cls_idx = self.cursor // 2
                         is_ceiling = (self.cursor % 2 == 1)
-                        name = CLASSES[cls_idx]
+                        name = self.classes[cls_idx]
                         cls_info = self.routing_doc["classes"][name]
                         if is_ceiling:
                             cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
                         else:
                             cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
                     else:
-                        name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
+                        name = "margin" if self.cursor == len(self.classes) * 2 else "gate"
                         old = self.routing_doc[name]
                         self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
             elif key == "enter":
@@ -911,7 +958,7 @@ class Wizard:
             # of sight included both file paths and every routing value. A
             # confirm screen you cannot read to the end is not one.
             count = (len(self._focus_rows()) if self.focus else
-                     len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 5)
+                     len(self.lanes_doc["lanes"]) + len(self.classes) * 2 + 5)
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -986,7 +1033,7 @@ class Wizard:
             for field in ("tier", "order", "enabled"):
                 if lane.get(field) != original.get(field):
                     add(f"{name}.{field}", original.get(field, "unset"), lane.get(field, "unset"))
-        for name in CLASSES:
+        for name in self.classes:
             for field in ("floor", "ceiling"):
                 old = self._original_routing["classes"][name][field]
                 new = self.routing_doc["classes"][name][field]
@@ -1182,7 +1229,7 @@ class Wizard:
 
     def _routing_settings(self):
         values = []
-        for name in CLASSES:
+        for name in self.classes:
             cls_info = self.routing_doc["classes"][name]
             values.append((name, "floor", cls_info["floor"]))
             values.append((name, "ceiling", cls_info["ceiling"]))
@@ -1190,6 +1237,12 @@ class Wizard:
                        (None, "gate", self.routing_doc["gate"]),
                        (None, "meters", "on" if self._meters_on() else "off")])
         return values
+
+    @property
+    def classes(self):
+        """The Classes on the routing page: the shipped five, then the
+        catalog's own."""
+        return catalog.class_names(self.routing_doc)
 
     # The routing page's last group: the three settings that make the pick.
     RANKING_GROUP = ("ranking", "how the pick is made among eligible lanes")
@@ -1206,7 +1259,7 @@ class Wizard:
         is whole.
         """
         settings = self._routing_settings()
-        names = ["  floor", "  ceiling", "  margin", "  gate", "  meters", *CLASSES,
+        names = ["  floor", "  ceiling", "  margin", "  gate", "  meters", *self.classes,
                  self.RANKING_GROUP[0], "setting"]
         room = max(MIN_ELASTIC, self._width - 1 - max(len(n) for n in names) - 2
                    - (PANEL_MIN + PANEL_GAP + 2))
@@ -1340,7 +1393,7 @@ class Wizard:
             refresh = self.refresh or {}
             new = {name: (self.lanes_doc["lanes"].get(name) or {}).get("harness")
                    for name in refresh.get("new") or ()}
-            removed = [name.rsplit("@", 1)[-1] for name in refresh.get("removed") or ()]
+            removed = [harness_registry.split_lane(name)[1] for name in refresh.get("removed") or ()]
             rows = []
             for name in HARNESSES:
                 info = harnesses.get(name) if isinstance(harnesses.get(name), dict) else None
@@ -1368,7 +1421,8 @@ class Wizard:
                               "current generation.")]
             if self.rows_note:
                 body.append(self._fit(self.rows_note))
-            legend = [CLAUDE_COUNT_LEGEND] if live and "claude" in harnesses else []
+            legend = [count_legend(h.name) for h in harness_registry.REGISTRY
+                      if live and h.catalog_models and h.name in harnesses]
             return self._frame(
                 "discovery", "Delegate setup: discovery",
                 columns=["harness", "status", "models", "new lanes", "removed lanes"],
@@ -1419,13 +1473,18 @@ class Wizard:
             if aa_names:
                 columns.extend([*aa_names, "AA $/task", "AA mean rank"])
             active = self._tier_names()
+            proposals = self.tier_proposals()
+            if proposals:
+                columns.insert(4, "proposed")
             rows = []
             for index, name in enumerate(active):
                 lane = self.lanes_doc["lanes"][name]
                 marked = name in self._marks[self.tier]
+                proposed = ([tier_proposal.describe(proposals[name]) if name in proposals else ""]
+                            if proposals else [])
                 rows.append({
                     "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
-                              *self._bench_cells(name, epoch_names, aa_names)],
+                              *proposed, *self._bench_cells(name, epoch_names, aa_names)],
                     "marked": marked, "dimmed": False,
                     "cursor": index == self.cursor,
                     "tag": "",
@@ -1437,7 +1496,9 @@ class Wizard:
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
                 # truncated footer loses the keys.
-                legend=[*self._tier_legend(), *(
+                legend=[*(tier_proposal.legend(catalog.tier_proposal_settings(self.routing_doc), proposals)
+                          if proposals else []),
+                        *self._tier_legend(), *(
                     ["Unmarking moves a Lane down one Tier; Enter reviews the changes."]
                     if self.focus and self.tier > 1 else [])],
             )
@@ -1510,7 +1571,7 @@ class Wizard:
                 rows.append({"cells": [name, "off" if off else "",
                                         f"tier {self._final_tier(name)}"],
                              "marked": False, "dimmed": off, "tag": ""})
-            for name in CLASSES:
+            for name in self.classes:
                 cls_info = self.routing_doc["classes"][name]
                 rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
                              "marked": False, "dimmed": False, "tag": ""})
@@ -2001,7 +2062,7 @@ def run_curses(wizard):
                        10: "enter", 13: "enter", curses.KEY_ENTER: "enter",
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
                        ord("+"): "plus", ord("="): "plus", ord("-"): "minus",
-                       ord("o"): "o", ord("O"): "o", ord("v"): "v", ord("V"): "v",
+                       ord("o"): "o", ord("O"): "o", ord("v"): "v", ord("V"): "v", ord("p"): "p",
                        ord("x"): "x", ord("X"): "x",
                        # the review page moves the lane itself (ticket 28)
                        ord("J"): "lane-down", ord("K"): "lane-up",

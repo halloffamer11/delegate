@@ -6,10 +6,10 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02
+**Status:** ready-for-human, raised by Orin 2026-10-02. Built 2026-10-03: `skills/kiro-delegate/` on the fork, commit `e3541ec` (branch `claude/delegate-any-harness-next-v75vlw`), pinned in `ads.sh`. The relay runs `kiro-cli chat --no-interactive --v3 --output-format stream-json [--model <id>] [--effort <lvl>]` with the brief on stdin; kiro.dev/docs/cli/headless now documents `--model` and `--effort` headless. `--v3` is the default because `stream-json` needs V2 or V3; V3 asks before each shell command in an untrusted workspace and headless denies every ask, so a write run that must run tests needs the repo trusted once interactively (in the relay's SKILL.md). Tested against a fake `kiro-cli` only: the stream-json event names are undocumented, so the relay reads session id, report and usage defensively and falls back to the last assistant text. The fork's delegate-setup now lists kiro as an implementer. Waits on Orin: the `kiro-cli --version` and `--list-models` checks and `KIRO_API_KEY` on the Mac, the live run, and whether to offer the relay upstream (amElnagdy is outside this session's reach).
 
-- [ ] Kiro CLI is installed on the Mac so the relay can be tested for real: `kiro-cli` declared in dotfiles (the Brewfile if Homebrew carries it, otherwise its official installer as a Makefile step), `kiro-cli --version` and `kiro-cli chat --list-models --format json` work, and `KIRO_API_KEY` is set machine-locally, never committed (Orin's box for the key; raised by Orin in review 2026-10-02).
-- [ ] `relay.mjs` maps `--read-only` to the narrowest trusted tool set and adds the git-fingerprint tripwire if that is weak.
-- [ ] `test/relay-parity.mjs` and a fake-CLI suite pass in the fork.
-- [ ] `ads.sh` pins the new commit; the upstream PR link is recorded here.
+- [ ] Kiro CLI is installed on the Mac (declared: dotfiles Brewfile `cask "kiro-cli"`, branch `claude/delegate-any-harness-next-v75vlw`) so the relay can be tested for real: `kiro-cli` declared in dotfiles (the Brewfile if Homebrew carries it, otherwise its official installer as a Makefile step), `kiro-cli --version` and `kiro-cli chat --list-models --format json` work, and `KIRO_API_KEY` is set machine-locally, never committed (Orin's box for the key; raised by Orin in review 2026-10-02).
+- [x] `relay.mjs` maps `--read-only` to the narrowest trusted tool set and adds the git-fingerprint tripwire if that is weak.
+- [x] `test/relay-parity.mjs` and a fake-CLI suite pass in the fork.
+- [ ] `ads.sh` pins the new commit; the upstream PR link is recorded here. (Pinned `e3541ec`; no upstream PR yet, Orin's call.)
 - [ ] One live read-only run on Orin's machine with his API key (Orin's box).

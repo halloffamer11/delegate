@@ -26,6 +26,8 @@ sys.path.insert(0, DELEGATE_DIR)
 import bench
 import catalog
 import discover
+import harnesses
+from harnesses import agy as agy_module, grok as grok_module
 import setup_tui
 
 fails = 0
@@ -46,7 +48,7 @@ codex_fixture_path = os.path.join(FIXTURES_DIR, "codex-debug-models.json")
 with open(codex_fixture_path, "r", encoding="utf-8") as f:
     codex_raw = f.read()
 
-codex_models = discover.parse_codex_output(codex_raw)
+codex_models = harnesses.get("codex").parse_models(codex_raw)
 codex_slugs = [m["slug"] for m in codex_models]
 codex_ok = (
     codex_slugs == ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
@@ -63,7 +65,7 @@ agy_fixture_path = os.path.join(FIXTURES_DIR, "agy-models.txt")
 with open(agy_fixture_path, "r", encoding="utf-8") as f:
     agy_raw = f.read()
 
-agy_models = discover.parse_agy_output(agy_raw)
+agy_models = agy_module.parse_listing(agy_raw)
 agy_slugs = [m["slug"] for m in agy_models]
 agy_ok = (
     len(agy_models) == 14
@@ -82,7 +84,7 @@ grok_fixture_path = os.path.join(FIXTURES_DIR, "grok-models.txt")
 with open(grok_fixture_path, "r", encoding="utf-8") as f:
     grok_raw = f.read()
 
-grok_models = discover.parse_grok_output(grok_raw)
+grok_models = grok_module.parse_listing(grok_raw)
 grok_slugs = [m["slug"] for m in grok_models]
 grok_ok = (
     grok_slugs == ["grok-4.6", "grok-4.5"]
@@ -332,7 +334,7 @@ with tempfile.TemporaryDirectory() as td:
 
     data = json.loads(res_json.stdout)
     top_keys = {"harnesses", "models", "unmapped", "retired"}
-    model_keys = {"harness", "slug", "display_name", "lane", "lanes", "efforts", "reason",
+    model_keys = {"harness", "slug", "display_name", "lane", "lanes", "efforts", "unknown_efforts", "reason",
                   "level", "version", "superseded", "members"}
     json_ok = (
         res_json.returncode == 0
@@ -625,20 +627,20 @@ with open(os.path.join(FIXTURES_DIR, "claude-help.txt"), encoding="utf-8") as f:
     claude_help = f.read()
 record(
     "the claude --help fixture (Claude Code 2.1.269) parses to its five efforts, in order",
-    discover.parse_claude_help(claude_help) == ["low", "medium", "high", "xhigh", "max"]
-    and discover.parse_claude_help("  --effort <level>  Effort level\n  --other  x (a, b)") == []
-    and discover.parse_claude_help("") == [],
-    repr(discover.parse_claude_help(claude_help)),
+    harnesses.get("claude").efforts_from_help(claude_help) == ["low", "medium", "high", "xhigh", "max"]
+    and harnesses.get("claude").efforts_from_help("  --effort <level>  Effort level\n  --other  x (a, b)") == []
+    and harnesses.get("claude").efforts_from_help("") == [],
+    repr(harnesses.get("claude").efforts_from_help(claude_help)),
 )
 record(
     "when claude --help lists no effort the harness table stands in, and says so",
-    discover.claude_efforts(runner=lambda h: "  --effort <level>  Effort level\n")
+    discover.help_efforts("claude", runner=lambda h: "  --effort <level>  Effort level\n")
     == (list(catalog.HARNESS_EFFORTS["claude"]), "catalog.HARNESS_EFFORTS (claude --help listed none)")
-    and discover.claude_efforts(fixture_dir=FIXTURES_DIR)[1] == "claude --help",
-    repr(discover.claude_efforts(runner=lambda h: "")),
+    and discover.help_efforts("claude", fixture_dir=FIXTURES_DIR)[1] == "claude --help",
+    repr(discover.help_efforts("claude", runner=lambda h: "")),
 )
 
-families = discover.group_agy_models(agy_models)
+families = harnesses.get("agy").group(agy_models)
 by_slug = {f["slug"]: f for f in families}
 record(
     "agy slugs group into one model per family with its efforts and member slugs",
@@ -747,7 +749,7 @@ record(
 )
 
 with open(os.path.join(REFRESH_DIR, "codex-debug-models.json"), encoding="utf-8") as f:
-    codex_generation = discover.mark_generation(discover.parse_codex_output(f.read()), "codex")
+    codex_generation = discover.mark_generation(harnesses.get("codex").parse_models(f.read()), "codex")
 by_slug = {m["slug"]: m for m in codex_generation}
 record(
     "superseded is the harness's own word or a higher version of the level",
@@ -923,7 +925,8 @@ record(
     remapped["unmapped"] == []
     and not any(line.startswith("Models with no lane")
                 for line in setup_tui.discovery_notices(remapped, 10_000))
-    and setup_tui.discovery_notices(remapped, 10_000) == ["Model discovery: no drift"],
+    # the fixture machine has no Kiro CLI, which is the one thing worth saying
+    and setup_tui.discovery_notices(remapped, 10_000) == ["Harness kiro: missing"],
     repr(setup_tui.discovery_notices(remapped, 10_000)),
 )
 
@@ -937,6 +940,141 @@ record(
     "a current-generation model that truly has no lane is still named",
     still_named == ["gpt-6-sol"],
     repr(still_named),
+)
+
+
+# --- refresh robustness: listing order, no-effort successors, dates, effort words
+
+def refresh_with(edit, extra_published=()):
+    """The refresh of the frozen catalog against a copy of the frozen fixtures
+    that `edit(directory)` changed: (discovery, refreshed catalog, plan)."""
+    with tempfile.TemporaryDirectory() as d:
+        fixtures = os.path.join(d, "fixtures")
+        shutil.copytree(REFRESH_DIR, fixtures)
+        edit(fixtures)
+        found = discover.discover(copy.deepcopy(frozen_lanes), fixture_dir=fixtures)
+    doc, made = discover.refresh_catalog(copy.deepcopy(frozen_lanes), found,
+                                         published_models=published + list(extra_published))
+    return found, doc, made
+
+
+def valid_or_error(doc):
+    try:
+        catalog.validate_lanes(copy.deepcopy(doc), "refreshed")
+        return True
+    except catalog.CatalogError as e:
+        return repr(e)
+
+
+def agy_listing(where):
+    """Lists gemini-3.9-flash at the top or the bottom of `agy models`."""
+    def edit(fixtures):
+        path = os.path.join(fixtures, "agy-models.txt")
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        new = [f"gemini-3.9-flash-{e}\tGemini 3.9 Flash ({e.title()})" for e in ("high", "medium", "low")]
+        lines = lines[:1] + new + lines[1:] if where == "top" else lines + new
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    return edit
+
+
+_, top_doc, _ = refresh_with(agy_listing("top"))
+_, bottom_doc, _ = refresh_with(agy_listing("bottom"))
+top_agy = sorted(n for n, lane in top_doc["lanes"].items() if lane["harness"] == "agy")
+bottom_agy = sorted(n for n, lane in bottom_doc["lanes"].items() if lane["harness"] == "agy")
+record(
+    "a new level gets its lanes whether agy lists it before or after the only successor",
+    top_agy == bottom_agy
+    and {"pro31-low@agy", "pro31-high@agy", "flash39-high@agy"} <= set(bottom_agy)
+    and not any(n.startswith("flash-") for n in bottom_agy),
+    f"top={top_agy} bottom={bottom_agy}",
+)
+
+
+def codex_add(*models):
+    def edit(fixtures):
+        path = os.path.join(fixtures, "codex-debug-models.json")
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+        for slug, efforts in models:
+            doc["models"].append({"slug": slug, "display_name": slug, "visibility": "list",
+                                  "supported_reasoning_levels": [{"effort": e} for e in efforts]})
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+    return edit
+
+
+_, haiku_doc, haiku_plan = refresh_with(lambda d: None, extra_published=["Claude Haiku 5"])
+haiku = {n: lane for n, lane in haiku_doc["lanes"].items() if "haiku" in lane["model"]}
+record(
+    "a successor that takes no effort level takes its predecessor's place in one lane",
+    list(haiku) == ["haiku5-high@claude"]
+    and haiku["haiku5-high@claude"]["model"] == "claude-haiku-5"
+    and haiku["haiku5-high@claude"]["tier"] == frozen_lanes["lanes"]["haiku-high@claude"]["tier"]
+    and "haiku-high@claude" in haiku_plan["removed"]
+    and valid_or_error(haiku_doc) is True,
+    f"{sorted(haiku)} {valid_or_error(haiku_doc)}",
+)
+
+dated = {slug: discover.model_level(slug) for slug in (
+    "gpt-6-sol-2026-11-01", "gpt-6-sol-20261101", "claude-haiku-4-5-20251001")}
+_, dated_doc, dated_plan = refresh_with(codex_add(("gpt-6-sol-2026-11-01", ["high"]),
+                                                  ("gpt-6.1-sol", ["high"])))
+record(
+    "a trailing date stamps a snapshot and is no part of the version",
+    dated == {"gpt-6-sol-2026-11-01": ("gpt-sol", (6,)), "gpt-6-sol-20261101": ("gpt-sol", (6,)),
+              "claude-haiku-4-5-20251001": ("claude-haiku", (4, 5))}
+    and [m["model"] for m in dated_plan["models"] if m["harness"] == "codex" and "sol" in m["model"]]
+    == ["gpt-6.1-sol"],
+    f"{dated} {[m['model'] for m in dated_plan['models']]}",
+)
+
+_, extreme_doc, extreme_plan = refresh_with(
+    codex_add(("gpt-6.1-sol", ["low", "medium", "high", "xhigh", "max", "extreme"])))
+record(
+    "an effort word delegate does not know gets a notice, not a lane",
+    not any(lane["effort"] == "extreme" for lane in extreme_doc["lanes"].values())
+    and "sol61-high@codex" in extreme_doc["lanes"]
+    and extreme_plan["notices"]
+    == ["codex lists effort 'extreme' for gpt-6.1-sol; delegate does not know it yet"]
+    and valid_or_error(extreme_doc) is True
+    and any("delegate does not know it yet" in line
+            for line in setup_tui.refresh_lines(extreme_plan, 10_000)),
+    f"{extreme_plan['notices']} {valid_or_error(extreme_doc)}",
+)
+
+
+def claude_help_extreme(fixtures):
+    with open(os.path.join(fixtures, "claude-help.txt"), "w", encoding="utf-8") as f:
+        f.write("  --effort <level>  Effort level for the current session\n"
+                "                    (low, medium, high, xhigh, max, extreme)\n  --other  x\n")
+
+
+claude_found, claude_doc, claude_plan = refresh_with(claude_help_extreme)
+claude_models = [m for m in claude_found["models"] if m["harness"] == "claude"]
+record(
+    "claude --help naming an unknown effort is reported, and its efforts stay the known ones",
+    all("extreme" not in m["efforts"] for m in claude_models)
+    and any("claude lists effort 'extreme' for claude-opus-5-5" in n for n in claude_plan["notices"])
+    and valid_or_error(claude_doc) is True,
+    repr(claude_plan["notices"]),
+)
+
+
+def agy_xhigh(fixtures):
+    with open(os.path.join(fixtures, "agy-models.txt"), "a", encoding="utf-8") as f:
+        f.write("gemini-3.8-flash-xhigh\tGemini 3.8 Flash (Xhigh)\n")
+
+
+xhigh_found, xhigh_doc, _ = refresh_with(agy_xhigh)
+record(
+    "agy listing an -xhigh slug adds an xhigh lane to the family, which the catalog accepts",
+    not any(m["slug"] == "gemini-3.8-flash-xhigh" for m in xhigh_found["models"])
+    and any(lane["model"] == "gemini-3.8-flash-xhigh" and lane["effort"] == "xhigh"
+            for lane in xhigh_doc["lanes"].values())
+    and valid_or_error(xhigh_doc) is True,
+    f"{valid_or_error(xhigh_doc)}",
 )
 
 sys.exit(1 if fails else 0)

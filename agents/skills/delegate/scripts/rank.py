@@ -278,8 +278,8 @@ def rank(cls, cat, meters, present, tier=None):
     """
     routing = cat.get("routing", {})
     classes = routing.get("classes", {})
-    if cls not in classes and cls not in CLASSES:
-        raise ValueError(f"unknown class '{cls}'; must be one of {', '.join(CLASSES)}")
+    if cls not in classes:
+        raise ValueError(f"unknown class '{cls}'; must be one of {', '.join(catalog.class_names(routing))}")
 
     cls_config = classes.get(cls, {})
     floor = cls_config.get("floor")
@@ -469,20 +469,19 @@ def main(argv=None):
         prog="rank.py",
         description="Rank execution lanes for a Class or preview all four exact Tiers."
     )
-    parser.add_argument("target", metavar="class|tiers", help=f"class to rank ({', '.join(CLASSES)}) or tiers")
+    parser.add_argument("target", metavar="class|tiers", help=f"class to rank ({', '.join(CLASSES)}, or one the catalog adds) or tiers")
     parser.add_argument("--tier", type=int, default=None, help="override floor tier for this job")
     parser.add_argument("--cwd", default=None, help="working directory to find git root from")
     parser.add_argument("--config-dir", default=None, help="config directory containing lanes.json and routing.json")
     parser.add_argument("--meters", default=None, help="path to usage document JSON file")
     parser.add_argument("--harnesses", default=None, help="comma-separated list of present harnesses")
+    parser.add_argument("--harness", default=None,
+                        help="the user's harness constraint: rank this harness's Lanes only")
     parser.add_argument("--json", action="store_true", help="output as JSON")
 
     args = parser.parse_args(argv)
     tiers_mode = args.target == "tiers"
 
-    if not tiers_mode and args.target not in CLASSES:
-        sys.stderr.write(f"rank: unknown class '{args.target}'; must be one of {', '.join(CLASSES)}\n")
-        sys.exit(2)
     if tiers_mode and args.tier is not None:
         parser.error("--tier is only valid with a Class")
 
@@ -491,6 +490,20 @@ def main(argv=None):
     except CatalogError as e:
         sys.stderr.write(f"rank: {e}\n")
         sys.exit(1)
+
+    known_classes = catalog.class_names(cat["routing"])
+    if not tiers_mode and args.target not in known_classes:
+        sys.stderr.write(f"rank: unknown class '{args.target}'; must be one of {', '.join(known_classes)}\n")
+        sys.exit(2)
+
+    if args.harness is not None:
+        error = catalog.harness_constraint_error(args.harness) if args.harnesses is None else (
+            None if args.harness in args.harnesses.split(",") else
+            f"harness '{args.harness}' is not installed; installed: {args.harnesses}")
+        if error:
+            sys.stderr.write(f"rank: {error}\n")
+            sys.exit(2)
+        cat = catalog.restrict_to_harness(cat, args.harness)
 
     meters_doc = load_usage(cat, args.meters, refresh=not tiers_mode)
 

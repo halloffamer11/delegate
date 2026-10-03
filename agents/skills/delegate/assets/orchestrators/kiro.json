@@ -1,0 +1,11 @@
+{
+  "note": "Kiro as the orchestrator. It runs no Lane in-process, so every Lane is relayed. kiro.dev documents no variable Kiro sets in the shells it starts, so it is never detected: pass --orchestrator kiro or set DELEGATE_ORCHESTRATOR=kiro, and the default path relays every Lane anyway.",
+  "harness": "kiro",
+  "detect_env": [],
+  "native": null,
+  "launch": {
+    "note": "Headless, for eval 3 (kiro.dev/docs/cli/headless): needs KIRO_API_KEY. V3 asks before shell commands in an untrusted workspace and headless denies every ask, so all tools are trusted for the eval's scratch project.",
+    "argv": ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "{prompt}"],
+    "prompt": "I am explicitly asking you to use the delegate skill. Delegate the job in {brief} as class {cls}, working directory {cwd}. When it finishes, print the run directory."
+  }
+}

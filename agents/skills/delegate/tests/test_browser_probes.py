@@ -22,6 +22,7 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 BROWSER_PROBES_PY = os.path.join(DELEGATE_DIR, "browser_probes.py")
 
 sys.path.insert(0, DELEGATE_DIR)
+import harnesses  # noqa: E402
 import browser_probes
 
 fails = 0
@@ -134,7 +135,7 @@ def main():
 
         fake_bin = os.path.join(tmpdir, "bin")
         os.makedirs(fake_bin, exist_ok=True)
-        for h in ("claude", "codex", "agy", "grok"):
+        for h in (h.binary for h in harnesses.REGISTRY):
             p = os.path.join(fake_bin, h)
             with open(p, "w") as f:
                 f.write("#!/bin/sh\nexit 0\n")
@@ -158,8 +159,12 @@ def main():
             text=True,
         )
 
-        lines = res.stdout.strip().splitlines()
-        has_8_lines = len(lines) == 8
+        # a harness with no Lane in the sample catalog (kiro) reports one
+        # `no enabled lane` row per probe and is otherwise left out here
+        all_lines = res.stdout.strip().splitlines()
+        no_lane = [ln for ln in all_lines if ln.endswith("| FAIL | no enabled lane |")]
+        lines = [ln for ln in all_lines if ln not in no_lane]
+        has_8_lines = len(lines) == 8 and len(no_lane) == 2 and all(ln.startswith("| kiro |") for ln in no_lane)
 
         # The sample's only claude lane is native (harness = ORCHESTRATOR), so its
         # rows name the agent to spawn instead of a relay command.

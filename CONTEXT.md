@@ -6,10 +6,10 @@ remaining subscription usage.
 ## Delegate: who runs a job
 
 **Harness**:
-A CLI that runs models: `claude`, `codex`, `agy`, or `grok`.
+A CLI that runs models: `claude`, `codex`, `agy`, `grok`, or `kiro` (its CLI is `kiro-cli`, and it serves several vendors' models on one Meter).
 
 **Orchestrator harness**:
-The harness that runs the session that plans, dispatches, and checks results. Today it is always Claude Code.
+The harness that runs the session that plans, dispatches, and checks results. Any harness that can run a shell and read files can be one; delegate detects it (or takes `--orchestrator`) and never assumes it.
 _Avoid_: lead harness, parent
 
 **Model**:
@@ -75,7 +75,7 @@ A project's preferred order for lanes inside their effective tiers. It overrides
 The lane ranking selects when selection is restricted to one Tier. It is a preview for that Tier, not the Pick for a Class range.
 
 **Class**:
-The kind of job: scout, mechanical, impl, review, or hard-impl.
+The kind of job. Five ship (scout, mechanical, impl, review, hard-impl) and every catalog has them; a catalog may add its own, each with a Range in `routing.json` and a section in a Class guide.
 _Avoid_: task type, category
 
 **Floor**:

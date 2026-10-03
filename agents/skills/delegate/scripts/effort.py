@@ -28,8 +28,9 @@ in every /models/<slug> page, so `aa` reads the rows straight out of that
 payload and writes the payload itself as the packet; `check` then runs as it
 does for any other source. `extract` refuses an Artificial Analysis packet.
 
-Default extract lane is flash-high@agy; terra-high@codex is the fallback
-for packets that lane handles badly.
+Default extract lane is the catalog's first carried agy lane (flash-high@agy
+when no catalog names one); terra-high@codex is the fallback for packets that
+lane handles badly.
 
 agy passes the prompt as a CLI argument, which Linux caps at ~128KB
 (MAX_ARG_STRLEN = 131,072 bytes). The dispatch harness and brief wrapper add
@@ -65,13 +66,20 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import harnesses  # noqa: E402
+
+# The extract lane when none is named is the catalog's first carried agy lane
+# (`default_lane`): the refresh renames agy's lanes with each Gemini version, so
+# a fixed name goes stale. This name stands in only when no catalog gives one.
 DEFAULT_LANE = "flash-high@agy"
+DEFAULT_HARNESS = "agy"
 FALLBACK_LANE = "terra-high@codex"
 DEFAULT_BUDGET = 100 * 1024  # 100KB in bytes; prompt overhead is ~3.5KB, fitting within Linux ~128KB arg cap
 ROW_IDENTITY_FIELDS = ("source", "model", "effort", "benchmark")
-EFFORT_VALUES = (
-    "none", "low", "medium", "high", "xhigh", "max", "ultra", "unspecified",
-)
+# A row's effort: one a lane can carry (harnesses.EFFORTS), or `none` for a
+# model run with no reasoning, or `unspecified` when the source names none.
+EFFORT_VALUES = ("none", *harnesses.EFFORTS, "unspecified")
 # The words a page may print for an effort, where the row's word is not one of
 # them: Artificial Analysis prints `Non-reasoning` for the API's `none`.
 EFFORT_PRINTED = {"none": ("none", "non-reasoning")}
@@ -874,10 +882,31 @@ def delegate_path():
     raise EffortError("delegate.py: not beside effort.py and not on PATH")
 
 
+def default_lane(cat=None, config_dir=None):
+    """The lane an extract runs on when none is named: the catalog's first
+    carried agy lane, else DEFAULT_LANE.
+
+    `cat` is a loaded catalog; without one, this machine's is read. A catalog
+    that cannot be read, or carries no agy lane, gives DEFAULT_LANE, which is
+    what the CLI always ran before.
+    """
+    if cat is None:
+        import catalog
+        try:
+            cat = catalog.load_catalog(config_dir=config_dir)
+        except (catalog.CatalogError, OSError, ValueError):
+            return DEFAULT_LANE
+    for name, lane in ((cat or {}).get("lanes") or {}).items():
+        if (isinstance(lane, dict) and lane.get("harness") == DEFAULT_HARNESS
+                and lane.get("enabled", True) is not False):
+            return name
+    return DEFAULT_LANE
+
+
 def extract_rows(packet_path, out_dir, lane=None, budget=DEFAULT_BUDGET):
     """Dispatch an LLM worker to write rows.json. Needs network; tests skip this."""
     if lane is None:
-        lane = DEFAULT_LANE
+        lane = default_lane()
     os.makedirs(out_dir, exist_ok=True)
     try:
         with open(packet_path, encoding="utf-8") as f:
@@ -1377,8 +1406,9 @@ def main(argv=None):
     p_extract.add_argument("--packet", required=True, help="path to packet.txt")
     p_extract.add_argument("--out-dir", required=True, help="output directory")
     p_extract.add_argument(
-        "--lane", default=DEFAULT_LANE,
-        help=f"delegate lane (default {DEFAULT_LANE}; fallback {FALLBACK_LANE})",
+        "--lane", default=None,
+        help=(f"delegate lane (default: the catalog's first carried {DEFAULT_HARNESS} lane, "
+              f"else {DEFAULT_LANE}; fallback {FALLBACK_LANE})"),
     )
     p_extract.add_argument(
         "--budget", type=int, default=DEFAULT_BUDGET,
@@ -1399,8 +1429,9 @@ def main(argv=None):
     p_run.add_argument("--out-dir", required=True, help="output directory")
     p_run.add_argument("--url", default=None, help="source URL")
     p_run.add_argument(
-        "--lane", default=DEFAULT_LANE,
-        help=f"delegate lane (default {DEFAULT_LANE}; fallback {FALLBACK_LANE})",
+        "--lane", default=None,
+        help=(f"delegate lane (default: the catalog's first carried {DEFAULT_HARNESS} lane, "
+              f"else {DEFAULT_LANE}; fallback {FALLBACK_LANE})"),
     )
     p_run.add_argument(
         "--budget", type=int, default=DEFAULT_BUDGET,

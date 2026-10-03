@@ -54,6 +54,16 @@ def make_checkout(td):
         os.makedirs(path)
     shutil.copy(COMMAND, os.path.join(bindir, "delegate"))
     record_to = os.path.join(td, "ran.json")
+    scripts = os.path.join(checkout, "agents", "skills", "delegate", "scripts")
+    os.makedirs(scripts)
+    for script in ("rank.py", "delegate.py", "report.py", "usage.py", "catalog.py"):
+        executable(os.path.join(scripts, script), (
+            "#!/usr/bin/env python3\n"
+            "import json, os, sys\n"
+            f"json.dump({{'program': {script!r}, 'argv': sys.argv[1:], 'cwd': os.getcwd()}}, "
+            f"open({record_to!r}, 'w'))\n"
+            "sys.exit(5)\n"
+        ))
     executable(os.path.join(stubs, "make"), (
         "#!/usr/bin/env python3\n"
         "import json, os, sys\n"
@@ -91,7 +101,7 @@ with tempfile.TemporaryDirectory() as td:
     results = {args and args[0] or "": run(command, list(args), env, td)
                for args in ((), ("-h",), ("--help",))}
     record(
-        "1 no argument, -h and --help print the two lines and exit 0",
+        "1 no argument, -h and --help print the usage and exit 0",
         all(res.returncode == 0 for res in results.values())
         and all("delegate global" in res.stdout and "delegate project" in res.stdout
                 for res in results.values())
@@ -106,7 +116,7 @@ with tempfile.TemporaryDirectory() as td:
     _checkout, command, env, record_to = make_checkout(td)
     res = run(command, ["wizard"], env, td)
     record(
-        "2 an unknown word names itself, prints the two lines and exits 2",
+        "2 an unknown word names itself, prints the usage and exits 2",
         res.returncode == 2 and "wizard" in res.stderr
         and "delegate global" in res.stderr and "delegate project" in res.stderr
         and ran(record_to) is None,
@@ -177,6 +187,30 @@ with tempfile.TemporaryDirectory() as td:
         and called["argv"][:3] == ["-C", os.path.realpath(checkout), "delegate-wizard"],
         repr(called),
     )
+
+# -------------------------------------------------------------
+# 8. Each script subcommand runs its script in the command's own checkout, with
+#    the arguments passed through: the contract any harness's skill calls.
+expected = {
+    ("rank", "scout", "--harness", "agy", "--json"): ("rank.py", ["scout", "--harness", "agy", "--json"]),
+    ("run", "impl", "--brief", "/b.md"): ("delegate.py", ["run", "impl", "--brief", "/b.md"]),
+    ("dispatch", "--lane", "x@codex"): ("delegate.py", ["dispatch", "--lane", "x@codex"]),
+    ("status",): ("report.py", ["limits"]),
+    ("status", "--json", "--refresh"): ("usage.py", ["--refresh"]),
+    ("log", "--work", "w"): ("report.py", ["log", "--work", "w"]),
+    ("catalog", "show"): ("catalog.py", ["show"]),
+}
+for args, (program, argv) in expected.items():
+    with tempfile.TemporaryDirectory() as td:
+        _checkout, command, env, record_to = make_checkout(td)
+        res = run(command, list(args), env, td)
+        called = ran(record_to)
+        record(
+            f"8 delegate {' '.join(args)} runs {program} {' '.join(argv)}",
+            res.returncode == 5 and called is not None
+            and called["program"] == program and called["argv"] == argv,
+            f"rc={res.returncode} called={called} err={res.stderr[-200:]}",
+        )
 
 # -------------------------------------------------------------
 # 7. The shipped file is executable, so the link is a runnable command.

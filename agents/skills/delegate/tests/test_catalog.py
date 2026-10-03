@@ -22,6 +22,7 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
+import harnesses  # noqa: E402
 import rank
 
 fails = 0
@@ -334,13 +335,13 @@ with tempfile.TemporaryDirectory() as td:
         msg,
     )
 
-# 2.15 unknown class in classes
+# 2.15 a class name that could not be a flag or a guide heading
 doc = copy.deepcopy(routing_sample)
 doc["classes"]["invalid_class"] = {"floor": 1, "ceiling": 2}
 msg = check_catalog_error(catalog.validate_routing, doc)
 record(
-    "reject: unknown class in classes",
-    bool(msg and "invalid_class" in msg and "unknown class" in msg),
+    "reject: a class name that is not lower-case words joined by hyphens",
+    bool(msg and "invalid_class" in msg and "class name" in msg),
     msg,
 )
 
@@ -2840,17 +2841,204 @@ with tempfile.TemporaryDirectory() as which_tmp:
     try:
         answers = {h: (catalog.cli_installed(h), usage.which(h)) for h in catalog.HARNESSES}
         present = catalog.installed_harnesses()
-        absent_row = usage.probe_codex()
+        absent_row = harnesses.get("codex").probe()
     finally:
         os.environ["PATH"] = saved_path
     record(
         "18. usage and catalog agree on which harness CLIs are installed",
         usage.which is catalog.cli_installed
         and answers == {"claude": (False, False), "codex": (False, False),
-                        "agy": (True, True), "grok": (False, False)}
+                        "agy": (True, True), "grok": (False, False), "kiro": (False, False)}
         and present == {"agy"}
         and [r.get("note") for r in absent_row] == ["absent"],
         f"answers={answers} present={present} codex_row={absent_row}",
     )
+
+# 19. Classes are data (any-harness ticket 16): the shipped five are defaults,
+# a catalog adds its own with a Range and a guide section, validated together.
+import rank  # noqa: E402
+
+TRIAGE_GUIDE = "# Machine classes\n\n## triage\n\nSort incoming reports into buckets.\n"
+
+
+def class_world(td, routing_classes, guide=None, project=None, project_guide=None):
+    config = os.path.join(td, "config")
+    os.makedirs(config)
+    shutil.copy(os.path.join(SAMPLES_DIR, "lanes.json"), config)
+    routing = copy.deepcopy(routing_sample)
+    if routing_classes is None:
+        routing.pop("classes")
+    else:
+        routing["classes"] = routing_classes
+    catalog.write_json(os.path.join(config, "routing.json"), routing)
+    if guide is not None:
+        with open(os.path.join(config, "classes.md"), "w") as f:
+            f.write(guide)
+    cwd = os.path.join(td, "proj")
+    os.makedirs(os.path.join(cwd, ".git"))
+    if project is not None or project_guide is not None:
+        os.makedirs(os.path.join(cwd, ".delegate"))
+    if project is not None:
+        catalog.write_json(os.path.join(cwd, ".delegate", "routing.json"), project)
+    if project_guide is not None:
+        with open(os.path.join(cwd, ".delegate", "classes.md"), "w") as f:
+            f.write(project_guide)
+    return config, cwd
+
+
+def catalog_cli(*args, home):
+    env = dict(os.environ, HOME=home)
+    return subprocess.run([sys.executable, CATALOG_PY, *args], capture_output=True, text=True, env=env)
+
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    record("19.1 a catalog that defines no Class gets the shipped five with the sample Ranges",
+           catalog.class_names(cat["routing"]) == list(catalog.CLASSES)
+           and cat["routing"]["classes"] == routing_sample["classes"]
+           and cat["sources"]["classes.review.floor"] == catalog.DEFAULT_CLASSES_SOURCE,
+           repr(cat["routing"]["classes"]))
+    picks = {c: rank.rank(c, cat, {}, set(catalog.HARNESSES))[0]["lane"] for c in catalog.CLASSES}
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, copy.deepcopy(routing_sample["classes"]))
+    cat_full = catalog.load_catalog(cwd=cwd, config_dir=config)
+    picks_full = {c: rank.rank(c, cat_full, {}, set(catalog.HARNESSES))[0]["lane"] for c in catalog.CLASSES}
+record("19.2 the shipped Classes rank the same whether the catalog writes them or not",
+       picks == picks_full, f"{picks} vs {picks_full}")
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, {"review": {"floor": 2, "ceiling": 3},
+                                   "triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    rows = rank.rank("triage", cat, {}, set(catalog.HARNESSES))
+    record("19.3 a global Class extends the defaults and rank accepts it",
+           catalog.class_names(cat["routing"]) == list(catalog.CLASSES) + ["triage"]
+           and cat["routing"]["classes"]["review"] == {"floor": 2, "ceiling": 3}
+           and cat["routing"]["classes"]["scout"] == routing_sample["classes"]["scout"]
+           and rows and all(r["tier"] <= 2 for r in rows if r["pick"]),
+           repr(cat["routing"]["classes"]))
+    res = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "triage",
+                          "--config-dir", config, "--cwd", cwd, "--harnesses", ",".join(catalog.HARNESSES),
+                          "--meters", os.path.join(HERE, "fixture", "meters.json")],
+                         capture_output=True, text=True)
+    res_bad = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "ghost",
+                              "--config-dir", config, "--cwd", cwd],
+                             capture_output=True, text=True)
+    record("19.4 rank.py ranks a custom Class and refuses one with no Range",
+           res.returncode == 0 and "triage" in res.stdout
+           and res_bad.returncode == 2 and "ghost" in res_bad.stderr and "triage" in res_bad.stderr,
+           res.stdout + res.stderr + res_bad.stderr)
+    guide_ok = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    check_ok = catalog_cli("check", os.path.join(config, "routing.json"), home=td)
+    record("19.5 check-guide and check accept a Class with a Range and a guide section",
+           guide_ok.returncode == 0 and f"ok: {os.path.join(config, 'classes.md')}" in guide_ok.stdout
+           and check_ok.returncode == 0,
+           guide_ok.stdout + guide_ok.stderr + check_ok.stderr)
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}})
+    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    check_res = catalog_cli("check", os.path.join(config, "routing.json"), home=td)
+    record("19.6 a Class with no guide section is rejected by check-guide and check, by name",
+           guide_res.returncode == 1 and "'triage'" in guide_res.stderr and "## triage" in guide_res.stderr
+           and check_res.returncode == 1 and "'triage'" in check_res.stderr,
+           guide_res.stderr + check_res.stderr)
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None, guide=TRIAGE_GUIDE)
+    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    record("19.7 a guide section for a Class with no Range is rejected, by name",
+           guide_res.returncode == 1 and "triage" in guide_res.stderr and "routing.json" in guide_res.stderr,
+           guide_res.stderr)
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None, project={"classes": {"triage": {"floor": 1, "ceiling": 2}}},
+                              project_guide=TRIAGE_GUIDE)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    record("19.8 a project adds a Class with its own Range and guide",
+           "triage" in catalog.class_names(cat["routing"]) and guide_res.returncode == 0,
+           guide_res.stdout + guide_res.stderr)
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None, project={"classes": {"triage": {"floor": 1}}})
+    msg = check_catalog_error(catalog.load_catalog, cwd=cwd, config_dir=config)
+    record("19.9 a project Class with no ceiling is rejected, by name",
+           bool(msg and "triage" in msg and "ceiling" in msg), msg)
+
+# One effort list: the suffixes are EFFORTS longest first, not a copy of it.
+record(
+    "20.1 the effort suffixes are EFFORTS, longest first",
+    sorted(e for _, e in catalog.MODEL_EFFORT_SUFFIXES) == sorted(catalog.EFFORTS)
+    and all(suffix == f"-{e}" for suffix, e in catalog.MODEL_EFFORT_SUFFIXES)
+    and [len(e) for _, e in catalog.MODEL_EFFORT_SUFFIXES]
+    == sorted((len(e) for e in catalog.EFFORTS), reverse=True),
+    str(catalog.MODEL_EFFORT_SUFFIXES),
+)
+
+# agy carries the effort in the slug, so a slug agy lists at xhigh is a lane at
+# xhigh, though xhigh is not among the efforts agy was known to offer; an xhigh
+# effort on a slug that names high is still refused.
+xhigh = copy.deepcopy(lanes_sample)
+xhigh["lanes"]["flash39-xhigh@agy"] = dict(
+    xhigh["lanes"]["flash-high@agy"], model="gemini-3.9-flash-xhigh", effort="xhigh")
+mismatch = copy.deepcopy(lanes_sample)
+mismatch["lanes"]["flash-high@agy"]["effort"] = "xhigh"
+mismatch_msg = check_catalog_error(catalog.validate_lanes, mismatch)
+record(
+    "20.2 an agy lane may carry an effort its slug names, and only that one",
+    check_catalog_error(catalog.validate_lanes, xhigh) is None
+    and bool(mismatch_msg and "does not offer effort 'xhigh'" in mismatch_msg),
+    f"{check_catalog_error(catalog.validate_lanes, xhigh)} / {mismatch_msg}",
+)
+
+
+# The shipped Classes are the starting catalog's, read from it, not a copy.
+record("21.1 CLASSES is the sample routing's class list, in its order",
+       catalog.CLASSES == tuple(routing_sample["classes"]), repr(catalog.CLASSES))
+
+# A Class's leash is a routing field: a boolean, merged per key, and a catalog
+# that leaves it out keeps the shipped Class's value.
+bad_leash = copy.deepcopy(routing_sample)
+bad_leash["classes"]["scout"]["leash"] = "no"
+bad_leash_msg = check_catalog_error(catalog.validate_routing, bad_leash)
+good_leash = copy.deepcopy(routing_sample)
+good_leash["classes"]["scout"]["leash"] = False
+record("21.2 classes.<name>.leash must be a boolean",
+       bool(bad_leash_msg and "scout" in bad_leash_msg and "leash" in bad_leash_msg)
+       and check_catalog_error(catalog.validate_routing, good_leash) is None
+       and check_catalog_error(catalog.validate_routing,
+                               {"classes": {"impl": {"leash": True}}}, partial=True) is None,
+       f"{bad_leash_msg}")
+record("21.3 the shipped leash: impl and hard-impl off, the rest and no Class on",
+       [catalog.class_leash(None, c) for c in catalog.CLASSES + (None, "triage")]
+       == [True, True, False, True, False, True, True],
+       repr([catalog.class_leash(None, c) for c in catalog.CLASSES]))
+with tempfile.TemporaryDirectory() as td:
+    old_classes = copy.deepcopy(routing_sample["classes"])
+    for c_val in old_classes.values():
+        c_val.pop("leash", None)
+    old_classes["scout"]["leash"] = False
+    old_classes["triage"] = {"floor": 1, "ceiling": 2}
+    config, cwd = class_world(td, old_classes, guide=TRIAGE_GUIDE,
+                              project={"classes": {"hard-impl": {"leash": True}}})
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    leashes = {c: catalog.class_leash(cat["routing"], c) for c in catalog.class_names(cat["routing"])}
+    record("21.4 a catalog's leash wins, a missing one keeps the shipped value, a project's merges per key",
+           leashes == {"scout": False, "mechanical": True, "impl": False, "review": True,
+                       "hard-impl": True, "triage": True}
+           and cat["sources"]["classes.impl.leash"] == catalog.DEFAULT_CLASSES_SOURCE
+           and cat["routing"]["classes"]["impl"]["floor"] == 2
+           and cat["sources"]["classes.hard-impl.leash"] == os.path.join(cwd, ".delegate", "routing.json"),
+           f"{leashes} {cat['sources'].get('classes.impl.leash')} {cat['sources'].get('classes.hard-impl.leash')}")
+
+# An edit's preview shows a Class the catalog adds, not only the shipped five.
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    picks, _leaders = catalog._rank_preview(cat, {}, set(catalog.HARNESSES))
+    record("21.5 the rank preview picks for every Class the catalog defines",
+           list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
+           repr(picks))
 
 sys.exit(1 if fails else 0)

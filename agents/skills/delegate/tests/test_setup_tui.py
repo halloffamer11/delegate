@@ -2322,6 +2322,12 @@ try:
            == ["Catalog refresh: every model is the current generation"],
            repr(setup_tui.refresh_lines({"models": [], "new": [], "removed": []}, 80)))
 
+    notice = "codex lists effort 'extreme' for gpt-6.1-sol; delegate does not know it yet"
+    record("63d an effort the refresh could not propose is named on the start page",
+           setup_tui.refresh_lines({"models": [], "new": [], "removed": [], "notices": [notice]}, 10_000)
+           == [notice],
+           repr(setup_tui.refresh_lines({"models": [], "new": [], "removed": [], "notices": [notice]}, 10_000)))
+
     w = Wizard(copy.deepcopy(refreshed), copy.deepcopy(ROUTING), None, DISCOVERED,
                "/tmp/lanes.json", "/tmp/routing.json", "",
                discovery=discover.map_lanes(found, refreshed), refresh=plan,
@@ -2587,7 +2593,7 @@ try:
            and by_name["claude"][2] == "4" and new["codex"] == 11 and removed["codex"] == 11
            and v["body"][0].startswith("Scanned at launch: ")
            and v["body"][1] == "Benchmark rows: Artificial Analysis fetched 3h ago, still fresh"
-           and v["legend"] == [setup_tui.CLAUDE_COUNT_LEGEND]
+           and v["legend"] == [setup_tui.count_legend("claude")]
            # r is offered only when there is a scrub to run
            and v["footer"] == setup_tui.DISCOVERY_FOOTER and "r: rescan" not in v["footer"]
            and grid[setup_tui.TOP].startswith("Scanned at launch")
@@ -2961,24 +2967,52 @@ except Exception as e:
 
 
 try:
-    # the harnesses page counts its body in the table's room: at 80x16 every
+    # the harnesses page counts its body in the table's room: at 80 by 12
+    # rows plus one per harness (16 with four, 17 with Kiro's five) every
     # harness shows, and the legend gives way first
     w, _r, _p = scanned_wizard(rescan=lambda: None)
     w.handle("enter")
     v = w.view(80)
-    grid = screen(v, 80, 16)
+    rows = 12 + len(catalog.HARNESSES)
+    grid = screen(v, 80, rows)
     shown = [line.split()[0] for line in grid if line.split() and line.split()[0] in catalog.HARNESSES]
-    roomy = screen(v, 80, 24)
-    record("79 the harnesses page at 80x16 shows every harness row, and its body",
+    roomy = screen(v, 80, 25)
+    record("79 the harnesses page at 80 by 12 + harnesses rows shows every harness row, and its body",
            len(v["body"]) == 2 and shown == list(catalog.HARNESSES)
            and grid[setup_tui.TOP].startswith("Scanned at launch")
-           and not any(line.startswith(setup_tui.CLAUDE_COUNT_LEGEND[:20]) for line in grid)
-           and grid[16 - 3].startswith("any key")
-           and not grid[2].rstrip().endswith("of 4")
+           and not any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in grid)
+           and grid[rows - 3].startswith("any key")
+           and not grid[2].rstrip().endswith(f"of {len(catalog.HARNESSES)}")
            # with room, the legend is back
-           and any(line.startswith(setup_tui.CLAUDE_COUNT_LEGEND[:20]) for line in roomy),
+           and any(line.startswith(setup_tui.count_legend("claude")[:20]) for line in roomy),
            repr(grid))
 except Exception as e:
     record("79 the harnesses page at 80x16 shows every harness row", False, repr(e))
+
+# 80. Classes are data (ticket 16): a catalog with no classes shows the shipped
+# five with their default Ranges; a Class it adds is on the routing page and
+# its +/- edits the right Class.
+try:
+    bare = copy.deepcopy(ROUTING)
+    bare.pop("classes", None)
+    bare_w = Wizard(copy.deepcopy(LANES), bare, None, DISCOVERED, "/tmp/lanes.json",
+                    "/tmp/routing.json", class_guide={})
+    custom = copy.deepcopy(ROUTING)
+    custom["classes"]["triage"] = {"floor": 1, "ceiling": 2}
+    w = Wizard(copy.deepcopy(LANES), custom, None, DISCOVERED, "/tmp/lanes.json",
+               "/tmp/routing.json", class_guide={"triage": "Sort incoming reports"})
+    w.screen = "routing"
+    w.cursor = len(catalog.CLASSES) * 2 + 1   # triage's ceiling
+    w.handle("plus")
+    headings = [r["cells"][0] for r in w._routing_rows() if not r["cells"][0].startswith("  ")]
+    record("80 the wizard shows the shipped Classes by default and edits a Class the catalog adds",
+           bare_w.classes == list(catalog.CLASSES)
+           and set(bare_w.routing_doc["classes"]) == set(catalog.CLASSES)
+           and w.classes == list(catalog.CLASSES) + ["triage"]
+           and "triage" in headings
+           and w.routing_doc["classes"]["triage"] == {"floor": 1, "ceiling": 3},
+           f"{bare_w.classes} {headings} {w.routing_doc['classes'].get('triage')}")
+except Exception as e:
+    record("80 the wizard shows the shipped Classes by default", False, repr(e))
 
 sys.exit(1 if fails else 0)

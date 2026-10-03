@@ -11,11 +11,11 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02; banding, cost and diversity rules set by Orin in review the same day.
+**Status:** ready-for-human, raised by Orin 2026-10-02; banding, cost and diversity rules set by Orin in review the same day. Built 2026-10-03: `scripts/tier_proposal.py`, the `tier_proposal` rule in `routing.json` (sample default: AA Intelligence Index, Tier 2 ≥ 30, 3 ≥ 40, 4 ≥ 50, diversity on), the tier pages' `proposed` column and `p`, `tests/test_tier_proposal.py`. How cost informs the proposal: a Tier keeps its band's score-and-cost frontier plus each harness's best Lane; a Lane another beats on both falls a Tier. Waits on Orin: the run on the current generation, which sets the thresholds.
 
-- [ ] The benchmark, the Tier thresholds and the diversity rule are catalog data with a validator, not constants in code.
-- [ ] Each Lane with a score shows its proposed Tier, the score and benchmark behind it, and its cost per task; a Lane without a score shows no proposal.
-- [ ] A test proves the diversity rule: a harness whose best Lane clears a threshold but sits off the cost frontier still gets a proposal in that Tier.
-- [ ] Switching the benchmark (AA index to Terminal-Bench) recomputes the proposals with no code change.
-- [ ] Confirming writes the Tier; quitting writes nothing; a test proves both.
+- [x] The benchmark, the Tier thresholds and the diversity rule are catalog data with a validator, not constants in code.
+- [x] Each Lane with a score shows its proposed Tier, the score and benchmark behind it, and its cost per task; a Lane without a score shows no proposal.
+- [x] A test proves the diversity rule: a harness whose best Lane clears a threshold but sits off the cost frontier still gets a proposal in that Tier.
+- [x] Switching the benchmark (AA index to Terminal-Bench) recomputes the proposals with no code change.
+- [x] Confirming writes the Tier; quitting writes nothing; a test proves both.
 - [ ] Orin runs it once on the current generation and keeps or adjusts the thresholds (Orin's box).

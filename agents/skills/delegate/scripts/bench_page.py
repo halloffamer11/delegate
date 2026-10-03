@@ -39,7 +39,8 @@ from bench import (
     model_group,
     propose_enabled,
 )
-from catalog import EFFORTS, agy_family
+from catalog import EFFORTS
+import harnesses
 
 # A published sweep runs the API's own enum, which starts below the lowest
 # effort a lane can be set to. `none` is a real row and the cheapest one, so a
@@ -511,7 +512,7 @@ def price_rows(lanes_doc):
 
     Every effort of a model is charged at the same token price, so a row is a
     model and not a lane. An agy model names its effort in the slug, so its
-    efforts join through `catalog.agy_family`, the family rule the rest of the
+    efforts join through `harnesses.family`, the family rule the rest of the
     page already uses. Each row carries the input and output list price in USD
     per 1M tokens, the meter its lanes drain, whether the catalog carries any of
     its lanes, and — when two efforts of one model disagree about a price, which
@@ -525,7 +526,7 @@ def price_rows(lanes_doc):
         model = lane.get("model")
         if not isinstance(model, str) or not model.strip():
             continue
-        base = agy_family(model)[0] if lane.get("harness") == "agy" else model
+        base = harnesses.family(lane.get("harness"), model)[0]
         row = groups.get(base)
         if row is None:
             row = groups[base] = {"model": base, "harness": lane.get("harness"),

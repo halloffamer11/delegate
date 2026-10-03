@@ -6,10 +6,14 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 11 One harness registry.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-02; wrappers folded into `/delegate` per Orin's review the same day
+**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-any-harness-next-v75vlw`). All boxes done. Raised by Orin 2026-10-02; wrappers folded into `/delegate` per Orin's review the same day.
 
-- [ ] No skill or agent file under `agents/` names a `~/.claude` path.
-- [ ] `delegate rank <class> --json` and `delegate run` cover what the skills call today.
-- [ ] `/delegate <harness> <task>` and a stated standing constraint both restrict ranking to that harness's Lanes; an unknown or uninstalled harness is refused with the list of installed ones.
-- [ ] The four `delegate-<harness>` skill directories are removed, and `make install` drops their stale links.
-- [ ] Ticket 10's evals pass at or above the baseline.
+What landed: `bin/delegate` gained `rank`, `run`, `dispatch`, `status` (`--json` for the usage document), `log`, `runs`, `cost`, `catalog` and `setup`, each running its script out of the command's own checkout. `--harness <h>` on `rank` and `run` is the user's harness constraint: the catalog is cut to that harness's Lanes before ranking, so the Range, Gate, overflow and Margin all apply inside it, and an unknown or uninstalled harness is refused with the installed list. SKILL.md says the constraint comes only from the user and folds in the wrappers' exclusion and effort-cap rules. SKILL.md, council and the courier call `delegate ...` and name no `~/.claude` path. The four `delegate-<harness>` directories are gone, and `make install` removes a link into the checkout whose skill no longer exists (tried on a temp HOME: the stale link went, an unrelated broken link stayed). The evals now drive the `delegate` command and pass as before. Tests: `test_delegate_command.py` case 8, `test_rank.py` case 28, `test_dispatch.py` 27b and 27c. Verified with `make test` on Python 3.9 and 3.13.
+
+Outside this repo: the dotfiles statusline and Hammerspoon config still call `~/.claude/skills/delegate/scripts/report.py`, and Orin's global `references/CLAUDE.md` still tells every session to read the delegate skill and run `rank.py` before choosing any model, which contradicts ticket 09's user-invoked-only rule. Neither is a skill or agent file here; both are Orin's to change.
+
+- [x] No skill or agent file under `agents/` names a `~/.claude` path.
+- [x] `delegate rank <class> --json` and `delegate run` cover what the skills call today.
+- [x] `/delegate <harness> <task>` and a stated standing constraint both restrict ranking to that harness's Lanes; an unknown or uninstalled harness is refused with the list of installed ones.
+- [x] The four `delegate-<harness>` skill directories are removed, and `make install` drops their stale links.
+- [x] Ticket 10's evals pass at or above the baseline.

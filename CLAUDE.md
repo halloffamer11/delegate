@@ -13,10 +13,12 @@ history. The repo is public.
 
 ## Layout
 
-- `agents/skills/`: the `delegate` skill, the typed-only `delegate-<harness>` skills,
-  and `council`, which calls delegate's scripts.
-- `agents/agents/courier.md`: the one shipped agent.
-- `bin/delegate`: the `delegate global|project` command.
+- `agents/skills/`: the `delegate` skill and `council`, which calls the `delegate`
+  command.
+- `agents/skills/delegate/assets/orchestrators/`: orchestrator profiles; Claude's
+  `claude/courier.md` is the one shipped agent, for Claude Workflow scripts only.
+- `bin/delegate`: the `delegate` command, the contract every harness calls
+  (`rank`, `run`, `dispatch`, `status`, `catalog`, `global`, `project`, ...).
 - `tools/delegate-dashboard/` (Herdr plugin) and `tools/delegate-mon/` (Rust monitor).
 
 ## Where state lives

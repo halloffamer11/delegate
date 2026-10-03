@@ -31,6 +31,10 @@ event; probe(refresh=...) is the refresh/TTL path.
 """
 import json, math, os, re, subprocess, sys, time
 from datetime import datetime, timezone
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Each harness's probe lives in its adapter (scripts/harnesses/); this module
+# owns the rows they build, the cache and the combined figures.
+import harnesses  # noqa: E402
 try:
     from events import append, meter_event
 except ImportError:
@@ -40,11 +44,6 @@ TTL_MIN_DEFAULT = 10
 WEEK = 7 * 86400      # assumed weekly-cycle length for pace
 CYCLE_FLOOR = 0.02    # ~3.4h: pace denominator floor near a reset
 ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
-AGY_COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
-                     "not a vendor bound")
-# The note the reversed rule wrote (modular ticket 13). A cache from that time
-# still carries it beside null figures; a read replaces both together.
-SUPERSEDED_AGY_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
 def get_cache_path():
     return os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
@@ -106,8 +105,10 @@ def _filled(observation):
     out.update(combined(out.get("remaining_5h"), out.get("remaining_weekly"),
                         out.get("reset_5h"), out.get("reset_weekly")))
     note = out.get("note")
-    if note and SUPERSEDED_AGY_NOTE in str(note):
-        out["note"] = str(note).replace(SUPERSEDED_AGY_NOTE, AGY_COMBINED_NOTE)
+    for h in harnesses.REGISTRY:
+        for old, new in h.note_renames:
+            if note and old in str(note):
+                note = out["note"] = str(note).replace(old, new)
     return out
 
 
@@ -208,8 +209,26 @@ def run(cmd, timeout=60, stdin_data=None, cwd=None):
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
+def remaining(fraction):
+    """A Remaining fraction held to [0, 1], or None.
+
+    A vendor can print more than 100% used (an overage, or a rounding past the
+    cap), which reads as a negative fraction. One such row would fail
+    `observations` and take every Meter's figures, and so the Gate, with it;
+    an overspent Window has nothing left, so it reads 0.
+    """
+    if fraction is None or isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+        return fraction
+    if math.isnan(fraction):
+        return fraction
+    return min(1.0, max(0.0, fraction))
+
+
 def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
-    """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None."""
+    """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None.
+    A fraction outside 0..1 is held to it (`remaining`)."""
+    five_h, weekly = remaining(five_h), remaining(weekly)
+    remaining_weekly_model = remaining(remaining_weekly_model)
     row = {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
            "remaining_5h": five_h, "remaining_weekly": weekly,
            "remaining_weekly_model": remaining_weekly_model,
@@ -218,156 +237,10 @@ def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None,
     row.update(combined(five_h, weekly, reset_5h, reset_wk))
     return row
 
-# ---------------------------------------------------------------- codex
-def probe_codex():
-    if not which("codex"): return [lane("codex", None, note="absent")]
-    try:
-        p = subprocess.Popen(["codex", "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True)
-        def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
-        def recv(i, timeout=20):
-            t0 = time.time()
-            while time.time() - t0 < timeout:
-                line = p.stdout.readline()
-                if not line: break
-                try: m = json.loads(line)
-                except ValueError: continue
-                if m.get("id") == i: return m
-            return None
-        send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "delegate-usage", "version": "0.1"}}})
-        if not recv(1): raise RuntimeError("no initialize response")
-        send({"method": "initialized"}); time.sleep(0.5)
-        send({"id": 2, "method": "account/rateLimits/read", "params": {}})
-        m = recv(2)
-        p.terminate()
-        rl = (m or {}).get("result", {}).get("rateLimits") or {}
-        def win(w): return (None, None) if not w else (1 - w["usedPercent"] / 100.0, w.get("resetsAt"))
-        # codex labels windows primary/secondary; identify by duration when present
-        wins = {}
-        for key in ("primary", "secondary"):
-            w = rl.get(key)
-            if not w: continue
-            mins = w.get("windowDurationMins") or 0
-            wins["weekly" if mins >= 24 * 60 else "5h"] = win(w)
-        f5, r5 = wins.get("5h", (None, None)); fw, rw = wins.get("weekly", (None, None))
-        return [lane("codex", None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
-    except Exception as e:  # noqa
-        return [lane("codex", None, note=f"probe failed: {e}")]
-
-# ---------------------------------------------------------------- agy
 def iso(s):
     try: return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
     except Exception: return None
 
-def probe_agy():
-    if not which("agy"): return [lane("agy", None, note="absent")]
-    r = run(["agy", "--print", "/usage", "--output-format", "json"], timeout=90, stdin_data="")
-    if not r or r.returncode != 0: return [lane("agy", None, note="probe failed")]
-    try:
-        groups = json.loads(r.stdout)["command"]["data"]["groups"]
-    except Exception as e:
-        return [lane("agy", None, note=f"unexpected output: {e}")]
-    out = []
-    for g in groups:
-        meter = "gemini" if "gemini" in g["name"].lower() else "claude-gpt"
-        f5 = fw = r5 = rw = None
-        for b in g.get("buckets", []):
-            if b.get("window") == "5h": f5, r5 = b.get("remaining_fraction"), iso(b.get("reset_time", ""))
-            elif b.get("window") == "weekly": fw, rw = b.get("remaining_fraction"), iso(b.get("reset_time", ""))
-        # No vendor bound joins the two windows, so the note says what the
-        # combined figure is: the lower window, an assumption (ticket 31).
-        out.append(lane("agy", meter, f5, fw, r5, rw, note=AGY_COMBINED_NOTE))
-    return out or [lane("agy", None, note="no groups")]
-
-# ---------------------------------------------------------------- claude
-def claude_reset(text):
-    """'Sep 8 at 2:59pm (America/New_York)' -> epoch seconds, or None. The year is
-    not printed: assume the current one, roll forward if that lands in the past."""
-    if not text: return None
-    m = re.search(r"([A-Z][a-z]{2}) (\d{1,2}) at (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)", text)
-    if not m: return None
-    try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo(m.group(6)); hour = int(m.group(3)) % 12 + (12 if m.group(5) == "pm" else 0)
-        minute = m.group(4) or "00"
-        year = datetime.now(tz).year
-        t = datetime.strptime(f"{m.group(1)} {m.group(2)} {year} {hour}:{minute}", "%b %d %Y %H:%M").replace(tzinfo=tz)
-        if t.timestamp() < time.time() - 86400: t = t.replace(year=year + 1)
-        return t.timestamp()
-    except Exception:
-        return None
-
-def probe_claude():
-    if not which("claude"): return [lane("claude", None, note="absent")]
-    # Run from the home directory: inside the dotfiles project the same command
-    # did not return within 45 s (2026-09-18), and from ~ it takes about 3 s.
-    r = run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="",
-            cwd=os.path.expanduser("~"))
-    if not r or r.returncode != 0: return [lane("claude", None, note="probe failed")]
-    try: text = json.loads(r.stdout)["result"]
-    except Exception as e: return [lane("claude", None, note=f"unexpected output: {e}")]
-    def pct(label):
-        m = re.search(re.escape(label) + r":\s*(\d+)% used(?: · resets ([^\n]+))?", text)
-        return (None, None) if not m else (1 - int(m.group(1)) / 100.0, m.group(2))
-    f5, r5 = pct("Current session"); fw, rw = pct("Current week (all models)")
-    lanes = [lane("claude", "general", f5, fw, claude_reset(r5), claude_reset(rw),
-                  note=f"resets: 5h '{r5}', weekly '{rw}'")]
-    # per-model weekly meters, e.g. "Current week (Fable): 86% used"
-    for m in re.finditer(r"Current week \(([^)]+)\):\s*(\d+)% used(?: · resets ([^\n]+))?", text):
-        name = m.group(1)
-        if name.lower() == "all models": continue
-        fm = 1 - int(m.group(2)) / 100.0
-        wk = min(fw, fm) if fw is not None else fm
-        lanes.append(lane("claude", name.lower(), f5, wk, claude_reset(r5), claude_reset(m.group(3) or rw),
-                          note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'",
-                          remaining_weekly_model=fm))
-    return lanes
-
-# ---------------------------------------------------------------- grok
-def probe_grok():
-    """Weekly meter via the Agent Client Protocol: `grok agent stdio`, then the
-    `_x.ai/billing` extension method (what the TUI's /usage dialog calls). Zero
-    model tokens. Payload fields (serde list in the binary, 1.0.13):
-    creditUsagePercent, currentPeriod{type,start,end}, includedUsed, totalUsed,
-    monthlyLimit, onDemandCap/Used, prepaidBalance, subscription_tier. Zero-valued
-    fields are omitted, so a missing creditUsagePercent means 0% used."""
-    if not which("grok"): return [lane("grok", None, note="absent")]
-    try:
-        p = subprocess.Popen(["grok", "agent", "stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True)
-        def send(i, method, params):
-            p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n"); p.stdin.flush()
-        def recv(i, timeout=25):
-            t0 = time.time()
-            while time.time() - t0 < timeout:
-                line = p.stdout.readline()
-                if not line: break
-                try: m = json.loads(line)
-                except ValueError: continue
-                if m.get("id") == i: return m
-            return None
-        send(1, "initialize", {"protocolVersion": 1, "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
-                                "_meta": {"clientType": "delegate-usage", "clientVersion": "0.1"}})
-        if not recv(1): raise RuntimeError("no initialize response")
-        send(2, "_x.ai/billing", {})
-        m = recv(2)
-        p.terminate()
-        if not m or "result" not in m: raise RuntimeError(f"billing: {(m or {}).get('error')}")
-        res = m["result"]; cfg = res.get("config") or {}
-        pct = cfg.get("creditUsagePercent")
-        if isinstance(pct, dict): pct = pct.get("val")
-        pct = float(pct or 0)
-        period = cfg.get("currentPeriod") or {}
-        end = iso(period.get("end") or cfg.get("billingPeriodEnd") or "")
-        ptype = (period.get("type") or "").replace("USAGE_PERIOD_TYPE_", "").lower() or "weekly"
-        tier = res.get("subscription_tier")
-        # single rolling meter (weekly on SuperGrok); no 5h window exists
-        return [lane("grok", None, None, 1 - pct / 100.0, None, end,
-                     note=f"tier={tier}; {ptype} meter only ({pct:g}% used); via _x.ai/billing")]
-    except Exception as e:  # noqa
-        try: p.terminate()
-        except Exception: pass
-        return [lane("grok", None, note=f"probe failed: {e}")]
 
 # ---------------------------------------------------------------- main
 def load_cache(max_age_min, cache_path=None):
@@ -395,12 +268,14 @@ def probe(refresh=False, max_age_min=None, cache_path=None):
     """Return a usage document, probing vendors when the cache is missing or stale.
 
     refresh=True always probes. A cache hit emits no meter event. Timeout and
-    per-harness failures stay inside the probe_* functions (unknown rows).
+    per-harness failures stay inside each adapter's probe (unknown rows).
     """
     ttl = TTL_MIN_DEFAULT if max_age_min is None else max_age_min
     d = None if refresh else load_cache(ttl, cache_path=cache_path)
     if d is None:
-        lanes = probe_codex() + probe_agy() + probe_claude() + probe_grok()
+        lanes = []
+        for h in harnesses.REGISTRY:
+            lanes += h.probe()
         now = time.time()
         d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
              "rollover_min": ROLLOVER_MIN, "lanes": lanes}
