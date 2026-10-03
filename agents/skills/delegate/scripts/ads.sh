@@ -27,9 +27,10 @@ case "${1:-}" in
     if [ ! -d "$ADS_DIR" ]; then
       mkdir -p "$(dirname "$ADS_DIR")"
       git clone "$ADS_REPO" "$ADS_DIR"
-    else
-      git -C "$ADS_DIR" fetch "$ADS_REPO"
     fi
+    # Fetch the pin by its id: it can sit on a branch other than the fork's
+    # default, which a clone or a plain fetch does not bring down.
+    git -C "$ADS_DIR" fetch "$ADS_REPO" "$ADS_COMMIT"
     git -C "$ADS_DIR" checkout --detach "$ADS_COMMIT"
     short_sha=$(git -C "$ADS_DIR" rev-parse --short HEAD 2>/dev/null || printf "%.7s" "$ADS_COMMIT")
     echo "ads: $ADS_DIR at $short_sha"
