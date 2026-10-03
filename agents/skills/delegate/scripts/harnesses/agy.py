@@ -1,5 +1,6 @@
 """Antigravity: `agy`, Google's CLI. Its effort is part of the model slug."""
 import json
+import published_names
 import re
 
 from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness
@@ -11,7 +12,7 @@ COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
 SUPERSEDED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
 # `gemini-3.8-flash-high` -> ("gemini-3.8-flash", "high"). Every effort word
-# delegate knows, longest first as `catalog.strip_effort_suffix` reads them, so
+# delegate knows, longest first as `published_names.strip_effort_suffix` reads them, so
 # a `-xhigh` or `-max` slug joins its family instead of standing as a model of
 # its own.
 _EFFORT_WORDS = "|".join(EFFORTS_LONGEST_FIRST)
@@ -32,6 +33,9 @@ class Agy(Harness):
     vendor = "gemini"
     list_command = ["agy", "models"]
     note_renames = ((SUPERSEDED_NOTE, COMBINED_NOTE),)
+    # `agy /usage` reports one group for Gemini models and one for the
+    # Claude and GPT models it serves.
+    meter_groups = ("gemini", "claude-gpt")
     fixture_file = "agy-models.txt"
 
     def family(self, slug):
@@ -45,7 +49,7 @@ class Agy(Harness):
 
         One rule in one place. Discovery groups a harness listing with it
         (`parse_models`) and the carry rule groups a lane's rows with it
-        (`bench.model_families`), so the wizard can never disagree with the models
+        (`carry.families`), so the wizard can never disagree with the models
         discovery reported (ticket 30).
         """
         text = slug or ""
@@ -98,26 +102,25 @@ class Agy(Harness):
         effort takes."""
         return (model.get("members") or {}).get(effort, model["slug"])
 
-    def probe(self):
+    def read_meters(self):
         import usage
-        if not usage.which(self.name): return [usage.lane(self.name, None, note="absent")]
         r = usage.run(["agy", "--print", "/usage", "--output-format", "json"], timeout=90, stdin_data="")
-        if not r or r.returncode != 0: return [usage.lane(self.name, None, note="probe failed")]
+        if not r or r.returncode != 0: return [usage.meter_row(self.name, None, note="probe failed")]
         try:
             groups = json.loads(r.stdout)["command"]["data"]["groups"]
         except Exception as e:
-            return [usage.lane(self.name, None, note=f"unexpected output: {e}")]
+            return [usage.meter_row(self.name, None, note=f"unexpected output: {e}")]
         out = []
         for g in groups:
-            meter = "gemini" if "gemini" in g["name"].lower() else "claude-gpt"
+            meter = self.meter_groups[0] if "gemini" in g["name"].lower() else self.meter_groups[1]
             f5 = fw = r5 = rw = None
             for b in g.get("buckets", []):
                 if b.get("window") == "5h": f5, r5 = b.get("remaining_fraction"), usage.iso(b.get("reset_time", ""))
                 elif b.get("window") == "weekly": fw, rw = b.get("remaining_fraction"), usage.iso(b.get("reset_time", ""))
             # No vendor bound joins the two windows, so the note says what the
             # combined figure is: the lower window, an assumption (ticket 31).
-            out.append(usage.lane(self.name, meter, f5, fw, r5, rw, note=COMBINED_NOTE))
-        return out or [usage.lane(self.name, None, note="no groups")]
+            out.append(usage.meter_row(self.name, meter, f5, fw, r5, rw, note=COMBINED_NOTE))
+        return out or [usage.meter_row(self.name, None, note="no groups")]
 
     def run_args(self, effort, timeout, write_dir):
         # agy has no effort flag: the slug carries it.

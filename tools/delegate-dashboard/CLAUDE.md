@@ -103,8 +103,8 @@ malformed Meter data becomes explicit unknown observations through
 ## Staged edits
 
 A key changes a staged policy held in the model and writes nothing (ticket 13). Each
-staged change carries the `catalog.edit_catalog` call it will make, and the staged
-documents come from `catalog.plan_edits`, which plans that list of calls onto the
+staged change carries the `catalog_edit.edit_catalog` call it will make, and the staged
+documents come from `catalog_edit.plan_edits`, which plans that list of calls onto the
 documents on disk and returns the planned documents and the effective catalog they
 produce (ticket 14). It is the catalog's one planning path, the one `edit_catalog`
 writes through, and the staged view is ranked from its catalog by `tier_leaders()`,
@@ -124,7 +124,7 @@ second `w` saves onto what is there now. Row `staged`, `policy.gate.staged`,
 
 ## The save rules
 
-Every project save goes through `catalog.edit_catalog` preview/apply and keeps the
+Every project save goes through `catalog_edit.edit_catalog` preview/apply and keeps the
 document shape it writes: a move names the complete moved Tier and leaves other Tiers on
 their named or fallback Order. Keep the editor-opening snapshot (project bytes and
 global signatures), fresh-global validation, unrelated keys, target checks before and

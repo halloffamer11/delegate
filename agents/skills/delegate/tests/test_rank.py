@@ -990,16 +990,15 @@ with tempfile.TemporaryDirectory() as td:
     os.environ["DELEGATE_CACHE"] = missing_cache24
     probed24 = []
     orig_probe = usage.probe
-    origs = {h: h.probe for h in harnesses.REGISTRY}
     def mark_probe(*a, **k):
         probed24.append("probe")
         return orig_probe(*a, **k)
     def boom_vendor(*a, **k):
         probed24.append("vendor")
-        return [usage.lane("codex", None, note="stub")]
+        return [usage.meter_row("codex", None, note="stub")]
     usage.probe = mark_probe
     for h in harnesses.REGISTRY:
-        h.probe = boom_vendor
+        h.meters = boom_vendor
     try:
         cached24 = rank.load_cached_usage()
         record("load_cached_usage on missing cache is {} and does not probe",
@@ -1012,8 +1011,8 @@ with tempfile.TemporaryDirectory() as td:
                ))
     finally:
         usage.probe = orig_probe
-        for h, probe in origs.items():
-            h.probe = probe
+        for h in harnesses.REGISTRY:
+            del h.meters
         os.environ.pop("DELEGATE_CACHE", None)
 
     # 25. routing.meters off: Tier/Order/name only, no Gate, no steal, no probe.

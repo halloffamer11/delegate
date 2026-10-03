@@ -43,8 +43,12 @@ replaces partial use of invalid documents.
 ## Scripts and assets
 
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`,
-  `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`),
-  validators, `show`/`check`/`fmt` and revision-checked `set`/`range`/`order`. `edit_catalog()`
+  `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`): load,
+  validate and project the effective catalog, and nothing else (ticket 26). It imports no other
+  delegate script but `harnesses` and `published_names`, so `rank` can import it with no cycle.
+  The efforts a harness offers are its adapter's `efforts`, with the command or page that proved
+  each list; `check` and `delegate.py --effort` refuse anything outside them (ticket 19).
+- `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
   previews cached Picks and resolved source paths, validates complete proposals, preserves stow
   symlinks, and rechecks source revisions before writing one document. `plan_edits()` is the one
   planning path (ticket 14). It takes the source documents already in hand and a list of the same
@@ -52,12 +56,14 @@ replaces partial use of invalid documents.
   and returns named fields: the four planned documents, the effective `catalog` they produce, and
   one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes
   nothing. `edit_catalog()` plans its one edit through it, and so does the dashboard's staged view,
-  so there is no second planner to drift. It also owns the mapping from a benchmark source's printed
-  model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's
-  `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it
-  from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that
-  proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19).
-  `single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
+  so there is no second planner to drift.
+- `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
+  edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
+  `scripts/tier_lines.py`: bulk Tier lines for the wizard.
+- `scripts/published_names.py`: the mapping from a benchmark source's printed model name to a
+  lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the
+  member of an agy slug family); `bench.py`, `tier_proposal.py` and the setup pre-screen read it.
+- `catalog.single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
   Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
   neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
   spec.
@@ -86,7 +92,12 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
 - `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch
   (`run`); a Lane whose harness is the orchestrator's, under a profile that declares native Lanes,
   prints the native line and the profile's spawn line instead of starting a relay. `dispatch.json`
-  records the orchestrator. Run directories under `~/.cache/delegate/runs/`, never reused.
+  records the orchestrator. `--json` on either prints one object in place of the finish and
+  metrics lines (`run --json` sends the ranking to stderr); the courier, the evals and the
+  browser probes read that or `runs.parse_finish_line`, never a regex of their own.
+- `scripts/runs.py`: the run directory's one owner (ticket 24). A `Run` is created, finished or
+  failed here, and only here are `dispatch.json` and `return.json` written; it spells and parses
+  the finish and native lines. Run directories under `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `e3541ece582b64b5c4b9b094a78384ad8a6a181e` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
@@ -104,16 +115,24 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   that orchestrator uses, kept beside it and linked by `make install` (`orchestrators.py agents`):
   Claude's `claude/courier.md`, the glue a Claude Workflow script needs because it has no shell.
 - `scripts/harnesses/`: the harness registry, one module per harness behind one interface
-  (`base.Harness`): binary, efforts, model listing and parsing, the Meter probe, relay flags. Every
-  other script iterates the registry; adding a harness is one module and one `REGISTRY` entry.
-  `kiro.py` (ticket 15) is the first harness whose binary is not its name (`kiro-cli`) and that
-  serves every vendor's models (`any_vendor`): the refresh offers all its current models, and its
-  first Lanes, with no Lane on the harness to copy from, start from the adapter's `starter_lane` and
-  add its `starter_meter` (plan and price assumed, Remaining unknown, so the Gate never vetoes it).
+  (`base.Harness`). Callers ask the adapter's verbs and branch on no harness flag (ticket 23):
+  `installed()`, `meters()` (the absent and failed rows live there once; each adapter's
+  `read_meters` reads the rest), `models()` and `generation()` (the Claude adapter's catalog plus
+  benchmark-names strategy), `owns(slug)`, `effort_for(lane, override)`, `blocked_reason(run_dir)`
+  (grok's gate cancel), `starter()`, and the relay flags. Every other script iterates the registry;
+  adding a harness is one module and one `REGISTRY` entry. `kiro.py` (ticket 15) is the first
+  harness whose binary is not its name (`kiro-cli`) and that serves every vendor's models (its
+  `owns` is always true): the refresh offers all its current models, and its first Lanes, with no
+  Lane on the harness to copy from, start from the adapter's `starter()` (plan and price assumed,
+  Remaining unknown, so the Gate never vetoes it).
   Its listing's JSON field names are not documented, so `parse_models` reads the plausible
   spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing
   replaces it.
 - `scripts/usage.py`: cached subscription-meter probes; each harness's probe is in its adapter.
+  A usage row is keyed by `meter`, the full Meter name (`usage.meter_name`), with `group` the
+  probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
+  on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
+  its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
   `scripts/events.py`: the monitor ledger encoder (schema unchanged).
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
   benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis
@@ -123,8 +142,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes`
   (only the figures measured at that lane's own effort, with `mean`/`n` over those).
   `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the
-  page both read it from there. Carry and display-order policy live beside `collect`:
-  `dominating_effort`, `propose_enabled`, `group_lanes`, `lane_order`. `propose_enabled` returns
+  page both read it from there. Display order lives beside `collect` (`group_lanes`,
+  `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
+  `scripts/carry.py` (ticket 27): `families()`, `beats()` and `decisions()`, which returns
   structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
   `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
   reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares
@@ -170,8 +190,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   which is never in the repo: each machine keeps its own (Orin, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
-  opens, which reads its attribution, its domination rule and its lane order (`bench.lane_order`,
-  `group_lanes`, `propose_enabled`) from `bench.py` rather than deciding any of them again. HTML
+  opens, which reads its attribution and its lane order (`bench.lane_order`, `group_lanes`) from
+  `bench.py` and its domination rule (`carry.decisions`, `carry.dominating_row`) from `carry.py`
+  rather than deciding any of them again. HTML
   carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline
   JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with
   its own filters and the frontier of what is shown, and only lays out what Python decided. Each
@@ -205,7 +226,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   their own heading and count, and "Copy as lines" writes `<lane> <1-4|off>` for every decided lane;
   the review page's `v` reads those lines from `pbpaste` (only on `v`; a missing or failing
   `pbpaste` changes nothing), and `setup.py --tiers-from <file>` applies them at start, both through
-  `catalog.parse_tier_lines` (re-exported by `setup_tui`) and one summary line
+  `tier_lines.parse_tier_lines` and one summary line
   (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it
   (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines'
   order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives
@@ -268,9 +289,10 @@ space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark move
 down one Tier; Tier 1 requires Carry to switch off.
 
 - `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their
-  efforts, and `--efforts <model>` for ready-to-paste lane stanzas per effort. Efforts come from
+  efforts, each from the adapter's `models()`. Efforts come from
   `codex debug models`, `claude --help`, the agy slug suffix (one model per slug family) and the
-  grok row of `catalog.HARNESS_EFFORTS`; a Haiku model gets none. It is the only thing that may say
+  grok adapter's `efforts`; a Haiku model gets none. A harness whose list is not everything it runs
+  (Claude Code) reports `complete: false`, and no Lane of it is reported retired. It is the only thing that may say
   an effort exists. The effort words are `harnesses.EFFORTS`, one list every script derives from;
   a word a harness lists that no lane on it may carry goes in the model's `unknown_efforts`
   (`Harness.split_efforts`). It also owns generation (ticket 33): `model_level` splits a slug into
@@ -294,16 +316,17 @@ down one Tier; Tier 1 requires Carry to switch off.
   Artificial Analysis rows straight out of the dataset every `/models/<slug>` page embeds, with no
   worker. `check` is the trust boundary: it rejects any number that is not on the page, and no
   worker or parser may originate a number or an identifier.
-- The carry page's domination rule is `bench.dominating_effort`: another effort of the same model,
-  for no more money, beats the lane on more than half of the benchmarks one source scored both on.
+- The carry page's domination rule is `carry.dominating_effort`: another effort of the same model,
+  for no more money (`carry.beats`, which the Tier proposal's cost frontier also uses), beats the
+  lane on more than half of the benchmarks one source scored both on.
   Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is
-  a family key, not the model string (ticket 30): `bench.model_families(lanes_doc)` keys every
+  a family key, not the model string (ticket 30): `carry.families(lanes_doc)` keys every
   harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
   because agy names each effort as its own model. The harness decides, never the spelling. That
   family rule has one implementation, the adapter's `family` (`harnesses/agy.py`, reached through
-  `harnesses.family` and `catalog.slug_family`), which the agy adapter's `group` also groups its
-  model listing with. `dominating_effort`, `dominating_row` and `_first_domination` take the map;
-  without one every model is its own family. `setup_tui` re-exports the policy helpers.
+  `harnesses.family`, and per Lane through `carry.model_of`, which also groups the pages' rows),
+  which the agy adapter's `group` also groups its model listing with. `dominating_effort`,
+  `dominating_row` and `first_domination` take the map; without one every model is its own family.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
   `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
@@ -336,8 +359,8 @@ tool auto-approval inside it (`--sandbox --dangerously-skip-permissions`), confi
 workspace. `--write` is no longer the workaround it was before 2026-09-10; do not reach for it to
 get agy's tools working. Note the ADS skill docs for agy still describe the old plan mode (ticket 14
 follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_result` returns
-`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; it
-recognises grok's event shape only (`gate_cancelled_tool`, fixture
+`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; the
+reason is the harness adapter's `blocked_reason`, which only grok's implements (fixture
 `tests/fixtures/dispatch/grok-gate-cancel/`).
 
 ## Browser use per harness

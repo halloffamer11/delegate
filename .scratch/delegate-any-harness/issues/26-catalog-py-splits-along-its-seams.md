@@ -8,8 +8,8 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised in review of PR #3 2026-10-03
+**Status:** landed in delegate#6 2026-10-03. `catalog.py` (2668 lines) now loads, validates and projects only (1125 lines) and imports no delegate script but `harnesses` and `published_names`. Moved out: `catalog_edit.py` (the edit engine, which imports `rank` at load; the lazy `_rank_mod` is gone), `class_guides.py`, `tier_lines.py` (the wizard's one caller is `setup_tui`/`setup`), `published_names.py` (bench's name reconciliation), and `catalog_cli.py`, the `delegate catalog` command, since a CLI living in `catalog.py` would have to import the modules that import it. The registry facade is gone: callers ask `harnesses.NAMES`, `harnesses.EFFORTS`, `harnesses.get(h).efforts`, `harnesses.installed()` and `harnesses.constraint_error()`, and `restrict_to_harness` lives in `rank`. No shims re-export the moved names. Verified: `make test` on 3.9 and 3.13, and `delegate catalog check` on the sample catalog.
 
-- [ ] No import cycle between `catalog` and `rank`.
-- [ ] Callers import the new modules directly; no re-export shims remain.
-- [ ] `make test` passes on 3.9 and 3.13 with no behaviour change.
+- [x] No import cycle between `catalog` and `rank`.
+- [x] Callers import the new modules directly; no re-export shims remain.
+- [x] `make test` passes on 3.9 and 3.13 with no behaviour change.

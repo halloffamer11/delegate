@@ -12,12 +12,15 @@ import time
 import bench
 import bench_page
 import catalog
+import catalog_edit
+import tier_lines as tier_line_rules
 import discover
 import effort
 import harnesses
 import orchestrators
 import setup_tui
-from catalog import CatalogError, HARNESSES, load_json, validate_lanes, validate_routing, write_json
+from catalog import CatalogError, load_json, validate_lanes, validate_routing, write_json
+from harnesses import NAMES as HARNESSES
 
 # The wizard refreshes the Artificial Analysis rows itself, so that one command
 # is one command (ticket 33). The fetch goes where `effort.py aa` would put it.
@@ -567,7 +570,7 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=
 def write_focused(config_dir, revision, original_lanes, original_routing,
                   lanes, routing, lanes_path, routing_path):
     """Check the sources again and preserve links and unchanged document bytes."""
-    if catalog.catalog_revision(config_dir=config_dir) != revision:
+    if catalog_edit.catalog_revision(config_dir=config_dir) != revision:
         raise CatalogError("intervening edit: catalog sources changed; reopen the focused screen")
     validate_lanes(lanes, lanes_path)
     validate_routing(routing, routing_path)
@@ -575,7 +578,7 @@ def write_focused(config_dir, revision, original_lanes, original_routing,
     for path, old, new in ((lanes_path, original_lanes, lanes),
                            (routing_path, original_routing, routing)):
         if old != new:
-            catalog._write_preserving_link(path, new)
+            catalog_edit._write_preserving_link(path, new)
             print(f"wrote {path}")
             written = True
     if not written:
@@ -615,10 +618,10 @@ def main(argv=None):
         if args.screen != "start" and plain:
             raise CatalogError(
                 f"--screen {args.screen} needs a terminal; "
-                "use catalog.py set, range, or order for non-interactive edits"
+                "use delegate catalog set, range, or order for non-interactive edits"
             )
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
-        focused_revision = catalog.catalog_revision(config_dir=config_dir) if args.screen != "start" else None
+        focused_revision = catalog_edit.catalog_revision(config_dir=config_dir) if args.screen != "start" else None
         tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
         existing = os.path.isfile(os.path.join(config_dir, "lanes.json"))
         # Start from the editable catalog, acquire once, then filter only a
@@ -653,9 +656,9 @@ def main(argv=None):
             if tier_lines is not None:
                 # the same parser and summary as the review page's `v`; the
                 # tiers become the prompts' defaults, and an off line is written off
-                parsed = setup_tui.parse_tier_lines(tier_lines, lanes_doc)
-                dropped = setup_tui.apply_tier_lines_to_doc(lanes_doc, parsed)
-                print(setup_tui.tier_lines_summary(parsed, dropped))
+                parsed = tier_line_rules.parse_tier_lines(tier_lines, lanes_doc)
+                dropped = tier_line_rules.apply_tier_lines_to_doc(lanes_doc, parsed)
+                print(tier_line_rules.tier_lines_summary(parsed, dropped))
             if effort_row_paths:
                 # The pre-screen is a selectable screen; there is no prompt-driven
                 # form of it yet. Saying so is the point: the instruction a human
@@ -669,7 +672,7 @@ def main(argv=None):
             if tier_lines is not None:
                 # no review page here: the lines' order inside each tier is the
                 # order written (ticket 28)
-                setup_tui.write_order_from_lines(lanes_doc, parsed)
+                tier_line_rules.write_order_from_lines(lanes_doc, parsed)
             ask_routing(routing_doc)
             confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path,
                               refresh=refresh, targets=native_targets(config_dir))

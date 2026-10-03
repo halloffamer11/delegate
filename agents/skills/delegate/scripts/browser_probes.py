@@ -27,6 +27,7 @@ if HERE not in sys.path:
 
 import catalog
 import harnesses
+import runs
 
 DELEGATE_PY = os.path.join(HERE, "delegate.py")
 PROBES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "probes"))
@@ -97,11 +98,9 @@ def build_dispatch_cmd(lane, harness, brief_path, cwd):
 
 
 def parse_run_dir_from_stdout(stdout):
-    """Extracts run directory path from delegate dispatch output."""
-    for line in stdout.splitlines():
-        if line.startswith("delegate:") and "run=" in line:
-            return line.split("run=")[-1].strip()
-    return None
+    """The run directory dispatch's finish line names (`runs.parse_finish_line`)."""
+    found = runs.parse_finish_line(stdout)
+    return found["run"] if found else None
 
 
 def grade(target, probe, nonce=None):
@@ -252,21 +251,21 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     if args.only:
-        harnesses = [h.strip() for h in args.only.split(",") if h.strip()]
-        for h in harnesses:
+        selected = [h.strip() for h in args.only.split(",") if h.strip()]
+        for h in selected:
             if h not in ALL_HARNESSES:
                 sys.stderr.write(f"error: unknown harness '{h}'; must be in {', '.join(ALL_HARNESSES)}\n")
                 return 2
     else:
-        harnesses = list(ALL_HARNESSES)
+        selected = list(ALL_HARNESSES)
 
     probes = [args.probe] if args.probe else list(ALL_PROBES)
 
     cat = load_effective_catalog()
 
     if args.dry_run:
-        for harness in harnesses:
-            if not catalog.cli_installed(harness):
+        for harness in selected:
+            if not harnesses.cli_installed(harness):
                 for probe in probes:
                     print(f"| {harness} | — | {probe} | FAIL | cli absent |")
                 continue
@@ -297,7 +296,7 @@ def main(argv=None):
 
     def worker(harness):
         h_rows = []
-        if not catalog.cli_installed(harness):
+        if not harnesses.cli_installed(harness):
             for probe in probes:
                 h_rows.append((harness, "—", probe, "FAIL", "cli absent"))
             return harness, h_rows
@@ -318,14 +317,14 @@ def main(argv=None):
             h_rows.append((harness, version, probe, verdict, reason))
         return harness, h_rows
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(harnesses))) as executor:
-        futures = [executor.submit(worker, h) for h in harnesses]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(selected))) as executor:
+        futures = [executor.submit(worker, h) for h in selected]
         for fut in concurrent.futures.as_completed(futures):
             h, rows = fut.result()
             results[h] = rows
 
     table_rows = []
-    for h in harnesses:
+    for h in selected:
         table_rows.extend(results.get(h, []))
 
     print("| harness | CLI version | probe | PASS/FAIL | reason |")

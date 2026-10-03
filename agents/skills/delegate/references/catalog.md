@@ -58,7 +58,10 @@ never declares a floor or a ceiling.
 
 - `delegate catalog show`: the effective catalog for the current directory,
   with where each value comes from.
-- `delegate catalog check <file>`: validates one file. On stderr, without
+- `delegate catalog check <file>`: validates one file. It refuses a lane whose
+  meter its harness's probe does not report (`codex`, `grok`, `agy-gemini`,
+  `agy-claude-gpt`, `claude-general` or `claude-<model word>`), since that
+  meter's remaining stays unknown and the gate never vetoes it. On stderr, without
   failing, it warns when one meter serves every carried lane of a tier, since
   that meter under the gate takes the whole tier with it.
 - `delegate catalog check-guide`: validates every class guide together

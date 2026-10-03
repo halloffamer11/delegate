@@ -1,0 +1,6 @@
+# Codex reads this beside SKILL.md. It ignores Claude's
+# `disable-model-invocation`, so this is Codex's half of the rule that the
+# skill runs only when the user asks for it (ADR 0001): `$skill` or the
+# /skills picker still runs it.
+policy:
+  allow_implicit_invocation: false

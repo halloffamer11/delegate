@@ -24,7 +24,8 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
+    from catalog import load_catalog, CatalogError, meters_enabled
+    from harnesses import NAMES as HARNESSES, installed as installed_harnesses
 except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
@@ -129,7 +130,7 @@ def model_cell(lane_row, by_meter):
     slugs = by_meter.get(lane_row["lane"])
     if slugs:
         return ", ".join(sorted(set(slugs)))
-    m = lane_row.get("meter") or "general"
+    m = lane_row.get("group") or "general"
     return "this session (all models)" if m == "general" else f"this session ({m})"
 
 
@@ -191,10 +192,10 @@ def cmd_limits(a):
     routing = catalog.get("routing", {})
     metering = meters_enabled(routing)
     doc = usage_doc(a.refresh, a.max_age_min, routing=routing)
-    gate = routing.get("gate", 0.1)
+    gate = routing["gate"]
     obs_map = usage.observations(doc) or {}
     by_meter = models_by_meter(catalog)
-    lanes = sorted((dict(L, lane=name, harness=L.get("harness", name.split("-", 1)[0]))
+    lanes = sorted((dict(L, lane=name, harness=L.get("harness"))
                     for name, L in obs_map.items()),
                    key=lambda L: (L.get("remaining_weekly") is None,
                                   -(L.get("remaining_weekly") or 0)))
@@ -610,7 +611,7 @@ def cmd_statusline(a):
     present = installed_harnesses()
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
-    gate_threshold = routing.get("gate", 0.10)
+    gate_threshold = routing["gate"]
     metering = meters_enabled(routing)
 
     won_by_meter = {}
@@ -663,7 +664,7 @@ def cmd_statusline(a):
         except Exception:
             return
 
-    by_meter = {L["lane"]: L for L in usage_doc.get("lanes", []) if isinstance(L, dict) and "lane" in L}
+    by_meter = usage.observations(usage_doc) or {}
     all_meters = catalog.get("meters", {})
     catalog_order = list(all_meters.keys())
 

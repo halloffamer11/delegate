@@ -32,6 +32,7 @@ RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
 sys.path.insert(0, DELEGATE_DIR)
 import harnesses  # noqa: E402
 import delegate  # noqa: E402
+import runs  # noqa: E402
 
 
 def pinned_ads_commit():
@@ -231,10 +232,8 @@ def run_run(t_env, args, extra_env=None, orchestrator=None):
 
 
 def parse_run_dir_from_stdout(stdout):
-    for line in stdout.splitlines():
-        if line.startswith("delegate:") and "run=" in line:
-            return line.split("run=")[-1].strip()
-    return None
+    found = runs.parse_finish_line(stdout)
+    return found["run"] if found else None
 
 
 def main():
@@ -831,6 +830,28 @@ def main():
             ok20 = disp20.get("lane") == "flash-high@agy"
         record("20. run mechanical dispatches flash-high@agy", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
 
+        # 20j. run --json: stdout is one object, the ranking and the
+        # dispatching line go to stderr, and the object carries the return
+        b20j = make_brief("b20j.md", f"fake-relay: status=completed final={done_final}\nBrief 20j.")
+        res20j = run_run(t_env, ["mechanical", "--brief", b20j, "--cwd", cwd, "--meters", healthy_meters, "--json"])
+        try:
+            doc20j = json.loads(res20j.stdout)
+        except ValueError:
+            doc20j = None
+        ok20j = (
+            res20j.returncode == 0 and isinstance(doc20j, dict) and
+            doc20j.get("lane") == "flash-high@agy" and doc20j.get("status") == "done" and
+            doc20j.get("class") == "mechanical" and doc20j.get("thread") and
+            doc20j.get("return") == json.load(open(os.path.join(doc20j["run"], "return.json"))) and
+            "delegate: dispatching flash-high@agy" in res20j.stderr and "flash-high@agy" in res20j.stderr
+        )
+        res20d = run_run(t_env, ["mechanical", "--brief", b20j, "--cwd", cwd, "--meters", healthy_meters,
+                                 "--json", "--dry-run"])
+        ok20j = ok20j and res20d.returncode == 0 and json.loads(res20d.stdout) == {
+            "class": "mechanical", "pick": "flash-high@agy", "dry_run": True}
+        record("20j. run --json prints one object and sends the ranking to stderr", ok20j,
+               f"rc={res20j.returncode} stdout={res20j.stdout} stderr={res20j.stderr} dry={res20d.stdout}")
+
         b21 = make_brief("b21.md", f"fake-relay: status=completed final={done_final}\nBrief 21.")
         res21 = run_run(t_env, ["impl", "--brief", b21, "--cwd", cwd, "--meters", healthy_meters, "--tier", "3"])
         dir21 = parse_run_dir_from_stdout(res21.stdout)
@@ -1024,7 +1045,7 @@ def main():
         gate_reason = "permission gate cancelled the run at run_terminal_command"
 
         dir28a = stage_run("grok-gate-cancel", "28a")
-        out28a = delegate.map_result(dir28a, "40m", 0, None)
+        out28a = delegate.map_result(dir28a, "40m", 0, None, "grok")
         ret28a = json.load(open(os.path.join(dir28a, "return.json")))
         disp28a = json.load(open(os.path.join(dir28a, "dispatch.json")))
         ok28a = (
@@ -1040,7 +1061,7 @@ def main():
         # cancelled tool call keeps the old reading.
         dir28b = stage_run("grok-gate-cancel", "28b",
                            keep_event=lambda ev: not (ev.get("type") == "tool_call_update" and ev.get("status") == "failed"))
-        out28b = delegate.map_result(dir28b, "40m", 0, None)
+        out28b = delegate.map_result(dir28b, "40m", 0, None, "grok")
         ok28b = (
             out28b["status"] == "partial" and
             out28b["open_questions"] == ["no return block in final message"]
@@ -1049,7 +1070,7 @@ def main():
 
         # The gate is the better reason than an empty final message.
         dir28c = stage_run("grok-gate-cancel", "28c", final_message="")
-        out28c = delegate.map_result(dir28c, "40m", 0, None)
+        out28c = delegate.map_result(dir28c, "40m", 0, None, "grok")
         ok28c = (out28c["status"] == "blocked" and out28c["reason"] == gate_reason)
         record("28c. gate cancel with an empty final message names the gate", ok28c, f"out={out28c}")
 
@@ -1135,79 +1156,88 @@ def main():
                f"rc={res29c.returncode} out={res29c.stdout} err={res29c.stderr}")
 
         # -------------------------------------------------------------
-        # 29b. the courier's two greps, read from courier.md, run on the log
-        # its background command writes: the agy override warning (24) comes
-        # first and is not the result; the native line (29) is not a result.
+        # 29b. the courier's command, read from courier.md: dispatch --json
+        # writes one object to <brief>.json and everything else, the agy
+        # override warning (24) included, to <brief>.log; the native line (29)
+        # is an object of its own, never a result.
         courier_md = open(COURIER_MD).read()
-        greps = re.findall(r"grep -m[12] -E '([^']+)'", courier_md)
-        finish_re, native_re = (greps + [None, None])[:2]
+        step1 = re.search(r"\{ delegate dispatch [^\n]*\} &", courier_md)
+        poll_re = (re.findall(r"until `grep -q '([^']+)'", courier_md) + [None])[0]
+        courier_shape = ("{ \"$0\" \"$@\" > \"$JSON\" 2> \"$LOG\"; "
+                         "echo \"courier-exit: $?\" >> \"$LOG\"; }")
 
-        def courier_log(args):
-            # The courier's step-1 command shape: both streams, then the exit marker.
-            cmd = ("{ \"$0\" \"$@\"; echo \"courier-exit: $?\"; } 2>&1")
-            argv = ["sh", "-c", cmd, sys.executable, DELEGATE_PY, "dispatch",
+        def courier_argv(args):
+            return ["sh", "-c", courier_shape, sys.executable, DELEGATE_PY, "dispatch",
                     "--config-dir", t_env["config_dir"], "--ads-dir", t_env["ads_dir"],
-                    "--runs-dir", t_env["runs_dir"], "--no-probe"] + args
-            return subprocess.run(argv, capture_output=True, text=True, env=t_env["env"], cwd=cwd).stdout
+                    "--runs-dir", t_env["runs_dir"], "--no-probe"] + args + ["--json"]
 
-        def first(pattern, log):
-            hits = [l for l in log.splitlines() if re.search(pattern, l)]
-            return hits[0] if hits else None
+        def courier_run(name, args):
+            files = {"JSON": os.path.join(tmpdir, f"{name}.md.json"),
+                     "LOG": os.path.join(tmpdir, f"{name}.md.log")}
+            subprocess.run(courier_argv(args), env=dict(t_env["env"], **files), cwd=cwd)
+            with open(files["LOG"]) as f:
+                log = f.read()
+            try:
+                with open(files["JSON"]) as f:
+                    doc = json.load(f)
+            except ValueError:
+                doc = None
+            return doc, log
 
         b29b = make_brief("b29b.md", f"fake-relay: status=completed final={done_final}\nBrief 29b.")
-        log_agy = courier_log(["--lane", "flash-high@agy", "--class", "impl", "--brief", b29b, "--cwd", cwd, "--effort", "low"])
-        log_native = courier_log(["--lane", "opus-high@claude", "--class", "impl", "--brief", b29b, "--cwd", cwd])
-        agy_lines = log_agy.splitlines()
-        finish_agy = first(finish_re, log_agy) if finish_re else None
+        doc_agy, log_agy = courier_run("b29b-agy", ["--lane", "flash-high@agy", "--class", "impl", "--brief", b29b,
+                                                    "--cwd", cwd, "--effort", "low"])
+        doc_native, log_native = courier_run("b29b-native", ["--lane", "opus-high@claude", "--class", "impl",
+                                                             "--brief", b29b, "--cwd", cwd])
+        agy_return = (json.load(open(os.path.join(doc_agy["run"], "return.json")))
+                      if isinstance(doc_agy, dict) and doc_agy.get("run") else None)
         ok29b = (
-            finish_re is not None and native_re is not None and
+            step1 is not None and "--json > <brief-path>.json 2> <brief-path>.log" in step1.group(0) and
             "courier-exit: 0" in log_agy and "courier-exit: 0" in log_native and
-            # the warning is the first delegate: line, and the courier skips it
-            agy_lines[0].startswith("delegate: effort override ignored") and
-            finish_agy is not None and finish_agy.startswith("delegate: flash-high@agy status=done ") and
-            os.path.isfile(os.path.join(finish_agy.split("run=")[1], "return.json")) and
-            first(native_re, log_agy) is None and
-            # the native line is never taken for a result
-            first(finish_re, log_native) is None and
-            (first(native_re, log_native) or "").startswith("delegate: native lane=opus-high@claude agent=lane-opus-high ")
+            # the warning is in the log, and the result is the JSON alone
+            log_agy.startswith("delegate: effort override ignored") and
+            isinstance(doc_agy, dict) and doc_agy.get("lane") == "flash-high@agy" and
+            doc_agy.get("status") == "done" and doc_agy.get("return") == agy_return and
+            not doc_agy.get("native") and
+            # the native object is never taken for a result
+            isinstance(doc_native, dict) and doc_native.get("native") is True and
+            doc_native.get("agent") == "lane-opus-high" and "return" not in doc_native
         )
-        record("29b. courier keys on the finish line, not the override warning or the native line", ok29b,
-               f"greps={greps} agy={log_agy!r} native={log_native!r}")
+        record("29b. courier reads dispatch's JSON, not the override warning or the native line", ok29b,
+               f"step1={step1 and step1.group(0)} agy={doc_agy!r} {log_agy!r} native={doc_native!r}")
 
         # 29d. the courier's poll condition, read from courier.md: while the
         # relay runs, the log already holds a delegate: line (the override
         # warning) but the poll must keep waiting; once dispatch exits, it stops.
-        poll_re = (re.findall(r"until `grep -q '([^']+)'", courier_md) + [None])[0]
         hold29d = os.path.join(tmpdir, "release-29d")
-        log29d = os.path.join(tmpdir, "b29d.md.log")
+        files29d = {"JSON": os.path.join(tmpdir, "b29d.md.json"), "LOG": os.path.join(tmpdir, "b29d.md.log")}
         b29d = make_brief("b29d.md", f"fake-relay: status=completed final={done_final} hold={hold29d}\nBrief 29d.")
 
         def poll_done():
-            return subprocess.run(["grep", "-q", poll_re, log29d]).returncode == 0
+            return (os.path.isfile(files29d["LOG"]) and
+                    subprocess.run(["grep", "-q", poll_re, files29d["LOG"]]).returncode == 0)
 
-        with open(log29d, "w") as log_f:
-            proc29d = subprocess.Popen(
-                ["sh", "-c", "{ \"$0\" \"$@\"; echo \"courier-exit: $?\"; } 2>&1", sys.executable, DELEGATE_PY,
-                 "dispatch", "--config-dir", t_env["config_dir"], "--ads-dir", t_env["ads_dir"],
-                 "--runs-dir", t_env["runs_dir"], "--no-probe", "--lane", "flash-high@agy", "--class", "impl",
-                 "--brief", b29d, "--cwd", cwd, "--effort", "low"],
-                stdout=log_f, stderr=subprocess.STDOUT, env=t_env["env"], cwd=cwd)
+        proc29d = subprocess.Popen(
+            courier_argv(["--lane", "flash-high@agy", "--class", "impl", "--brief", b29d, "--cwd", cwd,
+                          "--effort", "low"]),
+            env=dict(t_env["env"], **files29d), cwd=cwd)
         mid_log = ""
         for _ in range(200):
-            mid_log = open(log29d).read()
+            mid_log = open(files29d["LOG"]).read() if os.path.isfile(files29d["LOG"]) else ""
             if "delegate: effort override ignored" in mid_log:
                 break
             time.sleep(0.05)
         waiting_mid_run = poll_re is not None and proc29d.poll() is None and not poll_done()
         open(hold29d, "w").close()
         proc29d.wait(timeout=60)
-        end_log = open(log29d).read()
+        with open(files29d["JSON"]) as f:
+            end_doc = json.load(f)
         ok29d = (
             waiting_mid_run and mid_log.startswith("delegate: effort override ignored") and
-            poll_done() and first(finish_re, end_log) is not None
+            poll_done() and end_doc.get("status") == "done"
         )
         record("29d. the courier keeps polling past an early delegate: line until dispatch exits", ok29d,
-               f"poll_re={poll_re!r} mid={mid_log!r} end={end_log!r}")
+               f"poll_re={poll_re!r} mid={mid_log!r} end={end_doc!r}")
 
         # -------------------------------------------------------------
         # 30. run native lane prints rank and native line, no relay

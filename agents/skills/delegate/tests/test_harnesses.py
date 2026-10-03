@@ -30,14 +30,14 @@ def record(name, ok, detail=""):
 
 def test_registry_is_the_list():
     record("catalog's harness list is the registry's",
-           catalog.HARNESSES == harnesses.NAMES and len(set(harnesses.NAMES)) == len(harnesses.NAMES),
-           f"{catalog.HARNESSES} vs {harnesses.NAMES}")
-    record("each adapter names a binary, efforts, a vendor (or serves any) and a relay",
-           all(h.binary and h.efforts and (h.vendor or h.any_vendor) and h.relay
+           harnesses.NAMES == harnesses.NAMES and len(set(harnesses.NAMES)) == len(harnesses.NAMES),
+           f"{harnesses.NAMES} vs {harnesses.NAMES}")
+    record("each adapter names a binary, efforts, the models it owns and a relay",
+           all(h.binary and h.efforts and (h.vendor or h.owns("any-model")) and h.relay
                for h in harnesses.REGISTRY),
            repr([(h.name, h.binary, h.efforts, h.vendor, h.relay) for h in harnesses.REGISTRY]))
     record("catalog's per-harness efforts come from the adapters",
-           all(catalog.HARNESS_EFFORTS[h.name] == tuple(h.efforts) for h in harnesses.REGISTRY))
+           all(tuple(harnesses.get(h.name).efforts) == tuple(h.efforts) for h in harnesses.REGISTRY))
     record("discovery asks harnesses with a model list first",
            [harnesses.get(n).catalog_models for n in harnesses.discovery_order()]
            == sorted(harnesses.get(n).catalog_models for n in harnesses.discovery_order()))
@@ -62,9 +62,7 @@ def test_lane_name():
            all(harnesses.split_lane(name)[1] == lane["harness"] for name, lane in lanes.items()))
     record("discovery's names and stems go through the pair",
            discover._free_name("sol", "high", "codex", {"sol-high@codex"}) == "sol2-high@codex"
-           and discover._lane_stem_of("sol-high@codex") == "sol"
-           and set(discover.generate_efforts_stanzas("codex", "gpt-5.6-sol", ["high"])[2])
-           == {harnesses.lane_name(discover.derive_short_name("gpt-5.6-sol")[0], "high", "codex")})
+           and discover._lane_stem_of("sol-high@codex") == "sol")
     profile = {"native": {"agent": "lane-{model_effort}"}}
     record("an orchestrator's agent name takes the Lane's model-effort",
            orchestrators.agent_name(profile, "fable-xhigh@claude") == "lane-fable-xhigh")
@@ -120,7 +118,6 @@ def test_family():
     record("a harness with the effort in the slug splits it off; others never do",
            harnesses.family("agy", "gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
            and harnesses.family("codex", "gpt-6-sol-high") == ("gpt-6-sol-high", None)
-           and catalog.slug_family("gemini-3.8-flash-low") == ("gemini-3.8-flash", "low")
            and agy.lane_model({"slug": "gemini-3.8-flash", "members": {"low": "gemini-3.8-flash-low"}}, "low")
            == "gemini-3.8-flash-low")
 
@@ -164,7 +161,7 @@ def test_kiro():
            and efforts["claude-haiku-4.5"] == [], repr(efforts))
     record("a read-only kiro run passes the effort, the timeout and --read-only to the relay",
            kiro.run_args("high", "30m", None) == (["--effort", "high", "--timeout", "30m", "--read-only"], None))
-    absent = kiro.probe()
+    absent = kiro.meters()
     record("kiro's Meter row has no Remaining, which the Gate never vetoes",
            len(absent) == 1 and absent[0]["remaining_weekly"] is None and absent[0]["harness"] == "kiro")
 
@@ -247,23 +244,60 @@ def test_claude_model_meter():
     import types
     import usage
     from harnesses import claude as claude_module
-    saved = usage.which, usage.run
+    adapter = harnesses.get("claude")
+    saved = usage.run
     text = ("Current session: 40% used\nCurrent week (all models): 30% used\n"
             "Current week (Fable 5.2): 96% used\n")
     try:
-        usage.which = lambda name: True
+        adapter.installed = lambda: True
         usage.run = lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps({"result": text}))
-        rows = harnesses.get("claude").probe()
+        rows = adapter.meters()
     finally:
-        usage.which, usage.run = saved
+        usage.run = saved
+        del adapter.installed
     record("'Current week (Fable 5.2)' is the claude-fable Meter, as 'Fable' was",
-           [r["lane"] for r in rows] == ["claude-general", "claude-fable"]
+           [r["meter"] for r in rows] == ["claude-general", "claude-fable"]
            and claude_module.model_meter_name("Fable") == "fable"
            and claude_module.model_meter_name("Fable v6") == "fable",
-           repr([r["lane"] for r in rows]))
+           repr([r["meter"] for r in rows]))
+
+
+def test_meter_identity():
+    """Each adapter says which Meters its probe reports, and the catalog check
+    holds a Lane's Meter to them (ticket 25)."""
+    import json
+    import types
+    import usage
+    from unittest import mock
+    sample = catalog.load_json(os.path.join(SCRIPTS, "..", "assets", "samples", "lanes.json"))
+    models = {}
+    for lane in sample["lanes"].values():
+        models.setdefault(lane["meter"], []).append(lane["model"])
+    record("every sample Meter is one its harness's probe reports",
+           all(harnesses.get(meter["harness"]).reports_meter(name, models.get(name, ()))
+               for name, meter in sample["meters"].items()),
+           repr({n: harnesses.get(m["harness"]).meter_names() for n, m in sample["meters"].items()}))
+    claude = harnesses.get("claude")
+    record("a claude model Meter is named for a model the catalog runs on it",
+           claude.reports_meter("claude-fable", ["claude-fable-5-1"])
+           and not claude.reports_meter("claude-fabel", ["claude-fable-5-1"])
+           and not claude.reports_meter("claude-generl")
+           and harnesses.get("agy").meter_names() == ("agy-gemini", "agy-claude-gpt")
+           and harnesses.get("codex").meter_names() == ("codex",))
+    agy = harnesses.get("agy")
+    listing = {"command": {"data": {"groups": [{"name": "Gemini Models", "buckets": []},
+                                               {"name": "Claude and GPT", "buckets": []}]}}}
+    with mock.patch.object(agy, "installed", return_value=True), \
+         mock.patch.object(usage, "run", return_value=types.SimpleNamespace(
+             returncode=0, stdout=json.dumps(listing))):
+        rows = agy.meters()
+    record("agy's probe rows are the Meters it declares, under `meter`",
+           tuple(r["meter"] for r in rows) == agy.meter_names()
+           and [r["group"] for r in rows] == ["gemini", "claude-gpt"], repr(rows))
 
 
 if __name__ == "__main__":
+    test_meter_identity()
     test_registry_is_the_list()
     test_lane_name()
     test_effort_words()

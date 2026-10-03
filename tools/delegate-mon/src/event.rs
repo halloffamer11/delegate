@@ -1,14 +1,16 @@
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// Per-lane quota and status information from `usage.json` or `meter` events.
+/// One Meter's quota and status from `usage.json` or `meter` events. `lane`
+/// holds the Meter name; `group` the probe's own word for it (`gemini`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "RawLane")]
 pub struct Lane {
     pub lane: String,
     #[serde(default)]
     pub harness: Option<String>,
     #[serde(default)]
-    pub meter: Option<String>,
+    pub group: Option<String>,
     #[serde(default)]
     pub remaining_5h: Option<f64>,
     #[serde(default)]
@@ -35,6 +37,74 @@ pub struct Lane {
     pub rollover_soon: Option<bool>,
     #[serde(default)]
     pub note: Option<String>,
+}
+
+/// A usage row as written. Since delegate's ticket 25 the row names its Meter
+/// under `meter` and the probe group under `group`; an older row named the
+/// Meter under `lane` and kept the group under `meter`. Both read.
+#[derive(Deserialize)]
+struct RawLane {
+    #[serde(default)]
+    lane: Option<String>,
+    #[serde(default)]
+    harness: Option<String>,
+    #[serde(default)]
+    meter: Option<String>,
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default)]
+    remaining_5h: Option<f64>,
+    #[serde(default)]
+    remaining_weekly: Option<f64>,
+    #[serde(default)]
+    r: Option<f64>,
+    #[serde(default)]
+    binding: Option<String>,
+    #[serde(default)]
+    reset_5h: Option<f64>,
+    #[serde(default)]
+    reset_weekly: Option<f64>,
+    #[serde(default)]
+    reset_binding: Option<f64>,
+    #[serde(default)]
+    cycle_left: Option<f64>,
+    #[serde(default)]
+    pace: Option<f64>,
+    #[serde(default)]
+    score: Option<f64>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    rollover_soon: Option<bool>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+impl From<RawLane> for Lane {
+    fn from(raw: RawLane) -> Self {
+        let (name, group) = match raw.lane {
+            Some(old_name) => (old_name, raw.meter),
+            None => (raw.meter.unwrap_or_default(), raw.group),
+        };
+        Lane {
+            lane: name,
+            harness: raw.harness,
+            group,
+            remaining_5h: raw.remaining_5h,
+            remaining_weekly: raw.remaining_weekly,
+            r: raw.r,
+            binding: raw.binding,
+            reset_5h: raw.reset_5h,
+            reset_weekly: raw.reset_weekly,
+            reset_binding: raw.reset_binding,
+            cycle_left: raw.cycle_left,
+            pace: raw.pace,
+            score: raw.score,
+            status: raw.status,
+            rollover_soon: raw.rollover_soon,
+            note: raw.note,
+        }
+    }
 }
 
 /// Meter event emitted by `usage.py` on cache write (probe path).

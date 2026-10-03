@@ -6,8 +6,6 @@ entry in REGISTRY. Everything else in delegate iterates the registry or asks
 `<model-effort>@<harness>` is spelled and split here too (`lane_name`,
 `split_lane`), the lowest module every script imports.
 """
-import shutil
-
 from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness  # noqa: F401
 from . import agy, claude, codex, grok, kiro
 
@@ -22,9 +20,36 @@ def get(name):
 
 
 def cli_installed(name):
-    """Whether this harness's CLI is on PATH, by the binary its adapter names."""
+    """Whether this harness's CLI is on PATH (`Harness.installed`); False for a
+    name no module defines."""
     h = get(name)
-    return h is not None and shutil.which(h.binary) is not None
+    return h is not None and h.installed()
+
+
+def installed(names=None):
+    """The harnesses, of NAMES or the ones given, whose CLI is on PATH."""
+    return {name for name in (NAMES if names is None else names) if cli_installed(name)}
+
+
+def constraint_error(name):
+    """Why a user's harness constraint cannot be applied, or None.
+
+    The constraint (`/delegate agy <task>`, or a standing "use agy for all
+    delegated work") restricts ranking to one harness's Lanes. Only the user
+    states one; a harness that is unknown or whose CLI is not on PATH is
+    refused, naming the installed ones.
+    """
+    if name in NAMES and cli_installed(name):
+        return None
+    present = ", ".join(sorted(installed())) or "none"
+    why = "is not a harness" if name not in NAMES else "is not installed"
+    return f"harness '{name}' {why}; installed: {present}"
+
+
+def vendor_words():
+    """The first words of the harnesses' own vendors' slugs: words that name a
+    whole family of models rather than one (`gpt`, `gemini`)."""
+    return tuple(h.vendor for h in REGISTRY if h.vendor)
 
 
 def discovery_order():
@@ -38,17 +63,6 @@ def family(harness, slug):
     whose effort is not part of the slug or a name no module defines."""
     h = get(harness)
     return h.family(slug) if h is not None else (slug or "", None)
-
-
-def slug_family(slug):
-    """(base, effort) for a slug of unknown harness: the first family any
-    effort-in-slug harness finds in it, else (slug, None)."""
-    for h in REGISTRY:
-        if h.effort_in_slug:
-            base, effort = h.family(slug)
-            if effort is not None:
-                return base, effort
-    return slug or "", None
 
 
 def lane_name(stem, effort, harness):

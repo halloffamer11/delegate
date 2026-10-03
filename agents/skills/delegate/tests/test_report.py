@@ -393,7 +393,10 @@ with tempfile.TemporaryDirectory() as tmp:
         doc["meters"] = {(new if k == "claude-fable" else k): v for k, v in doc["meters"].items()}
         for lane in doc["lanes"].values():
             if lane.get("meter") == "claude-fable":
+                # a model Meter is named for its model's word, which the
+                # catalog check holds it to (ticket 25), so the model goes too
                 lane["meter"] = new
+                lane["model"] = lane["model"].replace("fable", new.split("-", 1)[1])
         with open(lanes_path, "w") as f:
             json.dump(doc, f, indent=2)
         cache_doc = json.load(open(sl_cache))

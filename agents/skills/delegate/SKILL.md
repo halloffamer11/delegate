@@ -64,7 +64,8 @@ Add only what the job needs:
 What comes back:
 
 - `delegate: <lane> status=… secs=… run=<dir>` and a `delegate-metrics:` line.
-  `<dir>/return.json` is the result.
+  `<dir>/return.json` is the result. With `--json`, one object carries the
+  same facts and the return.
 - `delegate: native …` then `delegate: spawn: …`: this harness runs the lane
   itself. Follow the spawn line; the agent's final message is the return
   claim. Log it as in step 4 with `--lane --secs --status` instead of `--run`.

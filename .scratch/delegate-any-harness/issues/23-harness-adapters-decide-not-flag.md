@@ -8,9 +8,15 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent, raised in review of PR #3 2026-10-03
+**Status:** landed 2026-10-03. `base.Harness` gained `installed`, `present_in`, `models`, `generation`,
+`owns`, `starter`, `meters` (with `read_meters` per adapter), `effort_for` and `blocked_reason`; the Claude
+adapter owns the catalog-plus-benchmark-names strategy, grok owns its gate-cancel parsing, and `any_vendor`
+and `no_effort_note` are gone. The legacy `discover.py --efforts` is deleted (the wizard's refresh proposes a
+new model's Lanes). Discovery results carry `complete` per harness, which `map_lanes` and the setup page read.
+`catalog_models` is read only by the registry, to order discovery. Verified: `make test` green on 3.9 and
+3.13; the refresh fixtures' tests pass unchanged.
 
-- [ ] `discover.py` reads no harness flag; adding a harness with no list command is one module.
-- [ ] The absent-CLI guard exists once, and `usage` no longer imports `catalog` to find a binary.
-- [ ] `delegate.py` names no harness.
-- [ ] `make test` passes on 3.9 and 3.13 with no behaviour change in the refresh fixtures.
+- [x] `discover.py` reads no harness flag; adding a harness with no list command is one module.
+- [x] The absent-CLI guard exists once, and `usage` no longer imports `catalog` to find a binary.
+- [x] `delegate.py` names no harness.
+- [x] `make test` passes on 3.9 and 3.13 with no behaviour change in the refresh fixtures.

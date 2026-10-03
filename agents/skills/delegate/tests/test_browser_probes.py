@@ -151,6 +151,12 @@ def main():
         test_env = dict(os.environ)
         test_env["PATH"] = os.pathsep.join([fake_bin, "/bin", "/usr/bin"])
         test_env["DELEGATE_CONFIG_DIR"] = fake_config
+        # The case expects Claude Code orchestrating, so the claude lane is
+        # native. Pin that, as test_dispatch.py does: the host's own markers
+        # and profiles never reach the run.
+        test_env.pop("CLAUDECODE", None)
+        test_env["DELEGATE_ORCHESTRATOR"] = "claude"
+        test_env["DELEGATE_ORCHESTRATORS_DIR"] = os.path.join(tmpdir, "orchestrators")
 
         res = subprocess.run(
             [sys.executable, BROWSER_PROBES_PY, "--dry-run"],

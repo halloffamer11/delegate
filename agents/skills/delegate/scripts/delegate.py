@@ -7,17 +7,9 @@ What a run is:
   The run manages catalog resolution, prompt assembly, ledger accounting, relay execution,
   and child return normalization.
 
-Run directory layout:
-  <runs-dir>/<YYYYMMDDTHHMMSSZ>-<lane>-<8 hex from uuid4>/
-    dispatch.json   metadata, configuration, timings, session IDs, and results
-    prompt.md       assembled prompt (preamble, cwd, permissions, brief, return schema)
-    relay.stdout    raw stdout stream from relay process
-    relay.stderr    raw stderr stream from relay process
-    result.json     structured outcome from relay
-    return.json     normalized child return contract (5 schema fields)
-    brief.txt       relay's recorded copy of the brief
-    final.txt       child final text (if emitted)
-    events.jsonl    child event log (if emitted)
+Run directory: `runs.py` owns it (dispatch.json, prompt.md, return.json, and
+the finish line). The relay adds relay.stdout, relay.stderr, result.json,
+brief.txt, final.txt and events.jsonl.
 
 Status mapping:
   completed:
@@ -34,29 +26,33 @@ Status mapping:
 CLI:
   python3 delegate.py dispatch (--lane <name> | --model <slug>) [--class <c>] --brief <path> --cwd <dir>
           [--write <worktree>] [--effort <e>] [--harness <h>] [--config-dir DIR]
-          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
+          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash] [--json]
   python3 delegate.py run <class> --brief <path> --cwd <dir> [--write <worktree>] [--tier <n>]
           [--dry-run] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c]
-          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
+          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash] [--json]
+
+  --json prints one JSON object (`runs.summary`, or `runs.native_summary` for a
+  native Lane) in place of the finish and metrics lines; `run --json` sends the
+  ranking to stderr.
 """
 import argparse
-from datetime import datetime, timezone
+import contextlib
 import json
 import os
-import re
 import subprocess
 import sys
 import time
-import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, HARNESS_EFFORTS, meters_enabled
+from catalog import load_catalog, CatalogError, meters_enabled
+from harnesses import NAMES as HARNESSES, EFFORTS
 import catalog
 import events
 import harnesses
 import orchestrators
 import rank
+import runs
 import usage
 
 # No orchestrator is assumed. A Lane runs in-process only when the orchestrator
@@ -214,36 +210,27 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         sys.stderr.write(f"delegate: lane '{lane_name}' runs on {harness}, not {harness_filter}\n")
         sys.exit(2)
 
-    # An override the lane's harness does not offer is refused, not passed on
-    # to a CLI that may silently run something else (ticket 19). An agy
-    # override inside agy's list is still only ignored: agy carries the effort
-    # in the model name.
-    if effort_arg in EFFORTS and effort_arg not in HARNESS_EFFORTS[harness]:
-        sys.stderr.write(
-            f"delegate: {harness} does not offer effort '{effort_arg}' on {lane_name}; "
-            f"{harness} offers {', '.join(HARNESS_EFFORTS[harness])}\n"
-        )
+    # The harness decides what an override does (`Harness.effort_for`): one it
+    # does not offer is refused, and one a harness cannot take is ignored.
+    adapter = harnesses.get(harness)
+    try:
+        effort, ignored = adapter.effort_for(lane_data, effort_arg)
+    except ValueError as e:
+        sys.stderr.write(f"delegate: {e} on {lane_name}; {harness} offers {', '.join(adapter.efforts)}\n")
         sys.exit(2)
-    if harnesses.get(harness).effort_in_slug and effort_arg is not None:
-        sys.stderr.write(
-            f"delegate: effort override ignored on {lane_name}; {harness} carries effort in the model name\n"
-        )
-        effort = lane_data["effort"]
-    elif orchestrators.is_native(profile, harness) and effort_arg is not None and effort_arg != lane_data["effort"]:
+    if (ignored is None and orchestrators.is_native(profile, harness)
+            and effort_arg is not None and effort_arg != lane_data["effort"]):
         # A native lane runs as its lane-*.md agent, whose file fixes the effort,
         # so an override would be recorded and never used.
-        sys.stderr.write(
-            f"delegate: effort override ignored on {lane_name}; a native lane runs at its agent file's "
-            f"effort, {lane_data['effort']}\n"
-        )
         effort = lane_data["effort"]
-    else:
-        effort = effort_arg if effort_arg is not None else lane_data["effort"]
+        ignored = f"a native lane runs at its agent file's effort, {effort}"
+    if ignored:
+        sys.stderr.write(f"delegate: effort override ignored on {lane_name}; {ignored}\n")
     if effort not in EFFORTS:
         sys.stderr.write(f"delegate: invalid effort '{effort}'; must be one of {', '.join(EFFORTS)}\n")
         sys.exit(2)
 
-    if not catalog.cli_installed(harness):
+    if not adapter.installed():
         sys.stderr.write(
             f"delegate: {harness} CLI is not on PATH; install it or pick a lane on another harness\n"
         )
@@ -361,58 +348,6 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     return prompt_bytes, prompt_path
 
 
-def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes, leash=True, orchestrator=None):
-    runs_dir_param = runs_dir_param or os.environ.get("DELEGATE_RUNS_DIR")
-    runs_dir = os.path.abspath(os.path.expanduser(runs_dir_param)) if runs_dir_param else os.path.expanduser("~/.cache/delegate/runs")
-    os.makedirs(runs_dir, exist_ok=True)
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    thread_id = str(uuid.uuid4())
-    hex8 = uuid.uuid4().hex[:8]
-    dir_name = f"{stamp}-{lane}-{hex8}"
-    run_dir = os.path.join(runs_dir, dir_name)
-    os.makedirs(run_dir, exist_ok=False)
-
-    prompt_path = os.path.join(run_dir, "prompt.md")
-    with open(prompt_path, "wb") as f:
-        f.write(prompt_bytes)
-
-    dispatch_doc = {
-        "lane": lane,
-        "harness": harness,
-        "model": model,
-        "effort": effort,
-        "timeout": timeout,
-        "class": class_name,
-        "leash": leash,
-        # the orchestrator profile this run was resolved under; null is the
-        # default path, where every Lane is relayed
-        "orchestrator": orchestrator,
-        "cwd": cwd,
-        "write": write,
-        "brief": brief_path,
-        "prompt": prompt_path,
-        "thread_id": thread_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "relay_status": None,
-        "relay_exit": None,
-        "secs": None,
-        "status": None,
-        "reason": None,
-        "session_id": None,
-        "session": None,
-        "usage": None,
-        "touched_files": None,
-        "read_only_violation": None,
-        "finished_at": None,
-    }
-    with open(os.path.join(run_dir, "dispatch.json"), "w", encoding="utf-8") as f:
-        json.dump(dispatch_doc, f, indent=2)
-        f.write("\n")
-
-    return run_dir, thread_id, prompt_path
-
-
 def ledger_start(thread_id, lane, class_name, effort, timeout_str, child_cwd, brief_path, return_path, write_dir):
     timeout_s = parse_timeout_s(timeout_str)
     events.append(events.start_event(
@@ -464,44 +399,7 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
     return relay_exit, secs
 
 
-def gate_cancelled_tool(run_dir):
-    """The tool a permission gate cancelled, if that is how the run ended.
-
-    grok's event stream records a gate refusal as a failed tool_call_update whose
-    text says the execution was cancelled, then an end event with
-    stopReason=cancelled. Both must hold: a cancel with no cancelled tool is some
-    other stop. Returns the tool name ("" if the call was never announced), or
-    None when the run did not end at the gate. Other harnesses' event shapes do
-    not match and return None.
-    """
-    events_path = os.path.join(run_dir, "events.jsonl")
-    if not os.path.isfile(events_path):
-        return None
-    tool_names = {}
-    cancelled_tool = None
-    stop_reason = None
-    with open(events_path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(ev, dict):
-                continue
-            kind = ev.get("type")
-            if kind == "tool_call":
-                tool_names[ev.get("toolCallId")] = ev.get("toolName") or ev.get("title") or ""
-            elif kind == "tool_call_update" and ev.get("status") == "failed":
-                if "cancel" in json.dumps(ev.get("content")).lower():
-                    cancelled_tool = tool_names.get(ev.get("toolCallId"), "")
-            elif kind == "end":
-                stop_reason = ev.get("stopReason")
-    if stop_reason == "cancelled" and cancelled_tool is not None:
-        return cancelled_tool
-    return None
-
-
-def map_result(run_dir, lane_timeout, relay_exit, write_dir):
+def map_result(run_dir, lane_timeout, relay_exit, write_dir, harness, secs=None):
     result_path = os.path.join(run_dir, "result.json")
     stderr_path = os.path.join(run_dir, "relay.stderr")
 
@@ -542,7 +440,9 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
         if relay_status == "completed":
             block = find_return_block(final_message)
-            gated_tool = gate_cancelled_tool(run_dir) if block is None else None
+            # a harness whose events say why the run stopped short has a
+            # reason a completed relay status hides (`Harness.blocked_reason`)
+            stopped = harnesses.get(harness).blocked_reason(run_dir) if block is None else None
             if block is not None:
                 status = block.get("status")
                 deliv = block.get("deliverable", "")
@@ -575,15 +475,11 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
                 if status == "blocked":
                     reason = deliverable
-            elif gated_tool is not None:
-                # The relay says completed, but a gated tool was refused and
-                # the turn ended there, so the worker did not finish. Reading
-                # it as partial hides the cause (ticket 14). As on timeout, the
-                # final message stays in final.txt.
+            elif stopped is not None:
+                # The relay says completed, but the worker did not finish. As
+                # on timeout, the final message stays in final.txt.
                 status = "blocked"
-                reason = "permission gate cancelled the run"
-                if gated_tool:
-                    reason += f" at {gated_tool}"
+                reason = stopped
                 deliverable = f"blocked: {reason}"
             elif final_message.strip():
                 status = "partial"
@@ -617,38 +513,14 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
         if not write_dir and read_only_violation is True:
             open_questions.append("read-only tripwire fired; review the diff")
 
-    return_doc = {
-        "status": status,
-        "deliverable": deliverable,
-        "evidence": evidence,
-        "open_questions": open_questions,
-        "changed_files": changed_files,
-    }
-    return_path = os.path.join(run_dir, "return.json")
-    with open(return_path, "w", encoding="utf-8") as f:
-        json.dump(return_doc, f, indent=2)
-        f.write("\n")
-
-    dispatch_path = os.path.join(run_dir, "dispatch.json")
-    if os.path.isfile(dispatch_path):
-        with open(dispatch_path, "r", encoding="utf-8") as f:
-            dispatch_doc = json.load(f)
-        dispatch_doc.update({
-            "relay_status": relay_status,
-            "relay_exit": relay_exit,
-            "secs": None,
-            "status": status,
-            "reason": reason,
-            "session_id": session_id,
-            "session": session_id,
-            "usage": usage,
-            "touched_files": touched_files,
-            "read_only_violation": read_only_violation,
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-        })
-        with open(dispatch_path, "w", encoding="utf-8") as f:
-            json.dump(dispatch_doc, f, indent=2)
-            f.write("\n")
+    runs.Run(run_dir).finish(
+        {"status": status, "deliverable": deliverable, "evidence": evidence,
+         "open_questions": open_questions, "changed_files": changed_files},
+        relay_status=relay_status, relay_exit=relay_exit, secs=secs, reason=reason,
+        session_id=session_id, usage=usage, touched_files=touched_files,
+        read_only_violation=read_only_violation,
+    )
+    return_path = runs.Run(run_dir).return_path
 
     return {
         "status": status,
@@ -699,17 +571,9 @@ def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, p
         lane_timeout=lane_timeout,
         relay_exit=relay_exit,
         write_dir=write,
+        harness=harness,
+        secs=secs,
     )
-
-    # Update secs in dispatch.json
-    dispatch_path = os.path.join(run_dir, "dispatch.json")
-    if os.path.isfile(dispatch_path):
-        with open(dispatch_path, "r", encoding="utf-8") as f:
-            d_doc = json.load(f)
-        d_doc["secs"] = secs
-        with open(dispatch_path, "w", encoding="utf-8") as f:
-            json.dump(d_doc, f, indent=2)
-            f.write("\n")
 
     return relay_exit, secs, mapped
 
@@ -724,35 +588,11 @@ def start_failure(exc):
 
 
 def fail_run(run_dir, secs, reason):
-    """Write return.json and dispatch.json for a run that failed after its start.
-
-    The status is blocked, as for a relay that fails: return.json has no other
-    word for a run that did no work. It never raises: the ledger finish comes
-    after it, and a file that cannot be written must not leave the run running.
-    """
-    deliverable = f"blocked: {reason}"
-    return_doc = {"status": "blocked", "deliverable": deliverable, "evidence": [],
-                  "open_questions": [], "changed_files": []}
-    try:
-        with open(os.path.join(run_dir, "return.json"), "w", encoding="utf-8") as f:
-            json.dump(return_doc, f, indent=2)
-            f.write("\n")
-    except OSError as e:
-        sys.stderr.write(f"delegate: could not write return.json: {e}\n")
-    dispatch_path = os.path.join(run_dir, "dispatch.json")
-    try:
-        with open(dispatch_path, "r", encoding="utf-8") as f:
-            dispatch_doc = json.load(f)
-    except (OSError, ValueError):
-        dispatch_doc = {}
-    dispatch_doc.update({"status": "blocked", "reason": reason, "secs": secs,
-                         "finished_at": datetime.now(timezone.utc).isoformat()})
-    try:
-        with open(dispatch_path, "w", encoding="utf-8") as f:
-            json.dump(dispatch_doc, f, indent=2)
-            f.write("\n")
-    except OSError as e:
-        sys.stderr.write(f"delegate: could not write dispatch.json: {e}\n")
+    """Finish a run that failed after its start (`runs.Run.fail`). Never
+    raises: the ledger finish comes after it."""
+    _doc, problem = runs.Run(run_dir).fail(secs, reason)
+    if problem:
+        sys.stderr.write(f"delegate: {problem}\n")
     return {"status": "blocked", "reason": reason, "session_id": None}
 
 
@@ -769,19 +609,17 @@ def ledger_finish(thread_id, lane, class_name, secs, relay_exit, status, session
     ))
 
 
-def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exit):
-    class_disp = "-" if class_name is None else class_name
-    print(f"delegate: {lane} status={status} secs={secs} run={run_dir}")
-    print(f"delegate-metrics: thread={thread_id} status={status} class={class_disp} secs={secs} rc={relay_exit}")
-    if status in ("done", "partial"):
-        sys.exit(0)
-    elif status == "blocked":
-        sys.exit(1)
+def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exit, as_json=False):
+    if as_json:
+        print(json.dumps(runs.summary(runs.Run(run_dir), lane, status, secs, class_name, relay_exit), indent=2))
     else:
-        sys.exit(1)
+        class_disp = "-" if class_name is None else class_name
+        print(runs.finish_line(lane, status, secs, run_dir))
+        print(f"delegate-metrics: thread={thread_id} status={status} class={class_disp} secs={secs} rc={relay_exit}")
+    sys.exit(0 if status in ("done", "partial") else 1)
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None, as_json=False):
     profile = load_profile(orchestrator)
     # Step 1: Resolve
     resolved = resolve(
@@ -818,31 +656,29 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         routing=resolved["routing"],
     )
 
-    # Step 3: Allocate the run directory
-    run_dir, thread_id, prompt_path = allocate_run_dir(
-        runs_dir_param=runs_dir,
-        lane=lane,
-        harness=harness,
-        model=model,
-        effort=eff,
-        timeout=lane_timeout,
-        class_name=class_,
-        cwd=cwd,
-        write=write,
-        brief_path=brief,
-        prompt_bytes=prompt_bytes,
-        leash=effective_leash,
+    # Step 3: Create the Run
+    run = runs.Run.create(
+        runs_dir, prompt_bytes,
+        lane=lane, harness=harness, model=model, effort=eff, timeout=lane_timeout,
+        class_name=class_, cwd=cwd, write=write, brief=brief, leash=effective_leash,
         orchestrator=profile["name"] if profile else None,
     )
+    run_dir, thread_id, prompt_path = run.path, run.thread_id, run.prompt_path
 
+    # The one native-or-relayed decision: a native Lane stops here, with the
+    # Run's prompt for the orchestrator's own agent.
     if orchestrators.is_native(profile, harness):
         abs_prompt = os.path.abspath(prompt_path)
         agent = orchestrators.agent_name(profile, lane)
-        print(f"delegate: native lane={lane} agent={agent} prompt={abs_prompt}")
-        print(f"delegate: spawn: {orchestrators.spawn_line(profile, lane, abs_prompt)}")
+        spawn = orchestrators.spawn_line(profile, lane, abs_prompt)
+        if as_json:
+            print(json.dumps(runs.native_summary(lane, agent, abs_prompt, spawn), indent=2))
+        else:
+            print(runs.native_line(lane, agent, abs_prompt))
+            print(f"delegate: spawn: {spawn}")
         sys.exit(0)
 
-    return_path = os.path.join(run_dir, "return.json")
+    return_path = run.return_path
 
     # Step 4: Ledger start
     ledger_start(
@@ -892,10 +728,11 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         thread_id=thread_id,
         class_name=class_,
         relay_exit=relay_exit,
+        as_json=as_json,
     )
 
 
-def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, present_harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None, as_json=False):
     try:
         cat = load_catalog(cwd=cwd, config_dir=config_dir)
     except CatalogError as e:
@@ -908,14 +745,14 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         sys.exit(2)
 
     if harness is not None:
-        present_list = None if harnesses is None else [h.strip() for h in harnesses.split(",")]
-        error = (catalog.harness_constraint_error(harness) if present_list is None else
+        present_list = None if present_harnesses is None else [h.strip() for h in present_harnesses.split(",")]
+        error = (harnesses.constraint_error(harness) if present_list is None else
                  None if harness in present_list else
                  f"harness '{harness}' is not installed; installed: {', '.join(present_list)}")
         if error:
             sys.stderr.write(f"delegate: {error}\n")
             sys.exit(2)
-        cat = catalog.restrict_to_harness(cat, harness)
+        cat = rank.restrict_to_harness(cat, harness)
 
     cls_config = cat.get("routing", {}).get("classes", {}).get(class_, {})
     floor = cls_config.get("floor")
@@ -932,24 +769,33 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
     # metering is off; dispatch then ranks and runs on that one acquisition.
     probed = meters is None and meters_enabled(cat.get("routing", {}))
 
-    if harnesses is not None:
-        present = set(h.strip() for h in harnesses.split(",") if h.strip())
+    if present_harnesses is not None:
+        present = set(h.strip() for h in present_harnesses.split(",") if h.strip())
     else:
-        present = catalog.installed_harnesses()
+        present = harnesses.installed()
 
     rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
-    has_pick = rank.print_rank_output(class_, cat, rows, tier=tier)
+    # with --json, stdout carries the one JSON object, so the ranking is
+    # written to stderr
+    text_out = sys.stderr if as_json else sys.stdout
+    with contextlib.redirect_stdout(text_out):
+        has_pick = rank.print_rank_output(class_, cat, rows, tier=tier)
     if not has_pick:
+        if as_json:
+            print(json.dumps({"class": class_, "pick": None}))
         sys.exit(1)
 
+    pick_lane = rows[0]["lane"]
     if dry_run:
-        print("delegate: dry run, nothing dispatched")
+        if as_json:
+            print(json.dumps({"class": class_, "pick": pick_lane, "dry_run": True}))
+        else:
+            print("delegate: dry run, nothing dispatched")
         sys.exit(0)
 
-    pick_lane = rows[0]["lane"]
     lane_harness = cat["lanes"][pick_lane]["harness"]
     if not orchestrators.is_native(load_profile(orchestrator), lane_harness):
-        print(f"delegate: dispatching {pick_lane}")
+        print(f"delegate: dispatching {pick_lane}", file=text_out)
     dispatch(
         lane=pick_lane,
         class_=class_,
@@ -964,6 +810,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         no_leash=no_leash,
         probed=probed,
         orchestrator=orchestrator,
+        as_json=as_json,
     )
 
 
@@ -1004,6 +851,7 @@ def main(argv=None):
     p_dispatch.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
     p_dispatch.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
     p_dispatch.add_argument("--orchestrator", default=None, help=ORCHESTRATOR_HELP)
+    p_dispatch.add_argument("--json", action="store_true", help="print one JSON object in place of the finish lines")
 
     p_run = sub.add_parser("run", help="rank and dispatch in one step")
     p_run.add_argument("class_", metavar="class", help="work class")
@@ -1022,6 +870,7 @@ def main(argv=None):
     p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
     p_run.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
     p_run.add_argument("--orchestrator", default=None, help=ORCHESTRATOR_HELP)
+    p_run.add_argument("--json", action="store_true", help="print one JSON object in place of the finish lines")
 
     args = parser.parse_args(argv)
     if args.cmd == "dispatch":
@@ -1040,6 +889,7 @@ def main(argv=None):
             model=args.model,
             no_leash=args.no_leash,
             orchestrator=args.orchestrator,
+            as_json=args.json,
         )
     elif args.cmd == "run":
         run(
@@ -1051,13 +901,14 @@ def main(argv=None):
             dry_run=args.dry_run,
             config_dir=args.config_dir,
             meters=args.meters,
-            harnesses=args.harnesses,
+            present_harnesses=args.harnesses,
             ads_dir=args.ads_dir,
             runs_dir=args.runs_dir,
             no_probe=args.no_probe,
             no_leash=args.no_leash,
             harness=args.harness,
             orchestrator=args.orchestrator,
+            as_json=args.json,
         )
 
 

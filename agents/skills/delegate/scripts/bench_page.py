@@ -23,23 +23,17 @@ import os
 from collections import defaultdict
 
 import bench
+import carry
 from bench import (
     AA_COST_COLUMN,
-    KIND_DOMINATED,
     carry_reason,
-    certain_effort_rows,
-    dominating_row,
     effort_rank,
-    evidence_unavailable,
     fmt_aa_value,
     fmt_cost,
     group_lanes,
     lane_order,
-    model_families,
-    model_group,
-    propose_enabled,
 )
-from catalog import EFFORTS
+from harnesses import EFFORTS
 import harnesses
 
 # A published sweep runs the API's own enum, which starts below the lowest
@@ -183,13 +177,13 @@ def _proposals(lanes_doc, effort_rows):
     the wizard marks. Two implementations of one rule would eventually
     disagree in front of the person checking the arithmetic.
 
-    Returns {name: carry_decision}. `effort_rows is None` (unavailable evidence)
+    Returns {name: carry.decision}. `effort_rows is None` (unavailable evidence)
     is distinct from an empty proposal.
     """
     if not _lanes(lanes_doc):
         return {}
     try:
-        return propose_enabled(lanes_doc, effort_rows)
+        return carry.decisions(lanes_doc, effort_rows)
     except Exception:
         return {}
 
@@ -198,14 +192,14 @@ def _proposed_off(proposals):
     """{lane name: display reason} for lanes the pre-screen would switch off on
     the strength of the data, not lanes already recorded off or never carried."""
     return {name: carry_reason(decision) for name, decision in (proposals or {}).items()
-            if decision.get("kind") == KIND_DOMINATED}
+            if decision.get("kind") == carry.KIND_DOMINATED}
 
 
 def _decision_for(proposals, names):
     """The first dominated decision among `names`, else None."""
     for name in names or ():
         decision = (proposals or {}).get(name)
-        if decision and decision.get("kind") == KIND_DOMINATED:
+        if decision and decision.get("kind") == carry.KIND_DOMINATED:
             return decision
     return None
 
@@ -282,11 +276,11 @@ def _annotate(effort_rows, lanes_doc, proposals):
         row = dict(item)
         row["model"] = item["_lane_model"] or item.get("model")
         keyed.append(row)
-    certain = certain_effort_rows(keyed)
-    families = model_families(lanes_doc)
+    certain = carry.certain_effort_rows(keyed)
+    families = carry.families(lanes_doc)
     comparable = {id(row) for row in certain}
     for item, row in zip(annotated, keyed):
-        other = dominating_row(row, certain, families) if id(row) in comparable else None
+        other = carry.dominating_row(row, certain, families) if id(row) in comparable else None
         item["_dominated_by"] = other["effort"] if other else None
     return annotated
 
@@ -472,7 +466,7 @@ def _lane_list(lanes_doc, bench, items, proposals):
         decision = (proposals or {}).get(name) or {}
         out.append({"name": name, "harness": lane.get("harness"), "meter": lane.get("meter"),
                     "model": lane.get("model"),
-                    "group": model_group(lane), "effort": lane.get("effort"),
+                    "group": carry.model_of(lane), "effort": lane.get("effort"),
                     "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
                     "carried": _carried(lane), "off": off.get(name), "rows": name in drawn,
                     "kind": decision.get("kind"), "source": decision.get("source"),
@@ -916,7 +910,7 @@ def _catalog_block(lanes_doc, proposals):
         else:
             on = verdict.get("enabled")
             why = carry_reason(verdict)
-            cls = "" if on else ("off" if verdict.get("kind") == KIND_DOMINATED else "quiet")
+            cls = "" if on else ("off" if verdict.get("kind") == carry.KIND_DOMINATED else "quiet")
             verdict_cell = f'<span class="{cls}">{"carry" if on else "off"}: {_esc(why)}</span>'
         body.append("<tr>"
                     f'<td><span class="mono">{_esc(name)}</span></td>'
@@ -1084,7 +1078,7 @@ def _header(lanes_doc, effort_rows, proposals):
         names = "; ".join(f'<span class="mono">{_esc(n)}</span>, {_esc(why)}' for n, why in sorted(off.items()))
         out.append(f'<p class="verdict">{_legend_glyph(LANE_OFF)} The pre-screen proposes to '
                    f"switch off {len(off)} lane{'s' if len(off) != 1 else ''}: {names}.</p>")
-    elif evidence_unavailable(effort_rows, proposals):
+    elif carry.evidence_unavailable(effort_rows, proposals):
         out.append(f'<p class="verdict">{_legend_glyph(LANE)} Per-effort evidence is unavailable, '
                    "so the pre-screen proposes nothing.</p>")
     elif effort_rows is not None:

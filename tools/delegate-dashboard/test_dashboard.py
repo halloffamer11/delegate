@@ -29,6 +29,7 @@ from dashboard import PercentageEditor, Session, pop_key
 import deck
 
 import catalog
+import catalog_edit
 import rank
 
 
@@ -436,7 +437,7 @@ class DashboardModelTest(ProjectFixture):
             "project": str(project_policy.resolve()),
         }
         # Ticket 14: one public planning path, the one the dashboard stages on.
-        plan = catalog.plan_edits(
+        plan = catalog_edit.plan_edits(
             [{"op": "order", "scope": "project", "lane": lane, "position": position}],
             lanes_doc,
             routing_doc,
@@ -886,7 +887,7 @@ class DashboardModelTest(ProjectFixture):
                 self.assertEqual(dashboard.state["tiers"][1]["leader"], previews[1]["leader"])
 
     def test_intervening_edit_mark_matches_catalog_message(self):
-        source = inspect.getsource(catalog)
+        source = inspect.getsource(catalog_edit)
         self.assertIn(INTERVENING_EDIT_MARK, source)
         self.assertEqual(
             INTERVENING_EDIT_MARK,
@@ -897,7 +898,7 @@ class DashboardModelTest(ProjectFixture):
         project_policy = self.root / ".delegate" / "routing.json"
         original = {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"}
         write_json(project_policy, original)
-        real_edit = catalog.edit_catalog
+        real_edit = catalog_edit.edit_catalog
 
         def wrap_with_global_change(which):
             def wrapper(*args, **kwargs):
@@ -917,7 +918,7 @@ class DashboardModelTest(ProjectFixture):
                 write_json(project_policy, original)
                 dashboard = self.make_model()
                 before = project_policy.read_bytes()
-                with mock.patch.object(catalog, "edit_catalog", side_effect=wrap_with_global_change(which)):
+                with mock.patch.object(catalog_edit, "edit_catalog", side_effect=wrap_with_global_change(which)):
                     if action == "move":
                         saved = dashboard.move_lane("sol-high@codex", -1)
                     else:
@@ -1070,7 +1071,7 @@ class DashboardModelTest(ProjectFixture):
         project_policy = self.root / ".delegate" / "routing.json"
         write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"})
         global_before = (self.config / "routing.json").read_bytes()
-        real_edit = catalog.edit_catalog
+        real_edit = catalog_edit.edit_catalog
 
         def replace_with_symlink_after_preview(*args, **kwargs):
             result = real_edit(*args, **kwargs)
@@ -1087,7 +1088,7 @@ class DashboardModelTest(ProjectFixture):
                     project_policy.unlink()
                 write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"})
                 dashboard = self.make_model()
-                with mock.patch.object(catalog, "edit_catalog", side_effect=replace_with_symlink_after_preview):
+                with mock.patch.object(catalog_edit, "edit_catalog", side_effect=replace_with_symlink_after_preview):
                     if action == "move":
                         saved = dashboard.move_lane("sol-high@codex", -1)
                     else:
@@ -1105,7 +1106,7 @@ class DashboardModelTest(ProjectFixture):
         write_json(project_policy, {"version": "delegate-routing.v1", "note": "keep"})
         before = project_policy.read_bytes()
         dashboard = self.make_model()
-        real_edit = catalog.edit_catalog
+        real_edit = catalog_edit.edit_catalog
 
         def retarget(*args, **kwargs):
             result = dict(real_edit(*args, **kwargs))
@@ -1114,7 +1115,7 @@ class DashboardModelTest(ProjectFixture):
             result["target"] = target
             return result
 
-        with mock.patch.object(catalog, "edit_catalog", side_effect=retarget):
+        with mock.patch.object(catalog_edit, "edit_catalog", side_effect=retarget):
             self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
             self.assertFalse(
                 dashboard.save_percentage_edit(dashboard.begin_percentage_edit("margin"), "10")
@@ -1129,11 +1130,11 @@ class DashboardModelTest(ProjectFixture):
         dashboard = self.make_model()
         for exc in (OSError("disk full"), ValueError("bad catalog value")):
             with self.subTest(exc=type(exc).__name__):
-                with mock.patch.object(catalog, "edit_catalog", side_effect=exc):
+                with mock.patch.object(catalog_edit, "edit_catalog", side_effect=exc):
                     self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
                 self.assertEqual(dashboard.state["save"]["status"], "error")
                 self.assertEqual(project_policy.read_bytes(), before)
-                with mock.patch.object(catalog, "edit_catalog", side_effect=exc):
+                with mock.patch.object(catalog_edit, "edit_catalog", side_effect=exc):
                     self.assertFalse(
                         dashboard.save_percentage_edit(
                             dashboard.begin_percentage_edit("gate"),
@@ -1143,21 +1144,21 @@ class DashboardModelTest(ProjectFixture):
                 self.assertEqual(dashboard.state["save"]["status"], "error")
                 self.assertEqual(project_policy.read_bytes(), before)
 
-        real_edit = catalog.edit_catalog
+        real_edit = catalog_edit.edit_catalog
 
         def raise_on_apply(*args, **kwargs):
             if kwargs.get("apply"):
                 raise OSError("apply failed")
             return real_edit(*args, **kwargs)
 
-        with mock.patch.object(catalog, "edit_catalog", side_effect=raise_on_apply):
+        with mock.patch.object(catalog_edit, "edit_catalog", side_effect=raise_on_apply):
             self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
         self.assertEqual(dashboard.state["save"]["status"], "error")
         self.assertEqual(project_policy.read_bytes(), before)
 
     def test_keyboardinterrupt_is_not_swallowed(self):
         dashboard = self.make_model()
-        with mock.patch.object(catalog, "edit_catalog", side_effect=KeyboardInterrupt):
+        with mock.patch.object(catalog_edit, "edit_catalog", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 dashboard.move_lane("sol-high@codex", -1)
             with self.assertRaises(KeyboardInterrupt):
@@ -1447,7 +1448,7 @@ class StagedEditTest(ProjectFixture):
         self.assertTrue(
             dashboard.stage_percentage_edit(dashboard.begin_percentage_edit("gate"), "4.5")
         )
-        real_edit = catalog.edit_catalog
+        real_edit = catalog_edit.edit_catalog
         seen = []
 
         def fail_the_second_apply(*args, **kwargs):
@@ -1457,7 +1458,7 @@ class StagedEditTest(ProjectFixture):
                     raise OSError("disk full")
             return real_edit(*args, **kwargs)
 
-        with mock.patch.object(catalog, "edit_catalog", side_effect=fail_the_second_apply):
+        with mock.patch.object(catalog_edit, "edit_catalog", side_effect=fail_the_second_apply):
             self.assertFalse(dashboard.save_staged())
         self.assertEqual(dashboard.state["save"]["status"], "error")
         self.assertEqual(dashboard.state["staged"]["count"], 1)

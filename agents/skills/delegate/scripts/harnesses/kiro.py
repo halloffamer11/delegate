@@ -34,17 +34,20 @@ class Kiro(Harness):
     name = "kiro"
     binary = "kiro-cli"
     efforts = ("low", "medium", "high", "xhigh", "max")
-    any_vendor = True
     list_command = ["kiro-cli", "chat", "--list-models", "--format", "json"]
     fixture_file = "kiro-models.json"
     # Kiro's first Lanes have no Lane on the harness to copy a Meter, a weight
     # or a timeout from, so the refresh starts them from this, and adds the
     # Meter when the catalog has none. Plan and price are the Kiro Pro list
     # price, which headless needs at least; edit them in lanes.json.
-    starter_meter = ("kiro", {"plan": "Kiro Pro", "price_month": 20, "probe": "usage.py",
+    starter_meter = ("kiro", {"plan": "Kiro Pro", "price_month": 20,
                               "note": "UNMEASURED: plan and price_month assumed; no usage "
                                       "source, so Remaining is unknown"})
     starter_lane = {"meter_weight": 1, "timeout": "30m"}
+
+    def owns(self, slug):
+        """Kiro serves every vendor's models on its own Meter, so all are its own."""
+        return True
 
     def parse_models(self, raw):
         """Models from `kiro-cli chat --list-models --format json`: a list, or

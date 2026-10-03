@@ -32,7 +32,8 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import bench  # noqa: E402
-import catalog  # noqa: E402
+import carry  # noqa: E402
+import published_names  # noqa: E402
 
 FRONTIER = "frontier"
 DIVERSITY = "diversity"
@@ -57,7 +58,7 @@ def lane_scores(lanes_doc, effort_rows, settings, names=None):
         score = bench.as_number(row.get("score"))
         if score is None:
             continue
-        model = catalog.resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
+        model = published_names.resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
         if model is None:
             continue
         for name in names:
@@ -74,15 +75,6 @@ def band(score, thresholds):
     """The highest Tier whose threshold the score clears; 1 when none."""
     cleared = [int(t) for t, floor in thresholds.items() if score >= floor]
     return max(cleared, default=1)
-
-
-def _beats(other, lane):
-    """Whether `other` beats `lane` on both axes: no lower score for no more
-    cost, better on one. An unknown cost never beats and is never beaten."""
-    if other["cost"] is None or lane["cost"] is None:
-        return False
-    return (other["score"] >= lane["score"] and other["cost"] <= lane["cost"]
-            and (other["score"] > lane["score"] or other["cost"] < lane["cost"]))
 
 
 def propose(lanes_doc, effort_rows, settings, names=None):
@@ -105,7 +97,7 @@ def propose(lanes_doc, effort_rows, settings, names=None):
         keep = {}
         for name in candidates:
             beater = next((other for other in candidates
-                           if other != name and _beats(scores[other], scores[name])), None)
+                           if other != name and carry.beats(scores[other], scores[name], cost="cost")), None)
             if beater is None:
                 keep[name] = FRONTIER
             elif tier == 1:
