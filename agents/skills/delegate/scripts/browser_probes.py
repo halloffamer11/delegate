@@ -27,6 +27,7 @@ if HERE not in sys.path:
 
 import catalog
 import harnesses
+import runs
 
 DELEGATE_PY = os.path.join(HERE, "delegate.py")
 PROBES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "probes"))
@@ -97,11 +98,9 @@ def build_dispatch_cmd(lane, harness, brief_path, cwd):
 
 
 def parse_run_dir_from_stdout(stdout):
-    """Extracts run directory path from delegate dispatch output."""
-    for line in stdout.splitlines():
-        if line.startswith("delegate:") and "run=" in line:
-            return line.split("run=")[-1].strip()
-    return None
+    """The run directory dispatch's finish line names (`runs.parse_finish_line`)."""
+    found = runs.parse_finish_line(stdout)
+    return found["run"] if found else None
 
 
 def grade(target, probe, nonce=None):

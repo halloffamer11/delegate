@@ -29,7 +29,6 @@ CLIs and relays, and spend a little real quota: one tiny job per harness.
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +43,7 @@ import catalog  # noqa: E402
 import harnesses  # noqa: E402
 import orchestrators  # noqa: E402
 import rank  # noqa: E402
+import runs  # noqa: E402
 
 # The evals drive delegate the way a harness does: through the `delegate`
 # command, which is the contract.
@@ -254,11 +254,12 @@ def ping_lane(sandbox, harness):
 
 
 def run_dir_from(stdout):
-    for line in stdout.splitlines():
-        m = re.match(r"^delegate: \S+ status=\S+ secs=\S+ run=(.+)$", line)
-        if m:
-            return m.group(1).strip()
-    return None
+    """The run directory `delegate dispatch --json` or `run --json` printed, or None."""
+    try:
+        doc = json.loads(stdout)
+    except ValueError:
+        return None
+    return doc.get("run") if isinstance(doc, dict) else None
 
 
 def ping_one(sandbox, harness):
@@ -274,7 +275,7 @@ def ping_one(sandbox, harness):
     cmd = DELEGATE + ["dispatch", "--lane", lane, "--class", PING_CLASS,
            "--brief", sandbox.brief, "--cwd", sandbox.cwd,
            # A ping proves the relay, so no Lane runs natively, whoever runs the eval.
-           "--orchestrator", "none"] + sandbox.common_args()
+           "--orchestrator", "none", "--json"] + sandbox.common_args()
     if sandbox.offline:
         cmd.append("--no-probe")
     proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
@@ -304,17 +305,11 @@ def equivalent(reference_dir, run_dir):
     for name in RUN_FILES:
         if not os.path.isfile(os.path.join(run_dir, name)):
             return f"missing {name}"
-    with open(os.path.join(reference_dir, "dispatch.json")) as f:
-        ref_lane = json.load(f).get("lane")
-    with open(os.path.join(run_dir, "dispatch.json")) as f:
-        lane = json.load(f).get("lane")
+    reference, got = runs.Run(reference_dir).read(), runs.Run(run_dir).read()
+    ref_lane, lane = reference["dispatch"].get("lane"), got["dispatch"].get("lane")
     if lane != ref_lane:
         return f"ran {lane}, the reference ran {ref_lane}"
-    with open(os.path.join(reference_dir, "return.json")) as f:
-        ref_return = json.load(f)
-    with open(os.path.join(run_dir, "return.json")) as f:
-        got = json.load(f)
-    if got != ref_return:
+    if got["return"] != reference["return"]:
         return "return.json differs from the reference"
     return None
 
@@ -348,13 +343,13 @@ def orchestrate_one(sandbox, orchestrator, reference, profiles):
         tail = (proc.stderr or proc.stdout).strip().splitlines()[-1:] or ["no output"]
         return "fail", f"no run directory (exit {proc.returncode}): {tail[0]}"
     run_dir = new[-1]
-    native = re.search(r"^delegate: native lane=(\S+) agent=(\S+)", proc.stdout, re.M)
+    native = runs.parse_native_line(proc.stdout)
     if native and sandbox.offline:
         # The stub cannot spawn a subagent; the run directory and its prompt
         # are what the orchestrator's agent would read.
         if not os.path.isfile(os.path.join(run_dir, "prompt.md")):
             return "fail", f"{run_dir}: native run wrote no prompt.md"
-        return "pass", f"native lane {native.group(1)}: spawn {native.group(2)} ({run_dir})"
+        return "pass", f"native lane {native['lane']}: spawn {native['agent']} ({run_dir})"
     problem = check_ping_run(run_dir)
     if problem:
         return "fail", problem
@@ -377,7 +372,7 @@ def eval_orchestrate(sandbox, names):
     except orchestrators.ProfileError as e:
         return {o: ("fail", str(e)) for o in names}
     if sandbox.offline:
-        cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief, "--orchestrator", "none",
+        cmd = DELEGATE + ["run", PING_CLASS, "--brief", sandbox.brief, "--orchestrator", "none", "--json",
                "--cwd", sandbox.cwd, "--meters", sandbox.meters, "--no-probe"] + sandbox.common_args()
         proc = subprocess.run(cmd, capture_output=True, text=True, env=sandbox.env)
         reference = run_dir_from(proc.stdout)

@@ -86,7 +86,12 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
 - `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch
   (`run`); a Lane whose harness is the orchestrator's, under a profile that declares native Lanes,
   prints the native line and the profile's spawn line instead of starting a relay. `dispatch.json`
-  records the orchestrator. Run directories under `~/.cache/delegate/runs/`, never reused.
+  records the orchestrator. `--json` on either prints one object in place of the finish and
+  metrics lines (`run --json` sends the ranking to stderr); the courier, the evals and the
+  browser probes read that or `runs.parse_finish_line`, never a regex of their own.
+- `scripts/runs.py`: the run directory's one owner (ticket 24). A `Run` is created, finished or
+  failed here, and only here are `dispatch.json` and `return.json` written; it spells and parses
+  the finish and native lines. Run directories under `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `e3541ece582b64b5c4b9b094a78384ad8a6a181e` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
