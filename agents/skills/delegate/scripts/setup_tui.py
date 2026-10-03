@@ -39,6 +39,7 @@ from bench import (
     unmatched_message,
 )
 import harnesses as harness_registry  # noqa: E402
+import catalog  # noqa: E402
 from catalog import (
     CLASSES,
     HARNESSES,
@@ -111,25 +112,29 @@ def count_legend(harness):
     return f"{harness} lists no model; its count is the catalog's own"
 
 
-def class_descriptions(path=None):
+def class_descriptions(path=None, extra=()):
     """{class: its first sentence} from the Class guide, `assets/classes.md`,
     for the routing page's group rows. The guide is the one place a class is
     described, so nothing here paraphrases it: the sentence is quoted, less its
     full stop. A guide that cannot be read gives every class "" and the page
-    still draws; the guide is an aid to the routing page, not a gate."""
-    try:
-        with open(path or catalog_guide_path(), "r", encoding="utf-8") as f:
-            text = f.read()
-    except (OSError, UnicodeDecodeError):
-        return {name: "" for name in CLASSES}
+    still draws; the guide is an aid to the routing page, not a gate. `extra`
+    are overlay guides (this machine's classes.md) whose sections describe the
+    Classes a catalog adds; a missing one is skipped."""
     out = {name: "" for name in CLASSES}
+    text = ""
+    for guide in [path or catalog_guide_path(), *extra]:
+        try:
+            with open(guide, "r", encoding="utf-8") as f:
+                text += "\n" + f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
     current = None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("## "):
             current = line[3:].strip()
             continue
-        if current in out and line and not out[current]:
+        if current is not None and line and not out.get(current):
             head = line.split(". ", 1)[0]
             out[current] = head[:-1] if head.endswith(".") else head
     return out
@@ -325,8 +330,10 @@ class Wizard:
                  clock=None, class_guide=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
-        self._original_routing = copy.deepcopy(routing_doc)
-        self.routing_doc = copy.deepcopy(routing_doc)
+        # every shipped Class is on the routing page, with the default Range
+        # when the catalog gives it none, then the Classes it adds (ticket 16)
+        self._original_routing = catalog.with_default_classes(routing_doc)
+        self.routing_doc = catalog.with_default_classes(routing_doc)
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
@@ -338,7 +345,8 @@ class Wizard:
         self._clock = clock or (lambda: time.strftime("%H:%M"))
         self.scanned = "at launch"
         # the routing page's class descriptions, from the Class guide
-        self.class_guide = class_descriptions() if class_guide is None else class_guide
+        self.class_guide = (class_descriptions(extra=[os.path.join(os.path.dirname(routing_path), "classes.md")])
+                            if class_guide is None else class_guide)
         self.focus = None if focus in (None, "start") else focus
         self.screen = "start"
         self.tier = None
@@ -874,8 +882,8 @@ class Wizard:
                 self._enter_tier(1)
             return
         if self.screen == "routing":
-            count = len(CLASSES) * 2 + 3
-            meters_idx = len(CLASSES) * 2 + 2
+            count = len(self.classes) * 2 + 3
+            meters_idx = len(self.classes) * 2 + 2
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
             elif key == "down":
@@ -885,17 +893,17 @@ class Wizard:
                     self._set_meters(not self._meters_on())
                 elif key in ("plus", "minus"):
                     delta = 1 if key == "plus" else -1
-                    if self.cursor < len(CLASSES) * 2:
+                    if self.cursor < len(self.classes) * 2:
                         cls_idx = self.cursor // 2
                         is_ceiling = (self.cursor % 2 == 1)
-                        name = CLASSES[cls_idx]
+                        name = self.classes[cls_idx]
                         cls_info = self.routing_doc["classes"][name]
                         if is_ceiling:
                             cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
                         else:
                             cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
                     else:
-                        name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
+                        name = "margin" if self.cursor == len(self.classes) * 2 else "gate"
                         old = self.routing_doc[name]
                         self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
             elif key == "enter":
@@ -914,7 +922,7 @@ class Wizard:
             # of sight included both file paths and every routing value. A
             # confirm screen you cannot read to the end is not one.
             count = (len(self._focus_rows()) if self.focus else
-                     len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 5)
+                     len(self.lanes_doc["lanes"]) + len(self.classes) * 2 + 5)
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -989,7 +997,7 @@ class Wizard:
             for field in ("tier", "order", "enabled"):
                 if lane.get(field) != original.get(field):
                     add(f"{name}.{field}", original.get(field, "unset"), lane.get(field, "unset"))
-        for name in CLASSES:
+        for name in self.classes:
             for field in ("floor", "ceiling"):
                 old = self._original_routing["classes"][name][field]
                 new = self.routing_doc["classes"][name][field]
@@ -1185,7 +1193,7 @@ class Wizard:
 
     def _routing_settings(self):
         values = []
-        for name in CLASSES:
+        for name in self.classes:
             cls_info = self.routing_doc["classes"][name]
             values.append((name, "floor", cls_info["floor"]))
             values.append((name, "ceiling", cls_info["ceiling"]))
@@ -1193,6 +1201,12 @@ class Wizard:
                        (None, "gate", self.routing_doc["gate"]),
                        (None, "meters", "on" if self._meters_on() else "off")])
         return values
+
+    @property
+    def classes(self):
+        """The Classes on the routing page: the shipped five, then the
+        catalog's own."""
+        return catalog.class_names(self.routing_doc)
 
     # The routing page's last group: the three settings that make the pick.
     RANKING_GROUP = ("ranking", "how the pick is made among eligible lanes")
@@ -1209,7 +1223,7 @@ class Wizard:
         is whole.
         """
         settings = self._routing_settings()
-        names = ["  floor", "  ceiling", "  margin", "  gate", "  meters", *CLASSES,
+        names = ["  floor", "  ceiling", "  margin", "  gate", "  meters", *self.classes,
                  self.RANKING_GROUP[0], "setting"]
         room = max(MIN_ELASTIC, self._width - 1 - max(len(n) for n in names) - 2
                    - (PANEL_MIN + PANEL_GAP + 2))
@@ -1514,7 +1528,7 @@ class Wizard:
                 rows.append({"cells": [name, "off" if off else "",
                                         f"tier {self._final_tier(name)}"],
                              "marked": False, "dimmed": off, "tag": ""})
-            for name in CLASSES:
+            for name in self.classes:
                 cls_info = self.routing_doc["classes"][name]
                 rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
                              "marked": False, "dimmed": False, "tag": ""})

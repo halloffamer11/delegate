@@ -16,7 +16,7 @@ import discover
 import effort
 import orchestrators
 import setup_tui
-from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
+from catalog import CatalogError, HARNESSES, load_json, validate_lanes, validate_routing, write_json
 
 # The wizard refreshes the Artificial Analysis rows itself, so that one command
 # is one command (ticket 33). The fetch goes where `effort.py aa` would put it.
@@ -135,6 +135,8 @@ def load_or_propose(config_dir, discovered):
         routing_doc = load_json(routing_path)
         validate_lanes(lanes_doc, lanes_path)
         validate_routing(routing_doc, routing_path)
+        # the wizard shows, and writes, every shipped Class (ticket 16)
+        routing_doc = catalog.with_default_classes(routing_doc)
     else:
         samples_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "samples"))
         sample_lanes = load_json(os.path.join(samples_dir, "lanes.json"))
@@ -255,7 +257,7 @@ def ask_lanes(lanes_doc):
 
 
 def show_routing(routing_doc):
-    for name in CLASSES:
+    for name in catalog.class_names(routing_doc):
         cls_info = routing_doc["classes"][name]
         print(f"classes.{name}: floor={cls_info['floor']} ceiling={cls_info['ceiling']}")
     print(f"margin: {routing_doc['margin']}")
@@ -267,7 +269,7 @@ def ask_routing(routing_doc):
     show_routing(routing_doc)
     if read_answer("keep routing as shown? [Y/n] ").strip().lower() != "n":
         return
-    for name in CLASSES:
+    for name in catalog.class_names(routing_doc):
         cls_info = routing_doc["classes"][name]
         f = ask_int(f"{name} floor", cls_info["floor"], 1, 4)
         c = ask_int(f"{name} ceiling", max(f, cls_info["ceiling"]), f, 4)

@@ -51,7 +51,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS, meters_enabled
+from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, HARNESS_EFFORTS, meters_enabled
 import catalog
 import events
 import harnesses
@@ -181,8 +181,9 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
     lane_data = lanes[lane_name]
     harness = lane_data["harness"]
 
-    if class_name is not None and class_name not in CLASSES:
-        sys.stderr.write(f"delegate: invalid class '{class_name}'; must be one of {', '.join(CLASSES)}\n")
+    known_classes = catalog.class_names(cat["routing"])
+    if class_name is not None and class_name not in known_classes:
+        sys.stderr.write(f"delegate: invalid class '{class_name}'; must be one of {', '.join(known_classes)}\n")
         sys.exit(2)
 
     if not os.path.isabs(brief_path):
@@ -895,14 +896,15 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
 
 
 def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None):
-    if class_ not in CLASSES:
-        sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(CLASSES)}\n")
-        sys.exit(2)
-
     try:
         cat = load_catalog(cwd=cwd, config_dir=config_dir)
     except CatalogError as e:
         sys.stderr.write(f"delegate: {e}\n")
+        sys.exit(2)
+
+    known_classes = catalog.class_names(cat["routing"])
+    if class_ not in known_classes:
+        sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(known_classes)}\n")
         sys.exit(2)
 
     if harness is not None:

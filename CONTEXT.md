@@ -75,7 +75,7 @@ A project's preferred order for lanes inside their effective tiers. It overrides
 The lane ranking selects when selection is restricted to one Tier. It is a preview for that Tier, not the Pick for a Class range.
 
 **Class**:
-The kind of job: scout, mechanical, impl, review, or hard-impl.
+The kind of job. Five ship (scout, mechanical, impl, review, hard-impl) and every catalog has them; a catalog may add its own, each with a Range in `routing.json` and a section in a Class guide.
 _Avoid_: task type, category
 
 **Floor**:

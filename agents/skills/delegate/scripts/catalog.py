@@ -9,13 +9,15 @@ Locations:
   global lanes:    <CONFIG_DIR>/lanes.json
   global routing:  <CONFIG_DIR>/routing.json
   project routing: <git-root>/.delegate/routing.json
-  class guide:     <skill>/assets/classes.md
+  class guide:     <skill>/assets/classes.md   (the five shipped Classes)
+  global guide:    <CONFIG_DIR>/classes.md      (overlay: Classes this machine adds)
   project guide:   <git-root>/.delegate/classes.md
 
 CLI forms:
   catalog.py show [--cwd DIR] [--config-dir DIR] [--json]
   catalog.py check FILE [--partial]   (warns when one Meter serves a whole Tier)
-  catalog.py check-guide [FILE] [--overlay]
+  catalog.py check-guide [FILE] [--overlay] [--cwd DIR] [--config-dir DIR]
+      no FILE: every guide together against the effective routing
   catalog.py fmt FILE [--partial]
   catalog.py set FIELD JSON_VALUE --scope global|project [--cwd DIR] [--config-dir DIR]
       FIELD is lanes.<lane>.tier, routing.gate, routing.margin, routing.meters,
@@ -86,7 +88,15 @@ EFFORTS = harnesses.EFFORTS
 # The efforts each harness offers, and so the only efforts a lane on it may
 # carry (ticket 19). Each adapter records its source.
 HARNESS_EFFORTS = {h.name: tuple(h.efforts) for h in harnesses.REGISTRY}
+# The five shipped Classes (ticket 16). A catalog gets them, with the Ranges
+# in assets/samples/routing.json, when it defines none; a catalog may give one
+# a Range of its own, and may add a Class of its own beside them (a Range in
+# routing.json and a section in a Class guide), but never loses one.
 CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
+DEFAULT_CLASSES_SOURCE = "default"
+# A Class name a catalog adds: lower case, digits and hyphens, as the shipped
+# ones are, so it reads the same in a Lane header, a flag and a guide heading.
+CLASS_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 LANES_VERSION = "delegate-lanes.v1"
 ROUTING_VERSION = "delegate-routing.v1"
 # Class sections in assets/classes.md (and a project overlay) are ATX headings
@@ -680,7 +690,8 @@ def validate_routing(doc, source="routing.json", partial=False):
             )
 
     if not partial:
-        for req in ("version", "classes", "margin", "gate"):
+        # `classes` is optional: the shipped Classes are the defaults.
+        for req in ("version", "margin", "gate"):
             if req not in doc:
                 raise CatalogError(f"{source}: key '{req}': missing required top-level key")
 
@@ -693,13 +704,12 @@ def validate_routing(doc, source="routing.json", partial=False):
         cls_map = doc["classes"]
         if not isinstance(cls_map, dict):
             raise CatalogError(f"{source}: key 'classes': classes must be an object")
-        if not partial:
-            for c in CLASSES:
-                if c not in cls_map:
-                    raise CatalogError(f"{source}: classes: missing required class '{c}'")
         for cls_name, cls_range in cls_map.items():
-            if cls_name not in CLASSES:
-                raise CatalogError(f"{source}: classes: unknown class '{cls_name}'")
+            if not CLASS_NAME.match(cls_name):
+                raise CatalogError(
+                    f"{source}: classes: class '{cls_name}': a class name is lower-case "
+                    "letters, digits and single hyphens, starting with a letter"
+                )
             if not isinstance(cls_range, dict):
                 raise CatalogError(
                     f"{source}: classes: class '{cls_name}': must be an object with 'floor' and 'ceiling'"
@@ -793,13 +803,26 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
     sources = {}
     for k in global_doc:
         sources[k] = g_src
+    # The shipped Classes come first, then the global document's own: a
+    # catalog's Range for a shipped Class replaces the default, and a Class it
+    # adds sorts after the shipped five.
+    classes = {}
+    for c, c_val in default_class_ranges().items():
+        classes[c] = c_val
+        sources[f"classes.{c}"] = DEFAULT_CLASSES_SOURCE
+        for sub_k in c_val:
+            sources[f"classes.{c}.{sub_k}"] = DEFAULT_CLASSES_SOURCE
     if "classes" in global_doc and isinstance(global_doc["classes"], dict):
         sources["classes"] = g_src
         for c, c_val in global_doc["classes"].items():
+            classes[c] = copy.deepcopy(c_val)
             sources[f"classes.{c}"] = g_src
             if isinstance(c_val, dict):
                 for sub_k in c_val:
                     sources[f"classes.{c}.{sub_k}"] = g_src
+    else:
+        sources["classes"] = DEFAULT_CLASSES_SOURCE
+    routing["classes"] = classes
 
     if project_doc:
         for k, v in project_doc.items():
@@ -823,6 +846,34 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
                 sources[k] = p_src
 
     return routing, sources
+
+
+def default_class_ranges():
+    """{class: {floor, ceiling}} for the shipped Classes: the Ranges the
+    starting catalog (assets/samples/routing.json) gives them."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets",
+                           "samples", "routing.json"), encoding="utf-8") as f:
+        shipped = json.load(f)["classes"]
+    return {c: dict(shipped[c]) for c in CLASSES}
+
+
+def with_default_classes(routing_doc):
+    """A copy of one routing document whose `classes` holds every shipped
+    Class, its own Range where it gives one, then the Classes it adds."""
+    doc = copy.deepcopy(routing_doc)
+    own = doc.get("classes") if isinstance(doc.get("classes"), dict) else {}
+    classes = default_class_ranges()
+    for c, c_val in own.items():
+        classes[c] = copy.deepcopy(c_val)
+    doc["classes"] = classes
+    return doc
+
+
+def class_names(routing):
+    """The Classes an effective routing defines: the shipped five, then the
+    Classes the catalog adds, in the order it writes them."""
+    own = [c for c in (routing or {}).get("classes", {}) if c not in CLASSES]
+    return list(CLASSES) + own
 
 
 def meters_enabled(routing):
@@ -1274,9 +1325,10 @@ def _iter_guide_headings(text):
         yield lineno, len(matched.group(1)), title
 
 
-def validate_guide_text(text, source="classes.md", overlay=False):
-    """Validate Class-guide markdown. Global headings must equal CLASSES;
-    overlay headings must be a subset. Metadata headings are any other level."""
+def validate_guide_text(text, source="classes.md", overlay=False, classes=None):
+    """Validate Class-guide markdown. The shipped guide's headings must equal
+    CLASSES; an overlay's must be a subset of `classes` (the effective
+    routing's, CLASSES when not given). Metadata headings are any other level."""
     if not isinstance(text, str):
         raise CatalogError(f"{source}: document: class guide must be markdown text")
 
@@ -1291,7 +1343,8 @@ def validate_guide_text(text, source="classes.md", overlay=False):
 
     found = []
     seen = {}
-    allowed = ", ".join(CLASSES)
+    known = tuple(classes) if classes is not None else CLASSES
+    allowed = ", ".join(known)
     for lineno, level, title in _iter_guide_headings(text):
         if level != CLASS_GUIDE_HEADING_LEVEL:
             continue
@@ -1300,10 +1353,11 @@ def validate_guide_text(text, source="classes.md", overlay=False):
                 f"{source}: heading '## {title}': duplicate class section "
                 f"(first at line {seen[title]})"
             )
-        if title not in CLASSES:
+        if title not in known:
             raise CatalogError(
                 f"{source}: heading '## {title}': unknown class; class sections "
-                f"must be one of {allowed}"
+                f"must be one of {allowed} (a new Class needs a floor and a ceiling "
+                "in routing.json first)"
             )
         seen[title] = lineno
         found.append(title)
@@ -1320,8 +1374,9 @@ def validate_guide_text(text, source="classes.md", overlay=False):
     return names
 
 
-def validate_guide(path, overlay=False):
-    """Validate one Class guide file. overlay=True for a project subset."""
+def validate_guide(path, overlay=False, classes=None):
+    """Validate one Class guide file. overlay=True for a global or project
+    overlay, whose sections name Classes in `classes`."""
     expanded = os.path.abspath(os.path.expanduser(path))
     if not os.path.isfile(expanded):
         raise CatalogError(f"{path}: file is missing")
@@ -1330,8 +1385,73 @@ def validate_guide(path, overlay=False):
             text = f.read()
     except Exception as e:
         raise CatalogError(f"{path}: file: cannot read: {e}")
-    validate_guide_text(text, source=path, overlay=overlay)
+    validate_guide_text(text, source=path, overlay=overlay, classes=classes)
     return text
+
+
+def _effective_class_names(cwd=None, config_dir=None):
+    """The effective routing's Classes, or the shipped five when this machine
+    has no routing.json yet."""
+    base_dir = os.path.expanduser(config_dir if config_dir is not None else CONFIG_DIR)
+    if not os.path.isfile(os.path.join(base_dir, "routing.json")):
+        return list(CLASSES)
+    routing, _sources = effective_routing(cwd=cwd, config_dir=config_dir)
+    return class_names(routing)
+
+
+def check_routing_guides(path, doc):
+    """`check` on a routing file: each Class it adds has a section in a Class
+    guide, the shipped one, the classes.md beside the file, or this machine's."""
+    classes = class_names(with_default_classes(doc))
+    try:
+        classes += [c for c in _effective_class_names() if c not in classes]
+    except CatalogError:
+        pass
+    guides = [(default_class_guide_path(), False)]
+    for candidate in (os.path.join(os.path.dirname(os.path.abspath(path)), "classes.md"),
+                      os.path.join(os.path.expanduser(CONFIG_DIR), "classes.md")):
+        if os.path.isfile(candidate) and all(not os.path.samefile(candidate, g) for g, _ in guides):
+            guides.append((candidate, True))
+    return check_class_guides(classes, guides)
+
+
+def guide_files(cwd=None, config_dir=None):
+    """[(path, overlay)] for every Class guide in effect: the shipped one, then
+    this machine's (<CONFIG_DIR>/classes.md) and the project's
+    (.delegate/classes.md) when they exist."""
+    base_dir = os.path.expanduser(config_dir if config_dir is not None else CONFIG_DIR)
+    out = [(default_class_guide_path(), False)]
+    global_guide = os.path.join(base_dir, "classes.md")
+    if os.path.isfile(global_guide):
+        out.append((global_guide, True))
+    git_root = find_git_root(cwd)
+    if git_root:
+        project_guide = os.path.join(git_root, ".delegate", "classes.md")
+        if os.path.isfile(project_guide):
+            out.append((project_guide, True))
+    return out
+
+
+def check_class_guides(classes, guides):
+    """Validate the Class guides together against the effective routing's
+    Classes: every Class has a section in some guide, and every overlay
+    section names a Class with a Range. Raises CatalogError naming the Class;
+    returns {class: the guide that holds its section}."""
+    found = {}
+    for path, overlay in guides:
+        text = validate_guide(path, overlay=overlay, classes=classes if overlay else None)
+        names = validate_guide_text(text, source=path, overlay=overlay,
+                                    classes=classes if overlay else None)
+        for name in names:
+            found.setdefault(name, path)
+    for name in classes:
+        if name not in found:
+            paths = ", ".join(path for path, _ in guides)
+            raise CatalogError(
+                f"classes: class '{name}' has a floor and a ceiling in routing.json but "
+                f"no '## {name}' section in any Class guide ({paths})"
+            )
+    return found
 
 
 def check_file(path, partial=False):
@@ -1408,7 +1528,7 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
             src = sources.get(k, "")
             print(f"{k}: {routing[k]}  {src}")
     if "classes" in routing and isinstance(routing["classes"], dict):
-        for cls in CLASSES:
+        for cls in class_names(routing):
             if cls in routing["classes"]:
                 c_val = routing["classes"][cls]
                 if isinstance(c_val, dict):
@@ -1947,9 +2067,10 @@ def _plan_set(field, value, scope, lanes_doc, routing_doc, project_doc,
 
 def _plan_range(cls, floor, ceiling, scope, lanes_doc, routing_doc, project_doc,
                 project_lanes_doc=None):
-    if cls not in CLASSES:
+    if not CLASS_NAME.match(cls):
         raise CatalogError(
-            f"unknown class '{cls}'; must be one of {', '.join(CLASSES)}"
+            f"class '{cls}': a class name is lower-case letters, digits and single "
+            "hyphens, starting with a letter"
         )
     if type(floor) is not int or type(ceiling) is not int:
         raise CatalogError(
@@ -1972,13 +2093,15 @@ def _plan_range(cls, floor, ceiling, scope, lanes_doc, routing_doc, project_doc,
         proposed_project["classes"].setdefault(cls, {})
         proposed_project["classes"][cls]["floor"] = floor
         proposed_project["classes"][cls]["ceiling"] = ceiling
-    original_global = copy.deepcopy(routing_doc.get("classes", {}).get(cls, {}))
+    original_global = copy.deepcopy(
+        routing_doc.get("classes", {}).get(cls, default_class_ranges().get(cls, {})))
     if project_doc and "classes" in project_doc and cls in project_doc.get("classes", {}):
         original_effective = copy.deepcopy(original_global)
         original_effective.update(project_doc["classes"][cls])
     else:
         original_effective = copy.deepcopy(original_global)
-    resulting_global = copy.deepcopy(proposed_routing.get("classes", {}).get(cls, {}))
+    resulting_global = copy.deepcopy(
+        proposed_routing.get("classes", {}).get(cls, default_class_ranges().get(cls, {})))
     if proposed_project and "classes" in proposed_project and cls in proposed_project.get("classes", {}):
         resulting_effective = copy.deepcopy(resulting_global)
         resulting_effective.update(proposed_project["classes"][cls])
@@ -2336,8 +2459,11 @@ def main(argv=None):
     p_guide.add_argument(
         "--overlay",
         action="store_true",
-        help="project overlay: class sections must be a subset of CLASSES",
+        help="a global or project overlay: class sections name Classes the routing defines",
     )
+    p_guide.add_argument("--cwd", default=None, help="working directory to find git root from")
+    p_guide.add_argument("--config-dir", default=None,
+                         help="config directory containing routing.json and classes.md")
 
     p_fmt = sub.add_parser("fmt", help="format and validate a catalog or routing file")
     p_fmt.add_argument("file", help="path to file to format")
@@ -2391,11 +2517,20 @@ def main(argv=None):
             # so that `ok: <file>` stays the whole of this command's stdout.
             for line in meter_dependency_lines(doc.get("lanes"), names=True):
                 sys.stderr.write(f"warning: {line}\n")
+            if doc.get("version") == ROUTING_VERSION:
+                check_routing_guides(args.file, doc)
             print(f"ok: {args.file}")
         elif args.cmd == "check-guide":
-            guide_path = args.file if args.file is not None else default_class_guide_path()
-            validate_guide(guide_path, overlay=args.overlay)
-            print(f"ok: {guide_path}")
+            classes = _effective_class_names(args.cwd, args.config_dir)
+            if args.file is not None:
+                validate_guide(args.file, overlay=args.overlay,
+                               classes=classes if args.overlay else None)
+                print(f"ok: {args.file}")
+            else:
+                guides = guide_files(cwd=args.cwd, config_dir=args.config_dir)
+                check_class_guides(classes, guides)
+                for path, _overlay in guides:
+                    print(f"ok: {path}")
         elif args.cmd == "fmt":
             fmt_file(args.file, partial=args.partial)
             print(f"formatted: {args.file}")

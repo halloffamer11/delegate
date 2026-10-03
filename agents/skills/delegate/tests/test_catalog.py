@@ -335,13 +335,13 @@ with tempfile.TemporaryDirectory() as td:
         msg,
     )
 
-# 2.15 unknown class in classes
+# 2.15 a class name that could not be a flag or a guide heading
 doc = copy.deepcopy(routing_sample)
 doc["classes"]["invalid_class"] = {"floor": 1, "ceiling": 2}
 msg = check_catalog_error(catalog.validate_routing, doc)
 record(
-    "reject: unknown class in classes",
-    bool(msg and "invalid_class" in msg and "unknown class" in msg),
+    "reject: a class name that is not lower-case words joined by hyphens",
+    bool(msg and "invalid_class" in msg and "class name" in msg),
     msg,
 )
 
@@ -2853,5 +2853,117 @@ with tempfile.TemporaryDirectory() as which_tmp:
         and [r.get("note") for r in absent_row] == ["absent"],
         f"answers={answers} present={present} codex_row={absent_row}",
     )
+
+# 19. Classes are data (any-harness ticket 16): the shipped five are defaults,
+# a catalog adds its own with a Range and a guide section, validated together.
+import rank  # noqa: E402
+
+TRIAGE_GUIDE = "# Machine classes\n\n## triage\n\nSort incoming reports into buckets.\n"
+
+
+def class_world(td, routing_classes, guide=None, project=None, project_guide=None):
+    config = os.path.join(td, "config")
+    os.makedirs(config)
+    shutil.copy(os.path.join(SAMPLES_DIR, "lanes.json"), config)
+    routing = copy.deepcopy(routing_sample)
+    if routing_classes is None:
+        routing.pop("classes")
+    else:
+        routing["classes"] = routing_classes
+    catalog.write_json(os.path.join(config, "routing.json"), routing)
+    if guide is not None:
+        with open(os.path.join(config, "classes.md"), "w") as f:
+            f.write(guide)
+    cwd = os.path.join(td, "proj")
+    os.makedirs(os.path.join(cwd, ".git"))
+    if project is not None or project_guide is not None:
+        os.makedirs(os.path.join(cwd, ".delegate"))
+    if project is not None:
+        catalog.write_json(os.path.join(cwd, ".delegate", "routing.json"), project)
+    if project_guide is not None:
+        with open(os.path.join(cwd, ".delegate", "classes.md"), "w") as f:
+            f.write(project_guide)
+    return config, cwd
+
+
+def catalog_cli(*args, home):
+    env = dict(os.environ, HOME=home)
+    return subprocess.run([sys.executable, CATALOG_PY, *args], capture_output=True, text=True, env=env)
+
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    record("19.1 a catalog that defines no Class gets the shipped five with the sample Ranges",
+           catalog.class_names(cat["routing"]) == list(catalog.CLASSES)
+           and cat["routing"]["classes"] == routing_sample["classes"]
+           and cat["sources"]["classes.review.floor"] == catalog.DEFAULT_CLASSES_SOURCE,
+           repr(cat["routing"]["classes"]))
+    picks = {c: rank.rank(c, cat, {}, set(catalog.HARNESSES))[0]["lane"] for c in catalog.CLASSES}
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, copy.deepcopy(routing_sample["classes"]))
+    cat_full = catalog.load_catalog(cwd=cwd, config_dir=config)
+    picks_full = {c: rank.rank(c, cat_full, {}, set(catalog.HARNESSES))[0]["lane"] for c in catalog.CLASSES}
+record("19.2 the shipped Classes rank the same whether the catalog writes them or not",
+       picks == picks_full, f"{picks} vs {picks_full}")
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, {"review": {"floor": 2, "ceiling": 3},
+                                   "triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    rows = rank.rank("triage", cat, {}, set(catalog.HARNESSES))
+    record("19.3 a global Class extends the defaults and rank accepts it",
+           catalog.class_names(cat["routing"]) == list(catalog.CLASSES) + ["triage"]
+           and cat["routing"]["classes"]["review"] == {"floor": 2, "ceiling": 3}
+           and cat["routing"]["classes"]["scout"] == routing_sample["classes"]["scout"]
+           and rows and all(r["tier"] <= 2 for r in rows if r["pick"]),
+           repr(cat["routing"]["classes"]))
+    res = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "triage",
+                          "--config-dir", config, "--cwd", cwd, "--harnesses", ",".join(catalog.HARNESSES),
+                          "--meters", os.path.join(HERE, "fixture", "meters.json")],
+                         capture_output=True, text=True)
+    res_bad = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "ghost",
+                              "--config-dir", config, "--cwd", cwd],
+                             capture_output=True, text=True)
+    record("19.4 rank.py ranks a custom Class and refuses one with no Range",
+           res.returncode == 0 and "triage" in res.stdout
+           and res_bad.returncode == 2 and "ghost" in res_bad.stderr and "triage" in res_bad.stderr,
+           res.stdout + res.stderr + res_bad.stderr)
+    guide_ok = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    check_ok = catalog_cli("check", os.path.join(config, "routing.json"), home=td)
+    record("19.5 check-guide and check accept a Class with a Range and a guide section",
+           guide_ok.returncode == 0 and f"ok: {os.path.join(config, 'classes.md')}" in guide_ok.stdout
+           and check_ok.returncode == 0,
+           guide_ok.stdout + guide_ok.stderr + check_ok.stderr)
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}})
+    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    check_res = catalog_cli("check", os.path.join(config, "routing.json"), home=td)
+    record("19.6 a Class with no guide section is rejected by check-guide and check, by name",
+           guide_res.returncode == 1 and "'triage'" in guide_res.stderr and "## triage" in guide_res.stderr
+           and check_res.returncode == 1 and "'triage'" in check_res.stderr,
+           guide_res.stderr + check_res.stderr)
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None, guide=TRIAGE_GUIDE)
+    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    record("19.7 a guide section for a Class with no Range is rejected, by name",
+           guide_res.returncode == 1 and "triage" in guide_res.stderr and "routing.json" in guide_res.stderr,
+           guide_res.stderr)
+
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None, project={"classes": {"triage": {"floor": 1, "ceiling": 2}}},
+                              project_guide=TRIAGE_GUIDE)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    guide_res = catalog_cli("check-guide", "--config-dir", config, "--cwd", cwd, home=td)
+    record("19.8 a project adds a Class with its own Range and guide",
+           "triage" in catalog.class_names(cat["routing"]) and guide_res.returncode == 0,
+           guide_res.stdout + guide_res.stderr)
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, None, project={"classes": {"triage": {"floor": 1}}})
+    msg = check_catalog_error(catalog.load_catalog, cwd=cwd, config_dir=config)
+    record("19.9 a project Class with no ceiling is rejected, by name",
+           bool(msg and "triage" in msg and "ceiling" in msg), msg)
 
 sys.exit(1 if fails else 0)

@@ -2981,4 +2981,30 @@ try:
 except Exception as e:
     record("79 the harnesses page at 80x16 shows every harness row", False, repr(e))
 
+# 80. Classes are data (ticket 16): a catalog with no classes shows the shipped
+# five with their default Ranges; a Class it adds is on the routing page and
+# its +/- edits the right Class.
+try:
+    bare = copy.deepcopy(ROUTING)
+    bare.pop("classes", None)
+    bare_w = Wizard(copy.deepcopy(LANES), bare, None, DISCOVERED, "/tmp/lanes.json",
+                    "/tmp/routing.json", class_guide={})
+    custom = copy.deepcopy(ROUTING)
+    custom["classes"]["triage"] = {"floor": 1, "ceiling": 2}
+    w = Wizard(copy.deepcopy(LANES), custom, None, DISCOVERED, "/tmp/lanes.json",
+               "/tmp/routing.json", class_guide={"triage": "Sort incoming reports"})
+    w.screen = "routing"
+    w.cursor = len(catalog.CLASSES) * 2 + 1   # triage's ceiling
+    w.handle("plus")
+    headings = [r["cells"][0] for r in w._routing_rows() if not r["cells"][0].startswith("  ")]
+    record("80 the wizard shows the shipped Classes by default and edits a Class the catalog adds",
+           bare_w.classes == list(catalog.CLASSES)
+           and set(bare_w.routing_doc["classes"]) == set(catalog.CLASSES)
+           and w.classes == list(catalog.CLASSES) + ["triage"]
+           and "triage" in headings
+           and w.routing_doc["classes"]["triage"] == {"floor": 1, "ceiling": 3},
+           f"{bare_w.classes} {headings} {w.routing_doc['classes'].get('triage')}")
+except Exception as e:
+    record("80 the wizard shows the shipped Classes by default", False, repr(e))
+
 sys.exit(1 if fails else 0)
