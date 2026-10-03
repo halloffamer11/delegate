@@ -53,41 +53,39 @@ class Codex(Harness):
             })
         return models
 
-    def probe(self):
+    def read_meters(self):
         import usage
-        if not usage.which(self.name): return [usage.lane(self.name, None, note="absent")]
+        p = subprocess.Popen(["codex", "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True)
+        def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+        def recv(i, timeout=20):
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                line = p.stdout.readline()
+                if not line: break
+                try: m = json.loads(line)
+                except ValueError: continue
+                if m.get("id") == i: return m
+            return None
         try:
-            p = subprocess.Popen(["codex", "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, text=True)
-            def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
-            def recv(i, timeout=20):
-                t0 = time.time()
-                while time.time() - t0 < timeout:
-                    line = p.stdout.readline()
-                    if not line: break
-                    try: m = json.loads(line)
-                    except ValueError: continue
-                    if m.get("id") == i: return m
-                return None
             send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "delegate-usage", "version": "0.1"}}})
             if not recv(1): raise RuntimeError("no initialize response")
             send({"method": "initialized"}); time.sleep(0.5)
             send({"id": 2, "method": "account/rateLimits/read", "params": {}})
             m = recv(2)
+        finally:
             p.terminate()
-            rl = (m or {}).get("result", {}).get("rateLimits") or {}
-            def win(w): return (None, None) if not w else (1 - w["usedPercent"] / 100.0, w.get("resetsAt"))
-            # codex labels windows primary/secondary; identify by duration when present
-            wins = {}
-            for key in ("primary", "secondary"):
-                w = rl.get(key)
-                if not w: continue
-                mins = w.get("windowDurationMins") or 0
-                wins["weekly" if mins >= 24 * 60 else "5h"] = win(w)
-            f5, r5 = wins.get("5h", (None, None)); fw, rw = wins.get("weekly", (None, None))
-            return [usage.lane(self.name, None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
-        except Exception as e:  # noqa
-            return [usage.lane(self.name, None, note=f"probe failed: {e}")]
+        rl = (m or {}).get("result", {}).get("rateLimits") or {}
+        def win(w): return (None, None) if not w else (1 - w["usedPercent"] / 100.0, w.get("resetsAt"))
+        # codex labels windows primary/secondary; identify by duration when present
+        wins = {}
+        for key in ("primary", "secondary"):
+            w = rl.get(key)
+            if not w: continue
+            mins = w.get("windowDurationMins") or 0
+            wins["weekly" if mins >= 24 * 60 else "5h"] = win(w)
+        f5, r5 = wins.get("5h", (None, None)); fw, rw = wins.get("weekly", (None, None))
+        return [usage.lane(self.name, None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
 
     def run_args(self, effort, timeout, write_dir):
         args = ["--effort", effort, "--timeout", timeout, "--skip-git-repo-check"]

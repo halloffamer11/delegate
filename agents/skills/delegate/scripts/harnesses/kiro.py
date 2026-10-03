@@ -34,7 +34,6 @@ class Kiro(Harness):
     name = "kiro"
     binary = "kiro-cli"
     efforts = ("low", "medium", "high", "xhigh", "max")
-    any_vendor = True
     list_command = ["kiro-cli", "chat", "--list-models", "--format", "json"]
     fixture_file = "kiro-models.json"
     # Kiro's first Lanes have no Lane on the harness to copy a Meter, a weight
@@ -45,6 +44,10 @@ class Kiro(Harness):
                               "note": "UNMEASURED: plan and price_month assumed; no usage "
                                       "source, so Remaining is unknown"})
     starter_lane = {"meter_weight": 1, "timeout": "30m"}
+
+    def owns(self, slug):
+        """Kiro serves every vendor's models on its own Meter, so all are its own."""
+        return True
 
     def parse_models(self, raw):
         """Models from `kiro-cli chat --list-models --format json`: a list, or

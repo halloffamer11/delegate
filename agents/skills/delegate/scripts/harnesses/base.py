@@ -6,6 +6,9 @@ are listed and parsed, how its Meters are probed, and the relay flags a run on
 it takes. The rest of delegate asks the registry (`harnesses.get(name)`) and
 never names a harness itself.
 """
+import copy
+import os
+import shutil
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # The same words longest first, for a pattern that reads an effort off the end
@@ -30,15 +33,12 @@ class Harness:
     # `gemini-3.8-flash-high`), so a Lane's model names its effort and an
     # effort override is ignored.
     effort_in_slug = False
-    # The first word of the harness's own vendor's model slugs. The refresh
-    # proposes Lanes for the harness's own vendor's models only.
+    # The first word of the harness's own vendor's model slugs (`owns`).
     vendor = None
-    # True for a harness that serves every vendor's models on its own Meter
-    # (Kiro): the refresh proposes Lanes for all of them.
-    any_vendor = False
     # For a harness the catalog may have no Lane on yet: (meter name, meter
     # record without `harness`) and the weight and timeout its first Lanes
-    # start from. None means the refresh adds no Lane until one exists.
+    # start from (`starter`). None means the refresh adds no Lane until one
+    # exists.
     starter_meter = None
     starter_lane = None
     # The command that lists models (or, for a harness with no list command,
@@ -46,16 +46,10 @@ class Harness:
     # fixture file that stands in for its output in tests.
     list_command = None
     fixture_file = None
-    # True when the harness has no list command, so its models are the ones
-    # the catalog names by hand, and newer ones come from the benchmark rows'
-    # published names (`published_name`).
+    # True when the harness has no list command. Only the registry reads it,
+    # to put such a harness last in `discovery_order`; everything else asks
+    # the adapter's verbs (`models`, `generation`, `present_in`).
     catalog_models = False
-    # For a catalog_models harness: a regex a benchmark row's published name
-    # must fully match to name one of its models. Group 1 is the level word and
-    # group 2 the version, e.g. `Claude Opus 5.5`.
-    published_name = None
-    # What `discover.py --efforts` adds when a model takes no effort level.
-    no_effort_note = "The harness runs this model with no effort level."
     # The delegate-skills relay directory that runs a Lane on this harness.
     relay = None
 
@@ -72,16 +66,57 @@ class Harness:
 
     # -- discovery ---------------------------------------------------------
 
+    def installed(self):
+        """Whether this harness's CLI is on PATH, by the binary it names. The
+        one answer to the question: ranking, probes and dispatch all ask here."""
+        return shutil.which(self.binary) is not None
+
+    def present_in(self, fixture_dir):
+        """Whether discovery from a fixture directory counts this harness as
+        present: its list command's fixture is there."""
+        return os.path.isfile(os.path.join(fixture_dir, self.fixture_file))
+
+    def models(self, raw, error, lanes):
+        """(models, error, complete) for discovery.
+
+        `raw` and `error` are what the list command printed, or why it could
+        not be read; `lanes` are the catalog's Lanes on this harness, {name:
+        lane}. Each model is a dict with `slug`, `display_name` and `efforts`.
+        `complete` says the list is everything the harness runs, so a Lane
+        whose model is not on it is on a retired model.
+        """
+        if error is not None:
+            return [], error, True
+        try:
+            return self.parse_models(raw), None, True
+        except Exception as e:
+            return [], f"unparseable output: {e}", True
+
     def parse_models(self, raw):
         """Models from the list command's output: dicts with `slug`,
-        `display_name` and `efforts`. A catalog_models harness has none."""
+        `display_name` and `efforts`."""
         raise NotImplementedError(f"{self.name} has no model list")
 
-    def efforts_from_help(self, raw):
-        """For a catalog_models harness, the effort words its list command's
-        output names, in order, or []. A word delegate does not know stays in,
-        so the refresh can name it (`split_efforts`)."""
-        return []
+    def generation(self, models, published_names):
+        """The models the refresh works from, given the ones discovery found
+        on this harness (each with `level`, `version` and `superseded`) and the
+        names the benchmark rows publish. A harness whose list is complete
+        works from its list as it is."""
+        return [copy.deepcopy(item) for item in models]
+
+    def owns(self, slug):
+        """True for a model of the harness's own vendor: the refresh proposes
+        Lanes for these only (`gpt-*` on codex, `gemini-*` on agy)."""
+        return bool(self.vendor) and (slug or "").split("-")[0] == self.vendor
+
+    def starter(self):
+        """(meter name, meter record, lane record) the first Lane on this
+        harness starts from when the catalog has no Lane on it to copy, or
+        None when the refresh adds no Lane until one exists."""
+        if self.starter_meter is None or self.starter_lane is None:
+            return None
+        meter_name, meter = self.starter_meter
+        return meter_name, copy.deepcopy(meter), copy.deepcopy(self.starter_lane)
 
     def split_efforts(self, words):
         """(efforts, unknown) for the effort words a harness lists for one model:
@@ -125,13 +160,23 @@ class Harness:
 
     # -- meters ------------------------------------------------------------
 
-    def probe(self):
-        """The harness's Meter rows, as `usage.lane` builds them. A harness
-        with no usage source returns one row with an unknown Remaining, which
-        the Gate never vetoes."""
+    def meters(self):
+        """The harness's Meter rows, as `usage.lane` builds them. An absent CLI
+        gives one `absent` row and a probe that raises one `probe failed` row,
+        here for every harness; each adapter's `read_meters` reads the rest.
+        Every such row has an unknown Remaining, which the Gate never vetoes."""
         import usage
-        if not usage.which(self.name):
+        if not self.installed():
             return [usage.lane(self.name, None, note="absent")]
+        try:
+            return self.read_meters()
+        except Exception as e:  # noqa
+            return [usage.lane(self.name, None, note=f"probe failed: {e}")]
+
+    def read_meters(self):
+        """The Meter rows the installed CLI reports. A harness with no usage
+        source reports one row with an unknown Remaining."""
+        import usage
         return [usage.lane(self.name, None, note="no usage source")]
 
     # (old, new) note texts a cached Meter row is read with: a note an
@@ -139,6 +184,26 @@ class Harness:
     note_renames = ()
 
     # -- dispatch ----------------------------------------------------------
+
+    def effort_for(self, lane, override):
+        """(effort, ignored) for one run on `lane` with an `--effort` override
+        or None: the effort the run takes, and why an override was not used,
+        or None. Raises ValueError for an override the harness does not offer,
+        which is refused rather than passed to a CLI that may run something
+        else (ticket 19). A word delegate does not know passes through, for
+        the caller's own check to name."""
+        if override in EFFORTS and override not in self.efforts:
+            raise ValueError(f"{self.name} does not offer effort '{override}'")
+        if override is None:
+            return lane["effort"], None
+        if self.effort_in_slug:
+            return lane["effort"], f"{self.name} carries effort in the model name"
+        return override, None
+
+    def blocked_reason(self, run_dir):
+        """Why a run the relay calls completed did not finish, read from the
+        run directory, or None. Only a harness whose events say so has one."""
+        return None
 
     def run_args(self, effort, timeout, write_dir):
         """(relay flags, env overrides or None) for one run, after the

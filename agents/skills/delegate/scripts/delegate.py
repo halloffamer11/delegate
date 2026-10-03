@@ -51,7 +51,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, HARNESS_EFFORTS, meters_enabled
+from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, meters_enabled
 import catalog
 import events
 import harnesses
@@ -214,36 +214,27 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         sys.stderr.write(f"delegate: lane '{lane_name}' runs on {harness}, not {harness_filter}\n")
         sys.exit(2)
 
-    # An override the lane's harness does not offer is refused, not passed on
-    # to a CLI that may silently run something else (ticket 19). An agy
-    # override inside agy's list is still only ignored: agy carries the effort
-    # in the model name.
-    if effort_arg in EFFORTS and effort_arg not in HARNESS_EFFORTS[harness]:
-        sys.stderr.write(
-            f"delegate: {harness} does not offer effort '{effort_arg}' on {lane_name}; "
-            f"{harness} offers {', '.join(HARNESS_EFFORTS[harness])}\n"
-        )
+    # The harness decides what an override does (`Harness.effort_for`): one it
+    # does not offer is refused, and one a harness cannot take is ignored.
+    adapter = harnesses.get(harness)
+    try:
+        effort, ignored = adapter.effort_for(lane_data, effort_arg)
+    except ValueError as e:
+        sys.stderr.write(f"delegate: {e} on {lane_name}; {harness} offers {', '.join(adapter.efforts)}\n")
         sys.exit(2)
-    if harnesses.get(harness).effort_in_slug and effort_arg is not None:
-        sys.stderr.write(
-            f"delegate: effort override ignored on {lane_name}; {harness} carries effort in the model name\n"
-        )
-        effort = lane_data["effort"]
-    elif orchestrators.is_native(profile, harness) and effort_arg is not None and effort_arg != lane_data["effort"]:
+    if (ignored is None and orchestrators.is_native(profile, harness)
+            and effort_arg is not None and effort_arg != lane_data["effort"]):
         # A native lane runs as its lane-*.md agent, whose file fixes the effort,
         # so an override would be recorded and never used.
-        sys.stderr.write(
-            f"delegate: effort override ignored on {lane_name}; a native lane runs at its agent file's "
-            f"effort, {lane_data['effort']}\n"
-        )
         effort = lane_data["effort"]
-    else:
-        effort = effort_arg if effort_arg is not None else lane_data["effort"]
+        ignored = f"a native lane runs at its agent file's effort, {effort}"
+    if ignored:
+        sys.stderr.write(f"delegate: effort override ignored on {lane_name}; {ignored}\n")
     if effort not in EFFORTS:
         sys.stderr.write(f"delegate: invalid effort '{effort}'; must be one of {', '.join(EFFORTS)}\n")
         sys.exit(2)
 
-    if not catalog.cli_installed(harness):
+    if not adapter.installed():
         sys.stderr.write(
             f"delegate: {harness} CLI is not on PATH; install it or pick a lane on another harness\n"
         )
@@ -464,44 +455,7 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
     return relay_exit, secs
 
 
-def gate_cancelled_tool(run_dir):
-    """The tool a permission gate cancelled, if that is how the run ended.
-
-    grok's event stream records a gate refusal as a failed tool_call_update whose
-    text says the execution was cancelled, then an end event with
-    stopReason=cancelled. Both must hold: a cancel with no cancelled tool is some
-    other stop. Returns the tool name ("" if the call was never announced), or
-    None when the run did not end at the gate. Other harnesses' event shapes do
-    not match and return None.
-    """
-    events_path = os.path.join(run_dir, "events.jsonl")
-    if not os.path.isfile(events_path):
-        return None
-    tool_names = {}
-    cancelled_tool = None
-    stop_reason = None
-    with open(events_path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(ev, dict):
-                continue
-            kind = ev.get("type")
-            if kind == "tool_call":
-                tool_names[ev.get("toolCallId")] = ev.get("toolName") or ev.get("title") or ""
-            elif kind == "tool_call_update" and ev.get("status") == "failed":
-                if "cancel" in json.dumps(ev.get("content")).lower():
-                    cancelled_tool = tool_names.get(ev.get("toolCallId"), "")
-            elif kind == "end":
-                stop_reason = ev.get("stopReason")
-    if stop_reason == "cancelled" and cancelled_tool is not None:
-        return cancelled_tool
-    return None
-
-
-def map_result(run_dir, lane_timeout, relay_exit, write_dir):
+def map_result(run_dir, lane_timeout, relay_exit, write_dir, harness):
     result_path = os.path.join(run_dir, "result.json")
     stderr_path = os.path.join(run_dir, "relay.stderr")
 
@@ -542,7 +496,9 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
         if relay_status == "completed":
             block = find_return_block(final_message)
-            gated_tool = gate_cancelled_tool(run_dir) if block is None else None
+            # a harness whose events say why the run stopped short has a
+            # reason a completed relay status hides (`Harness.blocked_reason`)
+            stopped = harnesses.get(harness).blocked_reason(run_dir) if block is None else None
             if block is not None:
                 status = block.get("status")
                 deliv = block.get("deliverable", "")
@@ -575,15 +531,11 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
                 if status == "blocked":
                     reason = deliverable
-            elif gated_tool is not None:
-                # The relay says completed, but a gated tool was refused and
-                # the turn ended there, so the worker did not finish. Reading
-                # it as partial hides the cause (ticket 14). As on timeout, the
-                # final message stays in final.txt.
+            elif stopped is not None:
+                # The relay says completed, but the worker did not finish. As
+                # on timeout, the final message stays in final.txt.
                 status = "blocked"
-                reason = "permission gate cancelled the run"
-                if gated_tool:
-                    reason += f" at {gated_tool}"
+                reason = stopped
                 deliverable = f"blocked: {reason}"
             elif final_message.strip():
                 status = "partial"
@@ -699,6 +651,7 @@ def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, p
         lane_timeout=lane_timeout,
         relay_exit=relay_exit,
         write_dir=write,
+        harness=harness,
     )
 
     # Update secs in dispatch.json

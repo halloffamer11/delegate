@@ -104,12 +104,16 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   that orchestrator uses, kept beside it and linked by `make install` (`orchestrators.py agents`):
   Claude's `claude/courier.md`, the glue a Claude Workflow script needs because it has no shell.
 - `scripts/harnesses/`: the harness registry, one module per harness behind one interface
-  (`base.Harness`): binary, efforts, model listing and parsing, the Meter probe, relay flags. Every
-  other script iterates the registry; adding a harness is one module and one `REGISTRY` entry.
-  `kiro.py` (ticket 15) is the first harness whose binary is not its name (`kiro-cli`) and that
-  serves every vendor's models (`any_vendor`): the refresh offers all its current models, and its
-  first Lanes, with no Lane on the harness to copy from, start from the adapter's `starter_lane` and
-  add its `starter_meter` (plan and price assumed, Remaining unknown, so the Gate never vetoes it).
+  (`base.Harness`). Callers ask the adapter's verbs and branch on no harness flag (ticket 23):
+  `installed()`, `meters()` (the absent and failed rows live there once; each adapter's
+  `read_meters` reads the rest), `models()` and `generation()` (the Claude adapter's catalog plus
+  benchmark-names strategy), `owns(slug)`, `effort_for(lane, override)`, `blocked_reason(run_dir)`
+  (grok's gate cancel), `starter()`, and the relay flags. Every other script iterates the registry;
+  adding a harness is one module and one `REGISTRY` entry. `kiro.py` (ticket 15) is the first
+  harness whose binary is not its name (`kiro-cli`) and that serves every vendor's models (its
+  `owns` is always true): the refresh offers all its current models, and its first Lanes, with no
+  Lane on the harness to copy from, start from the adapter's `starter()` (plan and price assumed,
+  Remaining unknown, so the Gate never vetoes it).
   Its listing's JSON field names are not documented, so `parse_models` reads the plausible
   spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing
   replaces it.
@@ -268,9 +272,10 @@ space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark move
 down one Tier; Tier 1 requires Carry to switch off.
 
 - `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their
-  efforts, and `--efforts <model>` for ready-to-paste lane stanzas per effort. Efforts come from
+  efforts, each from the adapter's `models()`. Efforts come from
   `codex debug models`, `claude --help`, the agy slug suffix (one model per slug family) and the
-  grok row of `catalog.HARNESS_EFFORTS`; a Haiku model gets none. It is the only thing that may say
+  grok adapter's `efforts`; a Haiku model gets none. A harness whose list is not everything it runs
+  (Claude Code) reports `complete: false`, and no Lane of it is reported retired. It is the only thing that may say
   an effort exists. The effort words are `harnesses.EFFORTS`, one list every script derives from;
   a word a harness lists that no lane on it may carry goes in the model's `unknown_efforts`
   (`Harness.split_efforts`). It also owns generation (ticket 33): `model_level` splits a slug into
@@ -336,8 +341,8 @@ tool auto-approval inside it (`--sandbox --dangerously-skip-permissions`), confi
 workspace. `--write` is no longer the workaround it was before 2026-09-10; do not reach for it to
 get agy's tools working. Note the ADS skill docs for agy still describe the old plan mode (ticket 14
 follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_result` returns
-`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; it
-recognises grok's event shape only (`gate_cancelled_tool`, fixture
+`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; the
+reason is the harness adapter's `blocked_reason`, which only grok's implements (fixture
 `tests/fixtures/dispatch/grok-gate-cancel/`).
 
 ## Browser use per harness

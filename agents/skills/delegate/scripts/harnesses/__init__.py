@@ -6,8 +6,6 @@ entry in REGISTRY. Everything else in delegate iterates the registry or asks
 `<model-effort>@<harness>` is spelled and split here too (`lane_name`,
 `split_lane`), the lowest module every script imports.
 """
-import shutil
-
 from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness  # noqa: F401
 from . import agy, claude, codex, grok, kiro
 
@@ -22,9 +20,16 @@ def get(name):
 
 
 def cli_installed(name):
-    """Whether this harness's CLI is on PATH, by the binary its adapter names."""
+    """Whether this harness's CLI is on PATH (`Harness.installed`); False for a
+    name no module defines."""
     h = get(name)
-    return h is not None and shutil.which(h.binary) is not None
+    return h is not None and h.installed()
+
+
+def vendor_words():
+    """The first words of the harnesses' own vendors' slugs: words that name a
+    whole family of models rather than one (`gpt`, `gemini`)."""
+    return tuple(h.vendor for h in REGISTRY if h.vendor)
 
 
 def discovery_order():

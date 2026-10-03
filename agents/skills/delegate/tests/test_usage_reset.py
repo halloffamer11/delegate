@@ -130,14 +130,13 @@ def main():
 
         # 4. Cached-only reads emit no meter event and launch no vendor probe.
         calls = []
-        originals = {h: h.probe for h in harnesses.REGISTRY}
         def boom(name):
             def _boom(*a, **k):
                 calls.append(name)
                 raise AssertionError(f"vendor probe {name}")
             return _boom
         for h in harnesses.REGISTRY:
-            h.probe = boom(h.name)
+            h.meters = boom(h.name)
         try:
             cached = load_cached(cache_path=cache_path)
             assert_true(cached.get("lanes")[0].get("remaining_weekly_model") == 0.59,
@@ -147,8 +146,8 @@ def main():
             assert_true(len(lines4) == 2, f"load_cached appended a meter event; count is {len(lines4)}")
             assert_true(calls == [], f"load_cached launched probes: {calls}")
         finally:
-            for h, probe in originals.items():
-                h.probe = probe
+            for h in harnesses.REGISTRY:
+                del h.meters
 
     # 5. Cache path: DELEGATE_CACHE wins, else CONSULT_CACHE, else default.
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -205,9 +204,9 @@ def main():
             {"name": "Gemini", "buckets": [
                 {"window": "5h", "remaining_fraction": 0.80, "reset_time": "2026-09-19T03:00:00Z"},
                 {"window": "weekly", "remaining_fraction": 0.90, "reset_time": "2026-09-24T03:00:00Z"}]}]}}})
-    with patch.object(usage, "which", return_value=True), \
+    with patch.object(harnesses.get("agy"), "installed", return_value=True), \
          patch.object(usage, "run", return_value=_R()):
-        probed_agy = harnesses.get("agy").probe()
+        probed_agy = harnesses.get("agy").meters()
     assert_true(len(probed_agy) == 1 and probed_agy[0]["r"] == 0.80
                 and probed_agy[0]["pace"] is not None,
                 f"a fresh agy probe must give Remaining and Pace: {probed_agy}")
@@ -275,10 +274,10 @@ def main():
     import subprocess
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "clock-cache.json")
-        with patch.object(harnesses.get("codex"), "probe", return_value=[]), \
-             patch.object(harnesses.get("agy"), "probe", return_value=[]), \
-             patch.object(harnesses.get("claude"), "probe", return_value=[]), \
-             patch.object(harnesses.get("grok"), "probe", return_value=[]), \
+        with patch.object(harnesses.get("codex"), "meters", return_value=[]), \
+             patch.object(harnesses.get("agy"), "meters", return_value=[]), \
+             patch.object(harnesses.get("claude"), "meters", return_value=[]), \
+             patch.object(harnesses.get("grok"), "meters", return_value=[]), \
              patch.object(usage, "append"), \
              patch.object(usage.time, "time", return_value=10000):
             first = usage.probe(refresh=True, cache_path=path)

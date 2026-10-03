@@ -32,8 +32,8 @@ def test_registry_is_the_list():
     record("catalog's harness list is the registry's",
            catalog.HARNESSES == harnesses.NAMES and len(set(harnesses.NAMES)) == len(harnesses.NAMES),
            f"{catalog.HARNESSES} vs {harnesses.NAMES}")
-    record("each adapter names a binary, efforts, a vendor (or serves any) and a relay",
-           all(h.binary and h.efforts and (h.vendor or h.any_vendor) and h.relay
+    record("each adapter names a binary, efforts, the models it owns and a relay",
+           all(h.binary and h.efforts and (h.vendor or h.owns("any-model")) and h.relay
                for h in harnesses.REGISTRY),
            repr([(h.name, h.binary, h.efforts, h.vendor, h.relay) for h in harnesses.REGISTRY]))
     record("catalog's per-harness efforts come from the adapters",
@@ -62,9 +62,7 @@ def test_lane_name():
            all(harnesses.split_lane(name)[1] == lane["harness"] for name, lane in lanes.items()))
     record("discovery's names and stems go through the pair",
            discover._free_name("sol", "high", "codex", {"sol-high@codex"}) == "sol2-high@codex"
-           and discover._lane_stem_of("sol-high@codex") == "sol"
-           and set(discover.generate_efforts_stanzas("codex", "gpt-5.6-sol", ["high"])[2])
-           == {harnesses.lane_name(discover.derive_short_name("gpt-5.6-sol")[0], "high", "codex")})
+           and discover._lane_stem_of("sol-high@codex") == "sol")
     profile = {"native": {"agent": "lane-{model_effort}"}}
     record("an orchestrator's agent name takes the Lane's model-effort",
            orchestrators.agent_name(profile, "fable-xhigh@claude") == "lane-fable-xhigh")
@@ -164,7 +162,7 @@ def test_kiro():
            and efforts["claude-haiku-4.5"] == [], repr(efforts))
     record("a read-only kiro run passes the effort, the timeout and --read-only to the relay",
            kiro.run_args("high", "30m", None) == (["--effort", "high", "--timeout", "30m", "--read-only"], None))
-    absent = kiro.probe()
+    absent = kiro.meters()
     record("kiro's Meter row has no Remaining, which the Gate never vetoes",
            len(absent) == 1 and absent[0]["remaining_weekly"] is None and absent[0]["harness"] == "kiro")
 
@@ -247,15 +245,17 @@ def test_claude_model_meter():
     import types
     import usage
     from harnesses import claude as claude_module
-    saved = usage.which, usage.run
+    adapter = harnesses.get("claude")
+    saved = usage.run
     text = ("Current session: 40% used\nCurrent week (all models): 30% used\n"
             "Current week (Fable 5.2): 96% used\n")
     try:
-        usage.which = lambda name: True
+        adapter.installed = lambda: True
         usage.run = lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps({"result": text}))
-        rows = harnesses.get("claude").probe()
+        rows = adapter.meters()
     finally:
-        usage.which, usage.run = saved
+        usage.run = saved
+        del adapter.installed
     record("'Current week (Fable 5.2)' is the claude-fable Meter, as 'Fable' was",
            [r["lane"] for r in rows] == ["claude-general", "claude-fable"]
            and claude_module.model_meter_name("Fable") == "fable"

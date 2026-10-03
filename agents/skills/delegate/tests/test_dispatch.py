@@ -1024,7 +1024,7 @@ def main():
         gate_reason = "permission gate cancelled the run at run_terminal_command"
 
         dir28a = stage_run("grok-gate-cancel", "28a")
-        out28a = delegate.map_result(dir28a, "40m", 0, None)
+        out28a = delegate.map_result(dir28a, "40m", 0, None, "grok")
         ret28a = json.load(open(os.path.join(dir28a, "return.json")))
         disp28a = json.load(open(os.path.join(dir28a, "dispatch.json")))
         ok28a = (
@@ -1040,7 +1040,7 @@ def main():
         # cancelled tool call keeps the old reading.
         dir28b = stage_run("grok-gate-cancel", "28b",
                            keep_event=lambda ev: not (ev.get("type") == "tool_call_update" and ev.get("status") == "failed"))
-        out28b = delegate.map_result(dir28b, "40m", 0, None)
+        out28b = delegate.map_result(dir28b, "40m", 0, None, "grok")
         ok28b = (
             out28b["status"] == "partial" and
             out28b["open_questions"] == ["no return block in final message"]
@@ -1049,7 +1049,7 @@ def main():
 
         # The gate is the better reason than an empty final message.
         dir28c = stage_run("grok-gate-cancel", "28c", final_message="")
-        out28c = delegate.map_result(dir28c, "40m", 0, None)
+        out28c = delegate.map_result(dir28c, "40m", 0, None, "grok")
         ok28c = (out28c["status"] == "blocked" and out28c["reason"] == gate_reason)
         record("28c. gate cancel with an empty final message names the gate", ok28c, f"out={out28c}")
 

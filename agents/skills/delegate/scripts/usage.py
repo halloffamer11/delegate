@@ -198,11 +198,6 @@ def load_cached(cache_path=None):
     except (OSError, ValueError):
         return {}
 
-# Whether a harness's CLI is installed is catalog's one answer, so a probe says
-# "absent" exactly when ranking does.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from catalog import cli_installed as which  # noqa: E402
-
 def run(cmd, timeout=60, stdin_data=None, cwd=None):
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=stdin_data, cwd=cwd)
@@ -268,14 +263,14 @@ def probe(refresh=False, max_age_min=None, cache_path=None):
     """Return a usage document, probing vendors when the cache is missing or stale.
 
     refresh=True always probes. A cache hit emits no meter event. Timeout and
-    per-harness failures stay inside each adapter's probe (unknown rows).
+    per-harness failures stay inside each adapter's `meters` (unknown rows).
     """
     ttl = TTL_MIN_DEFAULT if max_age_min is None else max_age_min
     d = None if refresh else load_cache(ttl, cache_path=cache_path)
     if d is None:
         lanes = []
         for h in harnesses.REGISTRY:
-            lanes += h.probe()
+            lanes += h.meters()
         now = time.time()
         d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
              "rollover_min": ROLLOVER_MIN, "lanes": lanes}

@@ -423,205 +423,6 @@ with tempfile.TemporaryDirectory() as td:
 
 
 # -------------------------------------------------------------
-# 13. discover.py --efforts gpt-6-astra: 6 stanzas, ultra enabled: false, basis reasons, exactly 1 price block
-res_astra = subprocess.run(
-    [
-        sys.executable, DISCOVER_PY,
-        "--fixture-dir", FIXTURES_DIR,
-        "--efforts", "gpt-6-astra",
-    ],
-    capture_output=True,
-    text=True,
-)
-out_astra = res_astra.stdout
-astra_stanzas = [
-    "astra-low@codex",
-    "astra-medium@codex",
-    "astra-high@codex",
-    "astra-xhigh@codex",
-    "astra-max@codex",
-    "astra-ultra@codex",
-]
-astra_has_all_stanzas = all(f'"{s}": {{' in out_astra for s in astra_stanzas)
-astra_one_price_block = (out_astra.count('"price": {') == 1)
-
-# Extract astra-ultra stanza text to verify enabled: false and basis reasons
-ultra_has_enabled_false = '"enabled": false' in out_astra
-ultra_basis_unscoreable = "no published source reports ultra" in out_astra or "unscoreable" in out_astra
-ultra_basis_preamble = (
-    "worker preamble" in out_astra
-    and "automatic task delegation" in out_astra
-    and "Do not delegate, spawn subagents, or call other agents" in out_astra
-)
-meter_weight_note = "meter_weight is a property of the plan, not the model" in out_astra
-
-astra_efforts_ok = (
-    res_astra.returncode == 0
-    and astra_has_all_stanzas
-    and astra_one_price_block
-    and ultra_has_enabled_false
-    and ultra_basis_unscoreable
-    and ultra_basis_preamble
-    and meter_weight_note
-)
-record(
-    "discover.py --efforts gpt-6-astra produces 6 stanzas with ultra disabled and exactly 1 price block",
-    astra_efforts_ok,
-    f"rc={res_astra.returncode}, price_blocks={out_astra.count(PRICE_KEY)}, stanzas={astra_has_all_stanzas}",
-)
-
-
-# -------------------------------------------------------------
-# 14. discover.py --efforts gpt-5.6-luna: 5 stanzas, no ultra, exactly 1 price block
-res_luna = subprocess.run(
-    [
-        sys.executable, DISCOVER_PY,
-        "--fixture-dir", FIXTURES_DIR,
-        "--efforts", "gpt-5.6-luna",
-    ],
-    capture_output=True,
-    text=True,
-)
-out_luna = res_luna.stdout
-luna_stanzas = [
-    "luna-low@codex",
-    "luna-medium@codex",
-    "luna-high@codex",
-    "luna-xhigh@codex",
-    "luna-max@codex",
-]
-luna_has_all_stanzas = all(f'"{s}": {{' in out_luna for s in luna_stanzas)
-luna_no_ultra = ("luna-ultra@codex" not in out_luna)
-luna_one_price_block = (out_luna.count('"price": {') == 1)
-
-luna_efforts_ok = (
-    res_luna.returncode == 0
-    and luna_has_all_stanzas
-    and luna_no_ultra
-    and luna_one_price_block
-)
-record(
-    "discover.py --efforts gpt-5.6-luna produces 5 stanzas with no ultra and exactly 1 price block",
-    luna_efforts_ok,
-    f"rc={res_luna.returncode}, price_blocks={out_luna.count(PRICE_KEY)}, stanzas={luna_has_all_stanzas}",
-)
-
-
-# -------------------------------------------------------------
-# 15. discover.py --efforts unknown model: plain message naming available models and exit 0
-res_unknown = subprocess.run(
-    [
-        sys.executable, DISCOVER_PY,
-        "--fixture-dir", FIXTURES_DIR,
-        "--efforts", "gpt-nonexistent-model",
-    ],
-    capture_output=True,
-    text=True,
-)
-out_unknown = res_unknown.stdout
-unknown_ok = (
-    res_unknown.returncode == 0
-    and "gpt-nonexistent-model" in out_unknown
-    and "not offered by any available harness" in out_unknown
-    and "Available models:" in out_unknown
-    and "gpt-6-astra" in out_unknown
-)
-record(
-    "discover.py --efforts unknown model exits 0 and names available models",
-    unknown_ok,
-    f"rc={res_unknown.returncode}, out={out_unknown[:200]}",
-)
-
-
-# -------------------------------------------------------------
-# 16. discover.py --efforts on an agy slug: its family's efforts, one stanza
-#     each, the effort in the model slug (ticket 19; until then agy offered no
-#     effort list and this printed the "does not offer" message, which 16b
-#     below still covers on a model with no effort suffix)
-res_agy_eff = subprocess.run(
-    [
-        sys.executable, DISCOVER_PY,
-        "--fixture-dir", FIXTURES_DIR,
-        "--efforts", "gemini-3.8-flash-high",
-    ],
-    capture_output=True,
-    text=True,
-)
-out_agy_eff = res_agy_eff.stdout
-agy_eff_ok = (
-    res_agy_eff.returncode == 0
-    and all(f'"flash-{e}@agy": {{' in out_agy_eff for e in ("low", "medium", "high"))
-    and all(f'"model": "gemini-3.8-flash-{e}"' in out_agy_eff for e in ("low", "medium", "high"))
-    and '"model": "gemini-3.8-flash",' not in out_agy_eff
-    and out_agy_eff.count('"price": {') == 1
-)
-record(
-    "discover.py --efforts on an agy slug prints a stanza per effort in its family, the effort in the slug",
-    agy_eff_ok,
-    f"rc={res_agy_eff.returncode}, out={out_agy_eff[:400]}",
-)
-
-# 16b. a model on a harness that offers it no effort: plain message and exit 0
-res_noeff = subprocess.run(
-    [sys.executable, DISCOVER_PY, "--fixture-dir", FIXTURES_DIR, "--efforts", "claude-sonnet-4-6"],
-    capture_output=True, text=True,
-)
-record(
-    "discover.py --efforts on an agy model with no effort suffix exits 0 and names available models",
-    res_noeff.returncode == 0
-    and "does not offer reasoning effort levels" in res_noeff.stdout
-    and "Available models on agy:" in res_noeff.stdout
-    and "gemini-3.8-flash" in res_noeff.stdout,
-    f"rc={res_noeff.returncode}, out={res_noeff.stdout[:300]}",
-)
-
-
-# -------------------------------------------------------------
-# 17. Pasteability test: paste generated gpt-6-astra stanzas into sample lanes.json copy and validate
-with tempfile.TemporaryDirectory() as td:
-    test_lanes_path = os.path.join(td, "lanes.json")
-    with open(os.path.join(SAMPLES_DIR, "lanes.json"), "r", encoding="utf-8") as f:
-        sample_doc = json.load(f)
-
-    # Extract stanzas JSON block from discover output
-    lines = []
-    capturing = False
-    for line in out_astra.splitlines():
-        if line.startswith('"astra-low@codex":'):
-            capturing = True
-        if capturing:
-            lines.append(line)
-    stanzas_json = "{\n" + "\n".join(lines) + "\n}"
-    parsed_stanzas = json.loads(stanzas_json)
-
-    # Fill human placeholders with plausible values
-    plausible_price = {"in": 10, "cache_read": 1.0, "cache_write": 12.5, "out": 50}
-    for lane_name, lane_def in parsed_stanzas.items():
-        lane_def["meter"] = "codex"
-        lane_def["meter_weight"] = 10
-        lane_def["timeout"] = "30m"
-        lane_def["tier"] = 3
-        lane_def["price"] = plausible_price
-        sample_doc["lanes"][lane_name] = lane_def
-
-    catalog.write_json(test_lanes_path, sample_doc)
-    res_check_paste = subprocess.run(
-        [sys.executable, CATALOG_PY, "check", test_lanes_path],
-        capture_output=True,
-        text=True,
-    )
-    paste_ok = (
-        res_check_paste.returncode == 0
-        and f"ok: {test_lanes_path}" in res_check_paste.stdout
-        and len(parsed_stanzas) == 6
-    )
-    record(
-        "pasting filled gpt-6-astra stanzas into lanes.json validates cleanly",
-        paste_ok,
-        f"rc={res_check_paste.returncode}, err={res_check_paste.stderr}",
-    )
-
-# -------------------------------------------------------------
 # 18. ticket 19: effort lists for claude, grok and agy
 with open(os.path.join(FIXTURES_DIR, "claude-help.txt"), encoding="utf-8") as f:
     claude_help = f.read()
@@ -632,12 +433,36 @@ record(
     and harnesses.get("claude").efforts_from_help("") == [],
     repr(harnesses.get("claude").efforts_from_help(claude_help)),
 )
+claude_adapter = harnesses.get("claude")
 record(
-    "when claude --help lists no effort the harness table stands in, and says so",
-    discover.help_efforts("claude", runner=lambda h: "  --effort <level>  Effort level\n")
-    == (list(catalog.HARNESS_EFFORTS["claude"]), "catalog.HARNESS_EFFORTS (claude --help listed none)")
-    and discover.help_efforts("claude", fixture_dir=FIXTURES_DIR)[1] == "claude --help",
-    repr(discover.help_efforts("claude", runner=lambda h: "")),
+    "when claude --help lists no effort, or cannot be read, the adapter's efforts stand in",
+    claude_adapter.help_efforts("  --effort <level>  Effort level\n", None)
+    == (list(claude_adapter.efforts), [])
+    and claude_adapter.help_efforts(None, "command failed") == (list(claude_adapter.efforts), [])
+    and claude_adapter.help_efforts(claude_help, None)[0] == ["low", "medium", "high", "xhigh", "max"],
+    repr(claude_adapter.help_efforts("", None)),
+)
+named, named_err, named_complete = claude_adapter.models(claude_help, None, {
+    "fable-xhigh@claude": {"harness": "claude", "model": "claude-fable-5-1", "effort": "xhigh"},
+    "fable-high@claude": {"harness": "claude", "model": "claude-fable-5-1", "effort": "high"},
+    "haiku-high@claude": {"harness": "claude", "model": "claude-haiku-4-5-20251001", "effort": "high"},
+})
+record(
+    "claude's models are the catalog's, one per model, Haiku with no effort, and never a complete list",
+    named_err is None and named_complete is False
+    and [m["slug"] for m in named] == ["claude-fable-5-1", "claude-haiku-4-5-20251001"]
+    and named[0]["efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    and named[1]["efforts"] == [] and named[0]["reason"] == "hand-named, undiscoverable",
+    repr(named),
+)
+res_no_efforts = subprocess.run(
+    [sys.executable, DISCOVER_PY, "--fixture-dir", FIXTURES_DIR, "--efforts", "gpt-6-astra"],
+    capture_output=True, text=True,
+)
+record(
+    "discover.py has no --efforts: the wizard's refresh proposes a new model's lanes",
+    res_no_efforts.returncode == 2 and "--efforts" in res_no_efforts.stderr,
+    res_no_efforts.stderr[-200:],
 )
 
 families = harnesses.get("agy").group(agy_models)
@@ -654,69 +479,6 @@ record(
     and by_slug["claude-sonnet-4-6"]["efforts"] == [],
     repr(families[:2]),
 )
-
-def efforts_cli(model):
-    res = subprocess.run(
-        [sys.executable, DISCOVER_PY, "--fixture-dir", FIXTURES_DIR,
-         "--config-dir", SAMPLES_DIR, "--efforts", model],
-        capture_output=True, text=True,
-    )
-    return res.returncode, res.stdout
-
-rc, out = efforts_cli("claude-opus-5")
-record(
-    "discover.py --efforts claude-opus-5 prints a stanza per claude effort, even with no opus lane",
-    rc == 0
-    and all(f'"opus-{e}@claude": {{' in out for e in ("low", "medium", "high", "xhigh", "max"))
-    and '"opus-ultra@claude"' not in out
-    and out.count('"price": {') == 1,
-    out[:300],
-)
-rc, out = efforts_cli("claude-fable-5-1")
-record(
-    "discover.py --efforts claude-fable-5-1 (a catalog lane model) prints five stanzas",
-    rc == 0 and all(f'"fable-{e}@claude": {{' in out for e in ("low", "medium", "high", "xhigh", "max")),
-    out[:300],
-)
-rc, out = efforts_cli("claude-haiku-4-5-20251001")
-record(
-    "discover.py --efforts on a Haiku model says Haiku takes no effort level",
-    rc == 0 and "does not offer reasoning effort levels" in out and "Haiku supports no effort level" in out
-    and '"price": {' not in out,
-    out[:300],
-)
-rc, out = efforts_cli("grok-4.6")
-record(
-    "discover.py --efforts grok-4.6 prints only the verified grok effort",
-    rc == 0 and '"grok46-high@grok": {' in out and out.count('@grok": {') == 1,
-    out[:300],
-)
-
-# the pasted flash stanzas validate: agy lanes carry the effort in the slug
-with tempfile.TemporaryDirectory() as td:
-    rc, out = efforts_cli("gemini-3.8-flash")
-    lines, capturing = [], False
-    for line in out.splitlines():
-        if line.startswith('"flash-low@agy":'):
-            capturing = True
-        if capturing:
-            lines.append(line)
-    stanzas = json.loads("{\n" + "\n".join(lines) + "\n}")
-    with open(os.path.join(SAMPLES_DIR, "lanes.json"), encoding="utf-8") as f:
-        doc = json.load(f)
-    for name, lane in stanzas.items():
-        lane.update(meter="agy-gemini", meter_weight=1, timeout="25m", tier=1,
-                    price={"in": 1, "cache_read": 0.1, "cache_write": None, "out": 2})
-        doc["lanes"][name] = lane
-    path = os.path.join(td, "lanes.json")
-    catalog.write_json(path, doc)
-    check = subprocess.run([sys.executable, CATALOG_PY, "check", path], capture_output=True, text=True)
-    record(
-        "pasting filled gemini-3.8-flash stanzas into lanes.json validates cleanly",
-        rc == 0 and check.returncode == 0 and set(stanzas) == {"flash-low@agy", "flash-medium@agy", "flash-high@agy"},
-        f"rc={check.returncode} err={check.stderr} stanzas={sorted(stanzas)}",
-    )
-
 
 # -------------------------------------------------------------
 # The refresh to the current generation (ticket 33). Every figure below comes

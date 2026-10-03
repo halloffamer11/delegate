@@ -1421,8 +1421,11 @@ class Wizard:
                               "current generation.")]
             if self.rows_note:
                 body.append(self._fit(self.rows_note))
-            legend = [count_legend(h.name) for h in harness_registry.REGISTRY
-                      if live and h.catalog_models and h.name in harnesses]
+            # a harness whose list is not all it runs counts the catalog's
+            # own models (`complete` in the discovery result)
+            legend = [count_legend(name) for name in HARNESSES
+                      if live and isinstance(harnesses.get(name), dict)
+                      and harnesses[name].get("complete") is False]
             return self._frame(
                 "discovery", "Delegate setup: discovery",
                 columns=["harness", "status", "models", "new lanes", "removed lanes"],

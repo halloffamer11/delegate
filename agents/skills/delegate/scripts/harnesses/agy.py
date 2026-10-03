@@ -98,9 +98,8 @@ class Agy(Harness):
         effort takes."""
         return (model.get("members") or {}).get(effort, model["slug"])
 
-    def probe(self):
+    def read_meters(self):
         import usage
-        if not usage.which(self.name): return [usage.lane(self.name, None, note="absent")]
         r = usage.run(["agy", "--print", "/usage", "--output-format", "json"], timeout=90, stdin_data="")
         if not r or r.returncode != 0: return [usage.lane(self.name, None, note="probe failed")]
         try:

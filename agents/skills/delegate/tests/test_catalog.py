@@ -2827,8 +2827,9 @@ with tempfile.TemporaryDirectory() as td:
         f"rc={res_off.returncode} stderr={res_off.stderr!r} out={res_off.stdout[:200]!r}",
     )
 
-# One answer to "is this harness's CLI installed" (ticket 07): usage's probes
-# ask catalog, so a directory or an empty PATH entry never reads as installed.
+# One answer to "is this harness's CLI installed" (ticket 07): the adapter's
+# `installed`, which catalog and the Meter probes both ask, so a directory or
+# an empty PATH entry never reads as installed.
 import usage
 with tempfile.TemporaryDirectory() as which_tmp:
     bin_dir = os.path.join(which_tmp, "bin")
@@ -2839,14 +2840,14 @@ with tempfile.TemporaryDirectory() as which_tmp:
     saved_path = os.environ.get("PATH", "")
     os.environ["PATH"] = os.pathsep.join(["", bin_dir])
     try:
-        answers = {h: (catalog.cli_installed(h), usage.which(h)) for h in catalog.HARNESSES}
+        answers = {h: (catalog.cli_installed(h), harnesses.get(h).installed()) for h in catalog.HARNESSES}
         present = catalog.installed_harnesses()
-        absent_row = harnesses.get("codex").probe()
+        absent_row = harnesses.get("codex").meters()
     finally:
         os.environ["PATH"] = saved_path
     record(
         "18. usage and catalog agree on which harness CLIs are installed",
-        usage.which is catalog.cli_installed
+        not hasattr(usage, "which")
         and answers == {"claude": (False, False), "codex": (False, False),
                         "agy": (True, True), "grok": (False, False), "kiro": (False, False)}
         and present == {"agy"}

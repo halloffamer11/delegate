@@ -1,4 +1,5 @@
 """Claude Code: `claude`. It has no model list command."""
+import copy
 import json
 import os
 import re
@@ -12,6 +13,9 @@ from .base import EFFORTS, Harness
 # listed here do not support effort"; Haiku is not listed. Matched as a word in
 # the model slug.
 MODELS_WITHOUT_EFFORT = ("haiku",)
+# One published name for one claude model: `Claude Opus 5.5`. Claude Code
+# names no model, so the benchmark rows are the only list of newer ones.
+PUBLISHED_NAME = re.compile(r"claude\s+([A-Za-z]+)\s+([0-9]+(?:\.[0-9]+)*)", re.I)
 
 
 class Claude(Harness):
@@ -27,11 +31,88 @@ class Claude(Harness):
     list_command = ["claude", "--help"]
     fixture_file = "claude-help.txt"
     catalog_models = True
-    no_effort_note = ("Claude Code's docs (https://code.claude.com/docs/en/model-config) "
-                      "say Haiku supports no effort level.")
-    # One published name for one claude model: `Claude Opus 5.5`. Claude Code
-    # names no model, so the benchmark rows are the only list of them there is.
-    published_name = re.compile(r"claude\s+([A-Za-z]+)\s+([0-9]+(?:\.[0-9]+)*)", re.I)
+
+    # -- discovery: the catalog names the models, the benchmark rows name
+    # newer ones, and `claude --help` names the efforts ---------------------
+
+    def present_in(self, fixture_dir):
+        """Always: the catalog names the models, and a missing help fixture
+        only means the efforts come from `efforts`."""
+        return True
+
+    def help_efforts(self, raw, error):
+        """(efforts, unknown) from `claude --help`'s output: the efforts it
+        lists that a Lane may carry, else `efforts` when it lists none or could
+        not be read, and the words it lists that no Lane on claude may carry."""
+        efforts, unknown = self.split_efforts(self.efforts_from_help(raw) if error is None else [])
+        return (efforts or list(self.efforts)), unknown
+
+    def models(self, raw, error, lanes):
+        """One model per model the catalog's claude Lanes run, never a guessed
+        one: Claude Code has no list command, so the catalog is the list, and
+        it is never complete (a newer model comes from `generation`)."""
+        efforts, unknown = self.help_efforts(raw, error)
+        out, seen = [], set()
+        for lane in lanes.values():
+            slug = lane.get("model", "")
+            if slug in seen:
+                continue
+            seen.add(slug)
+            takes = self.model_takes_effort(slug)
+            out.append({"slug": slug, "display_name": None,
+                        "efforts": list(efforts) if takes else [],
+                        "unknown_efforts": list(unknown) if takes else [],
+                        "reason": "hand-named, undiscoverable"})
+        return out, None, False
+
+    def generation(self, models, published_names):
+        """The catalog's models, newest version per level, and a newer one for
+        each level a benchmark row names.
+
+        A published name `Claude <Level> <version>` (`PUBLISHED_NAME`) denotes
+        `claude-<level>-<major>[-<minor>]`, and only for a level the catalog
+        already runs. A level keeps its catalog model until a newer version of
+        it is named (ticket 33).
+        """
+        out = [copy.deepcopy(item) for item in models]
+        current = {}
+        for item in out:
+            best = current.get(item["level"])
+            if best is None or tuple(item["version"]) > tuple(best["version"]):
+                current[item["level"]] = item
+        newer = {}
+        for name in published_names or ():
+            found = PUBLISHED_NAME.fullmatch(str(name).strip())
+            if not found:
+                continue
+            level = f"{self.vendor}-{found.group(1).lower()}"
+            version = tuple(int(number) for number in found.group(2).split("."))
+            base = current.get(level)
+            if base is None or version <= tuple(base["version"]):
+                continue
+            if level not in newer or version > newer[level][0]:
+                newer[level] = (version, found.group(2))
+        for level, (version, text) in newer.items():
+            base = current[level]
+            slug = "-".join([*level.split("-"), *text.split(".")])
+            base["superseded"] = f"{slug} is newer"
+            takes = self.model_takes_effort(slug)
+            out.append({
+                "harness": self.name,
+                "slug": slug,
+                "display_name": None,
+                "lane": "none",
+                "lanes": [],
+                # the level's efforts: one model of a level takes what the level takes
+                "efforts": list(base["efforts"]) if takes else [],
+                "unknown_efforts": list(base.get("unknown_efforts") or []) if takes else [],
+                "reason": "named by the benchmark rows",
+                "level": level,
+                "version": list(version),
+                "superseded": None,
+                "members": {},
+            })
+        return out
 
     def efforts_from_help(self, raw):
         """The efforts `claude --help` lists for `--effort`, in its order, or [].
@@ -66,9 +147,8 @@ class Claude(Harness):
         words = re.split(r"[^a-z0-9]+", (slug or "").lower())
         return not any(word in words for word in MODELS_WITHOUT_EFFORT)
 
-    def probe(self):
+    def read_meters(self):
         import usage
-        if not usage.which(self.name): return [usage.lane(self.name, None, note="absent")]
         # Run from the home directory: inside the dotfiles project the same command
         # did not return within 45 s (2026-09-18), and from ~ it takes about 3 s.
         r = usage.run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="",
