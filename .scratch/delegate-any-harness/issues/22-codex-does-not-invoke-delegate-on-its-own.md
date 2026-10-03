@@ -23,12 +23,14 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 **Blocked by:** None. Lands cleanly beside 09 and 12; if 12 folds the wrappers into
 `/delegate <harness>`, only the surviving skill directories need the file.
 
-**Status:** ready-for-agent, raised by Orin 2026-10-03 after Codex invoked delegate unprompted.
+**Status:** ready-for-human, built 2026-10-03; Orin's Codex check below is the open box.
+`delegate` and `council` ship `agents/openai.yaml`. `tests/test_skill_invocation.py` fails when either
+switch is set without the other (checked by removing council's file), and passes on 3.9 and 3.13.
 
-- [ ] Every skill directory under `agents/skills/` that sets `disable-model-invocation: true`
+- [x] Every skill directory under `agents/skills/` that sets `disable-model-invocation: true`
       ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`.
-- [ ] A test fails when a skill sets one and lacks the other, so a new skill cannot miss it.
-- [ ] ADR 0001's user-invoked line names both switches (Claude frontmatter, Codex `openai.yaml`)
+- [x] A test fails when a skill sets one and lacks the other, so a new skill cannot miss it.
+- [x] ADR 0001's user-invoked line names both switches (Claude frontmatter, Codex `openai.yaml`)
       and says Kiro has none yet.
 - [ ] Orin's box: in Codex, a prompt that would have triggered delegate no longer does, and
       `$delegate` still runs it.

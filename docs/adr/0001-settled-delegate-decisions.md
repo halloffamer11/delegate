@@ -45,3 +45,6 @@ its ticket, where the reason is.
   never on the model's own initiative. Every delegate skill keeps
   `disable-model-invocation: true`, and its description and body say the same, because
   other orchestrators do not read that field (Orin, 2026-10-02; any-harness ticket 09).
+  Each harness that has a switch gets it: Claude Code reads that frontmatter, and Codex
+  reads `policy.allow_implicit_invocation: false` in `agents/openai.yaml` beside SKILL.md.
+  Kiro has no switch yet, so the description and body are its only guard (ticket 22).
