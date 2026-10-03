@@ -995,7 +995,7 @@ with tempfile.TemporaryDirectory() as td:
         return orig_probe(*a, **k)
     def boom_vendor(*a, **k):
         probed24.append("vendor")
-        return [usage.lane("codex", None, note="stub")]
+        return [usage.meter_row("codex", None, note="stub")]
     usage.probe = mark_probe
     for h in harnesses.REGISTRY:
         h.meters = boom_vendor

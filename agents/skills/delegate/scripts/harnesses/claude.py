@@ -31,6 +31,25 @@ class Claude(Harness):
     list_command = ["claude", "--help"]
     fixture_file = "claude-help.txt"
     catalog_models = True
+    # `/usage` reports the session's general Meter and a weekly Meter per
+    # model it names (`Current week (Fable)`), so `claude-<model>` is any model
+    # word (`model_meter_name`).
+    meter_groups = ("general",)
+
+    def meter_names(self):
+        return ("claude-general", "claude-<model>")
+
+    def reports_meter(self, name, models=()):
+        """`claude-general`, or `claude-<word>` for a word in the slug of a
+        model the catalog runs on that Meter (`claude-fable` for
+        `claude-fable-5-1`), which is the word `/usage` names it by."""
+        if name == "claude-general":
+            return True
+        prefix = f"{self.name}-"
+        if not name.startswith(prefix):
+            return False
+        word = name[len(prefix):]
+        return any(word in re.split(r"[^a-z0-9]+", (slug or "").lower()) for slug in models)
 
     # -- discovery: the catalog names the models, the benchmark rows name
     # newer ones, and `claude --help` names the efforts ---------------------
@@ -153,14 +172,14 @@ class Claude(Harness):
         # did not return within 45 s (2026-09-18), and from ~ it takes about 3 s.
         r = usage.run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="",
                       cwd=os.path.expanduser("~"))
-        if not r or r.returncode != 0: return [usage.lane(self.name, None, note="probe failed")]
+        if not r or r.returncode != 0: return [usage.meter_row(self.name, None, note="probe failed")]
         try: text = json.loads(r.stdout)["result"]
-        except Exception as e: return [usage.lane(self.name, None, note=f"unexpected output: {e}")]
+        except Exception as e: return [usage.meter_row(self.name, None, note=f"unexpected output: {e}")]
         def pct(label):
             m = re.search(re.escape(label) + r":\s*(\d+)% used(?: · resets ([^\n]+))?", text)
             return (None, None) if not m else (1 - int(m.group(1)) / 100.0, m.group(2))
         f5, r5 = pct("Current session"); fw, rw = pct("Current week (all models)")
-        lanes = [usage.lane(self.name, "general", f5, fw, reset(r5), reset(rw),
+        lanes = [usage.meter_row(self.name, "general", f5, fw, reset(r5), reset(rw),
                             note=f"resets: 5h '{r5}', weekly '{rw}'")]
         # per-model weekly meters, e.g. "Current week (Fable): 86% used"
         for m in re.finditer(r"Current week \(([^)]+)\):\s*(\d+)% used(?: · resets ([^\n]+))?", text):
@@ -168,7 +187,7 @@ class Claude(Harness):
             if name == "all models": continue
             fm = 1 - int(m.group(2)) / 100.0
             wk = min(fw, fm) if fw is not None else fm
-            lanes.append(usage.lane(self.name, name, f5, wk, reset(r5), reset(m.group(3) or rw),
+            lanes.append(usage.meter_row(self.name, name, f5, wk, reset(r5), reset(m.group(3) or rw),
                                     note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'",
                                     remaining_weekly_model=fm))
         return lanes

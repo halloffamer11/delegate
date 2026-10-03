@@ -123,6 +123,10 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing
   replaces it.
 - `scripts/usage.py`: cached subscription-meter probes; each harness's probe is in its adapter.
+  A usage row is keyed by `meter`, the full Meter name (`usage.meter_name`), with `group` the
+  probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
+  on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
+  its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
   `scripts/events.py`: the monitor ledger encoder (schema unchanged).
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
   benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis

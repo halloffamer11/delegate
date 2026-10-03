@@ -275,47 +275,34 @@ pub fn fold<Tz: TimeZone, W: IntoDuration>(
     }
 }
 
-/// Meter names `lanes.tsv` can actually spend. Same mapping as report.py:
-/// non-agy harness → harness name; agy gemini-* → agy-gemini; other agy → agy-claude-gpt.
-pub fn spendable_meters_from_lanes_tsv(text: &str) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for line in text.lines() {
-        if line.starts_with('#') || line.trim().is_empty() {
-            continue;
-        }
-        let mut cols = line.split('\t');
-        let _lane = match cols.next() {
-            Some(s) if !s.is_empty() => s,
-            _ => continue,
-        };
-        let harness = match cols.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let slug = match cols.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let meter = if harness != "agy" {
-            harness.to_string()
-        } else if slug.starts_with("gemini") {
-            "agy-gemini".to_string()
-        } else {
-            "agy-claude-gpt".to_string()
-        };
-        out.insert(meter);
-    }
-    out
+/// Meter names the catalog's Lanes spend: each Lane's own `meter` in
+/// `lanes.json`, never re-derived from its harness or model. A file that does
+/// not parse spends nothing, which leaves the snapshot alone.
+pub fn spendable_meters_from_lanes_json(text: &str) -> HashSet<String> {
+    let doc: serde_json::Value = match serde_json::from_str(text) {
+        Ok(doc) => doc,
+        Err(_) => return HashSet::new(),
+    };
+    doc.get("lanes")
+        .and_then(|lanes| lanes.as_object())
+        .map(|lanes| {
+            lanes
+                .values()
+                .filter_map(|lane| lane.get("meter").and_then(|m| m.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-/// Claude session meters stay visible even with no lanes.tsv row. agy-claude-gpt does not:
+/// Claude session meters stay visible even with no Lane on them. agy-claude-gpt does not:
 /// no dispatch lane spends that probe group.
 pub fn lane_is_displayed(lane: &Lane, spendable: &HashSet<String>) -> bool {
     spendable.contains(&lane.lane) || lane.harness.as_deref() == Some("claude")
 }
 
 /// Drop probe meters no lane can spend, and their burn series. Empty `spendable` means
-/// lanes.tsv was not loaded — leave the snapshot alone.
+/// the catalog was not loaded — leave the snapshot alone.
 pub fn hide_unspendable(mut snap: Snapshot, spendable: &HashSet<String>) -> Snapshot {
     if spendable.is_empty() {
         return snap;

@@ -257,13 +257,48 @@ def test_claude_model_meter():
         usage.run = saved
         del adapter.installed
     record("'Current week (Fable 5.2)' is the claude-fable Meter, as 'Fable' was",
-           [r["lane"] for r in rows] == ["claude-general", "claude-fable"]
+           [r["meter"] for r in rows] == ["claude-general", "claude-fable"]
            and claude_module.model_meter_name("Fable") == "fable"
            and claude_module.model_meter_name("Fable v6") == "fable",
-           repr([r["lane"] for r in rows]))
+           repr([r["meter"] for r in rows]))
+
+
+def test_meter_identity():
+    """Each adapter says which Meters its probe reports, and the catalog check
+    holds a Lane's Meter to them (ticket 25)."""
+    import json
+    import types
+    import usage
+    from unittest import mock
+    sample = catalog.load_json(os.path.join(SCRIPTS, "..", "assets", "samples", "lanes.json"))
+    models = {}
+    for lane in sample["lanes"].values():
+        models.setdefault(lane["meter"], []).append(lane["model"])
+    record("every sample Meter is one its harness's probe reports",
+           all(harnesses.get(meter["harness"]).reports_meter(name, models.get(name, ()))
+               for name, meter in sample["meters"].items()),
+           repr({n: harnesses.get(m["harness"]).meter_names() for n, m in sample["meters"].items()}))
+    claude = harnesses.get("claude")
+    record("a claude model Meter is named for a model the catalog runs on it",
+           claude.reports_meter("claude-fable", ["claude-fable-5-1"])
+           and not claude.reports_meter("claude-fabel", ["claude-fable-5-1"])
+           and not claude.reports_meter("claude-generl")
+           and harnesses.get("agy").meter_names() == ("agy-gemini", "agy-claude-gpt")
+           and harnesses.get("codex").meter_names() == ("codex",))
+    agy = harnesses.get("agy")
+    listing = {"command": {"data": {"groups": [{"name": "Gemini Models", "buckets": []},
+                                               {"name": "Claude and GPT", "buckets": []}]}}}
+    with mock.patch.object(agy, "installed", return_value=True), \
+         mock.patch.object(usage, "run", return_value=types.SimpleNamespace(
+             returncode=0, stdout=json.dumps(listing))):
+        rows = agy.meters()
+    record("agy's probe rows are the Meters it declares, under `meter`",
+           tuple(r["meter"] for r in rows) == agy.meter_names()
+           and [r["group"] for r in rows] == ["gemini", "claude-gpt"], repr(rows))
 
 
 if __name__ == "__main__":
+    test_meter_identity()
     test_registry_is_the_list()
     test_lane_name()
     test_effort_words()

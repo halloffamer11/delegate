@@ -14,7 +14,7 @@ import usage
 import harnesses
 from harnesses.agy import COMBINED_NOTE as AGY_NOTE
 from harnesses.claude import reset as claude_reset
-from usage import write_cache, load_cache, load_cached, lane, get_cache_path, eligible, observations
+from usage import write_cache, load_cache, load_cached, meter_row as lane, get_cache_path, eligible, observations
 
 
 def fail(msg):
@@ -248,8 +248,13 @@ def main():
         with open(cache_path, "w") as f:
             json.dump(old, f)
         loaded = load_cached(cache_path=cache_path)
-        agy_row = next(L for L in loaded["lanes"] if L["lane"] == "agy-gemini")
-        codex_row = next(L for L in loaded["lanes"] if L["lane"] == "codex")
+        agy_row = next(L for L in loaded["lanes"] if L["meter"] == "agy-gemini")
+        codex_row = next(L for L in loaded["lanes"] if L["meter"] == "codex")
+        # a row written before ticket 25 names its Meter under `lane` and its
+        # probe group under `meter`; it reads in the current shape
+        assert_true("lane" not in agy_row and agy_row["group"] == "gemini" and codex_row["group"] is None
+                    and set(observations(old)) == {"agy-gemini", "codex"},
+                    f"an old row should read with `meter` and `group`: {agy_row}")
         assert_true(agy_row["r"] == 0.80 and agy_row["binding"] == "5h",
                     f"a cached agy Remaining should be the lower window, got {agy_row}")
         assert_true(agy_row["pace"] is not None and agy_row["status"] == "ok",
@@ -299,7 +304,7 @@ def main():
              patch.object(usage.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 90)) as runner:
             assert_true(usage.acquire(timeout=90) == {}, "bounded acquisition returns unknown on timeout")
             assert_true(runner.call_args.kwargs["timeout"] == 90, "acquisition must keep the wall timeout")
-        low = usage.lane("codex", None, 0.05, 0.06)
+        low = usage.meter_row("codex", None, 0.05, 0.06)
         assert_true(low["status"] == "ok", "observation status must not encode a private Gate")
         assert_true(usage.eligible(low, 0.0) and not usage.eligible(low, 0.1),
                     "the effective Gate alone determines low-Meter eligibility")
@@ -324,11 +329,11 @@ def main():
 
     # A figure past 100% used reads as nothing left, not as a negative
     # fraction that would fail the whole document and turn every Gate off.
-    over = usage.lane("claude", "general", -0.04, 0.7, remaining_weekly_model=1.2)
+    over = usage.meter_row("claude", "general", -0.04, 0.7, remaining_weekly_model=1.2)
     assert_true(over["remaining_5h"] == 0.0 and over["r"] == 0.0
                 and over["remaining_weekly_model"] == 1.0,
                 f"remaining fractions must be held to 0..1: {over}")
-    over_doc = {"probed_at": time.time(), "lanes": [over, usage.lane("codex", None, 0.05, 0.05)]}
+    over_doc = {"probed_at": time.time(), "lanes": [over, usage.meter_row("codex", None, 0.05, 0.05)]}
     parsed = usage.observations(over_doc)
     assert_true(parsed is not None and parsed["codex"]["r"] == 0.05,
                 "one overspent row must not unread every Meter")

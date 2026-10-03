@@ -40,7 +40,7 @@ class Kiro(Harness):
     # or a timeout from, so the refresh starts them from this, and adds the
     # Meter when the catalog has none. Plan and price are the Kiro Pro list
     # price, which headless needs at least; edit them in lanes.json.
-    starter_meter = ("kiro", {"plan": "Kiro Pro", "price_month": 20, "probe": "usage.py",
+    starter_meter = ("kiro", {"plan": "Kiro Pro", "price_month": 20,
                               "note": "UNMEASURED: plan and price_month assumed; no usage "
                                       "source, so Remaining is unknown"})
     starter_lane = {"meter_weight": 1, "timeout": "30m"}

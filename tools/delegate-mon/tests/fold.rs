@@ -1,7 +1,7 @@
 use chrono::DateTime;
 use delegate_mon::{
     activity_log, clamp_fraction, fold, hide_unspendable, parent_label, parse_event, parse_events,
-    spendable_meters_from_lanes_tsv, work_label, Event, Lane, ThreadState, UsageDoc, Window,
+    spendable_meters_from_lanes_json, work_label, Event, Lane, ThreadState, UsageDoc, Window,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -153,7 +153,7 @@ fn test_usage_doc_precedence_and_cache_age() {
         lanes: vec![Lane {
             lane: "custom-lane".to_string(),
             harness: Some("custom".to_string()),
-            meter: None,
+            group: None,
             remaining_5h: Some(0.5),
             remaining_weekly: Some(0.5),
             r: Some(0.5),
@@ -246,7 +246,7 @@ fn lane(name: &str, harness: &str) -> Lane {
     Lane {
         lane: name.to_string(),
         harness: Some(harness.to_string()),
-        meter: None,
+        group: None,
         remaining_5h: Some(0.5),
         remaining_weekly: Some(0.5),
         r: Some(0.5),
@@ -265,13 +265,11 @@ fn lane(name: &str, harness: &str) -> Lane {
 
 #[test]
 fn test_agy_claude_gpt_hidden_when_no_lane_spends_it() {
-    let tsv = "\
-# lane\tharness\tslug\tclasses\tnote
-flash-high@agy\tagy\tgemini-3.8-flash-high\timpl\t
-grok46@grok\tgrok\tgrok-4.6\timpl\t
-terra@codex\tcodex\tgpt-5.6-terra\timpl\t
-";
-    let spendable = spendable_meters_from_lanes_tsv(tsv);
+    let lanes_json = r#"{"version": "delegate-lanes.v1", "lanes": {
+        "flash-high@agy": {"harness": "agy", "model": "gemini-3.8-flash-high", "meter": "agy-gemini"},
+        "grok46@grok": {"harness": "grok", "model": "grok-4.6", "meter": "grok"},
+        "terra@codex": {"harness": "codex", "model": "gpt-5.6-terra", "meter": "codex"}}}"#;
+    let spendable = spendable_meters_from_lanes_json(lanes_json);
     assert!(spendable.contains("agy-gemini"));
     assert!(spendable.contains("grok"));
     assert!(spendable.contains("codex"));
@@ -356,4 +354,22 @@ fn test_work_and_parent_labels() {
         ),
         "wt-monitor-t3"
     );
+}
+
+#[test]
+fn test_usage_rows_read_in_both_shapes() {
+    // since delegate's ticket 25 a row names its Meter under `meter`; an older
+    // row named it under `lane` and kept the probe group under `meter`
+    let new_row: Lane = serde_json::from_str(
+        r#"{"meter": "agy-gemini", "harness": "agy", "group": "gemini", "r": 0.5}"#,
+    )
+    .unwrap();
+    let old_row: Lane = serde_json::from_str(
+        r#"{"lane": "agy-gemini", "harness": "agy", "meter": "gemini", "r": 0.5}"#,
+    )
+    .unwrap();
+    assert_eq!(new_row, old_row);
+    assert_eq!(new_row.lane, "agy-gemini");
+    assert_eq!(new_row.group.as_deref(), Some("gemini"));
+    assert!(spendable_meters_from_lanes_json("not json").is_empty());
 }

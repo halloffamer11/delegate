@@ -342,8 +342,10 @@ def validate_lanes(doc, source="lanes.json"):
     if not isinstance(meters, dict) or len(meters) == 0:
         raise CatalogError(f"{source}: key 'meters': meters must be a non-empty object")
 
+    # `probe` named the script that read a Meter before the adapters did; a
+    # catalog that still carries it reads, and the field means nothing
     allowed_meter_fields = {"harness", "plan", "price_month", "probe", "note", "model_meter"}
-    required_meter_fields = ("harness", "plan", "price_month", "probe")
+    required_meter_fields = ("harness", "plan", "price_month")
 
     for meter_name, meter in meters.items():
         if not isinstance(meter, dict):
@@ -366,8 +368,6 @@ def validate_lanes(doc, source="lanes.json"):
             raise CatalogError(
                 f"{source}: meter '{meter_name}': price_month must be a number >= 0, got {pm!r}"
             )
-        if not isinstance(meter["probe"], str) or not meter["probe"].strip():
-            raise CatalogError(f"{source}: meter '{meter_name}': probe must be a non-empty string")
         if "note" in meter and not isinstance(meter["note"], str):
             raise CatalogError(f"{source}: meter '{meter_name}': note must be a string")
         if "model_meter" in meter and not isinstance(meter["model_meter"], bool):
@@ -448,7 +448,6 @@ def validate_lanes(doc, source="lanes.json"):
             raise CatalogError(
                 f"{source}: lane '{lane_name}': meter '{meter_id}' belongs to another harness '{meter_harness}', does not match lane harness '{harness}'"
             )
-
         mw = lane["meter_weight"]
         if type(mw) is bool or not isinstance(mw, (int, float)) or mw <= 0:
             raise CatalogError(
@@ -1527,6 +1526,26 @@ def check_class_guides(classes, guides):
     return found
 
 
+def check_meter_identity(doc, source):
+    """Refuses a Lane whose Meter its harness's probe does not report.
+
+    Such a Meter has an unknown Remaining for good, which the Gate never
+    vetoes, so a misspelled name fails open (ticket 25). It is a `catalog
+    check` refusal, not a load one: a catalog written before the names were
+    checked keeps routing until the next check or wizard run names the fix.
+    """
+    lanes = doc.get("lanes") or {}
+    for lane_name, lane in lanes.items():
+        harness, meter_id = lane["harness"], lane["meter"]
+        adapter = harnesses.get(harness)
+        on_meter = [other.get("model") for other in lanes.values() if other.get("meter") == meter_id]
+        if not adapter.reports_meter(meter_id, on_meter):
+            raise CatalogError(
+                f"{source}: lane '{lane_name}': meter '{meter_id}' is not one the {harness} probe reports; "
+                f"it reports {', '.join(adapter.meter_names())}"
+            )
+
+
 def check_file(path, partial=False):
     """Validates one file. Detects validator from version field."""
     doc = load_json(path)
@@ -1537,6 +1556,7 @@ def check_file(path, partial=False):
     version = doc["version"]
     if version == LANES_VERSION:
         validate_lanes(doc, source=path)
+        check_meter_identity(doc, source=path)
     elif version == ROUTING_VERSION:
         validate_routing(doc, source=path, partial=partial)
     else:

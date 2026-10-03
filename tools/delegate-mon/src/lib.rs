@@ -8,6 +8,6 @@ pub use event::{
 };
 pub use store::{
     activity_log, clamp_fraction, clamp_lane, fold, hide_unspendable, lane_is_displayed,
-    parent_label, spendable_meters_from_lanes_tsv, work_label, ActivityRow, IntoDuration,
+    parent_label, spendable_meters_from_lanes_json, work_label, ActivityRow, IntoDuration,
     OpenThread, SeriesPoint, Snapshot, Thread, ThreadState, Window,
 };

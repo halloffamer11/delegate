@@ -161,23 +161,39 @@ class Harness:
     # -- meters ------------------------------------------------------------
 
     def meters(self):
-        """The harness's Meter rows, as `usage.lane` builds them. An absent CLI
+        """The harness's Meter rows, as `usage.meter_row` builds them. An absent CLI
         gives one `absent` row and a probe that raises one `probe failed` row,
         here for every harness; each adapter's `read_meters` reads the rest.
         Every such row has an unknown Remaining, which the Gate never vetoes."""
         import usage
         if not self.installed():
-            return [usage.lane(self.name, None, note="absent")]
+            return [usage.meter_row(self.name, None, note="absent")]
         try:
             return self.read_meters()
         except Exception as e:  # noqa
-            return [usage.lane(self.name, None, note=f"probe failed: {e}")]
+            return [usage.meter_row(self.name, None, note=f"probe failed: {e}")]
 
     def read_meters(self):
         """The Meter rows the installed CLI reports. A harness with no usage
         source reports one row with an unknown Remaining."""
         import usage
-        return [usage.lane(self.name, None, note="no usage source")]
+        return [usage.meter_row(self.name, None, note="no usage source")]
+
+    # The probe groups `read_meters` reports, each one Meter
+    # (`usage.meter_name`): None is the harness's own name.
+    meter_groups = (None,)
+
+    def meter_names(self):
+        """The Meter names this harness's probe reports, for a message."""
+        import usage
+        return tuple(usage.meter_name(self.name, group) for group in self.meter_groups)
+
+    def reports_meter(self, name, models=()):
+        """Whether the probe reports a Meter by this name, given the models
+        the catalog's Lanes run on it. A catalog Meter it does not report would
+        have an unknown Remaining for good, which the Gate never vetoes, so
+        `catalog check` refuses it."""
+        return name in self.meter_names()
 
     # (old, new) note texts a cached Meter row is read with: a note an
     # earlier probe wrote that now reads differently.

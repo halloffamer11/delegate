@@ -85,7 +85,7 @@ class Codex(Harness):
             mins = w.get("windowDurationMins") or 0
             wins["weekly" if mins >= 24 * 60 else "5h"] = win(w)
         f5, r5 = wins.get("5h", (None, None)); fw, rw = wins.get("weekly", (None, None))
-        return [usage.lane(self.name, None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
+        return [usage.meter_row(self.name, None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
 
     def run_args(self, effort, timeout, write_dir):
         args = ["--effort", effort, "--timeout", timeout, "--skip-git-repo-check"]

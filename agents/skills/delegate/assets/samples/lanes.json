@@ -5,32 +5,27 @@
       "harness": "claude",
       "plan": "Max 5x",
       "price_month": 100,
-      "probe": "usage.py",
       "model_meter": true
     },
     "claude-general": {
       "harness": "claude",
       "plan": "Max 5x",
-      "price_month": 100,
-      "probe": "usage.py"
+      "price_month": 100
     },
     "codex": {
       "harness": "codex",
       "plan": "ChatGPT Plus",
-      "price_month": 20,
-      "probe": "usage.py"
+      "price_month": 20
     },
     "grok": {
       "harness": "grok",
       "plan": "SuperGrok",
-      "price_month": 30,
-      "probe": "usage.py"
+      "price_month": 30
     },
     "agy-gemini": {
       "harness": "agy",
       "plan": "Google AI Pro",
-      "price_month": 17,
-      "probe": "usage.py"
+      "price_month": 17
     }
   },
   "lanes": {

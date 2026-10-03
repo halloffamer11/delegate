@@ -86,6 +86,25 @@ def combined(five_h, weekly, reset_5h=None, reset_wk=None):
             "status": "unknown" if r is None else "ok"}
 
 
+def row_meter(entry):
+    """The Meter a usage row is for. A row written before ticket 25 named it
+    under `lane` and kept the probe group under `meter`."""
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("lane") if "lane" in entry else entry.get("meter")
+
+
+def _upgraded(entry):
+    """A usage row in the current shape: an old row's `lane` becomes `meter`
+    and its `meter` the `group`, so old caches still read."""
+    if not isinstance(entry, dict) or "lane" not in entry:
+        return entry
+    out = dict(entry)
+    out["group"] = out.get("meter")
+    out["meter"] = out.pop("lane")
+    return out
+
+
 def _filled(observation):
     """Derive the combined figures a cache is missing. Never overwrites one.
 
@@ -97,6 +116,7 @@ def _filled(observation):
     """
     if not isinstance(observation, dict):
         return observation
+    observation = _upgraded(observation)
     if observation.get("r") is not None or observation.get("pace") is not None:
         return observation
     if observation.get("remaining_5h") is None and observation.get("remaining_weekly") is None:
@@ -142,11 +162,11 @@ def observations(document):
         for entry in document["lanes"]:
             if not isinstance(entry, dict):
                 return None
-            name = entry.get("lane")
+            name = row_meter(entry)
             if not isinstance(name, str) or not name:
                 return None
             parsed[name] = entry
-        entries = [(entry["lane"], entry) for entry in document["lanes"]]
+        entries = [(row_meter(entry), entry) for entry in document["lanes"]]
     else:
         parsed = document
         entries = document.items()
@@ -219,12 +239,21 @@ def remaining(fraction):
     return min(1.0, max(0.0, fraction))
 
 
-def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
-    """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None.
+def meter_name(harness, group):
+    """The Meter a probe group reports: `<harness>-<group>`, or the harness's
+    own name for a harness with one Meter. The catalog's Meter names are these
+    (`Harness.reports_meter` checks them)."""
+    return f"{harness}-{group}" if group else harness
+
+
+def meter_row(harness, group, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
+    """One usage row: the Meter (`meter`), its harness, the probe's own group
+    word (`group`, None for a harness with one Meter) and its figures.
+    five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None.
     A fraction outside 0..1 is held to it (`remaining`)."""
     five_h, weekly = remaining(five_h), remaining(weekly)
     remaining_weekly_model = remaining(remaining_weekly_model)
-    row = {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
+    row = {"meter": meter_name(harness, group), "harness": harness, "group": group,
            "remaining_5h": five_h, "remaining_weekly": weekly,
            "remaining_weekly_model": remaining_weekly_model,
            "reset_5h": reset_5h, "reset_weekly": reset_wk,

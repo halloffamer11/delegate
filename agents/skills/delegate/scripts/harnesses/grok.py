@@ -70,7 +70,7 @@ class Grok(Harness):
         ptype = (period.get("type") or "").replace("USAGE_PERIOD_TYPE_", "").lower() or "weekly"
         tier = res.get("subscription_tier")
         # single rolling meter (weekly on SuperGrok); no 5h window exists
-        return [usage.lane(self.name, None, None, 1 - pct / 100.0, None, end,
+        return [usage.meter_row(self.name, None, None, 1 - pct / 100.0, None, end,
                            note=f"tier={tier}; {ptype} meter only ({pct:g}% used); via _x.ai/billing")]
 
     def blocked_reason(self, run_dir):

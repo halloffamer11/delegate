@@ -563,6 +563,35 @@ record(
     res_check.returncode == 0 and res_check.stdout.strip() == f"ok: {os.path.join(SAMPLES_DIR, 'lanes.json')}",
 )
 
+# A misspelled Meter fails check, naming the Meters the harness's probe
+# reports (ticket 25): its Remaining would be unknown for good, which the Gate
+# never vetoes. A Meter with no `probe` field, which no longer means anything,
+# still checks.
+with tempfile.TemporaryDirectory() as td:
+    typo_doc = json.load(open(os.path.join(SAMPLES_DIR, "lanes.json")))
+    typo_doc["meters"]["codex-plus"] = typo_doc["meters"].pop("codex")
+    for typo_lane in typo_doc["lanes"].values():
+        if typo_lane["meter"] == "codex":
+            typo_lane["meter"] = "codex-plus"
+    typo_path = os.path.join(td, "typo.json")
+    with open(typo_path, "w") as f:
+        json.dump(typo_doc, f)
+    res_typo = subprocess.run([sys.executable, CATALOG_PY, "check", typo_path], capture_output=True, text=True)
+    legacy_doc = json.load(open(os.path.join(SAMPLES_DIR, "lanes.json")))
+    for legacy_meter in legacy_doc["meters"].values():
+        legacy_meter["probe"] = "usage.py"
+    legacy_path = os.path.join(td, "legacy.json")
+    with open(legacy_path, "w") as f:
+        json.dump(legacy_doc, f)
+    res_legacy = subprocess.run([sys.executable, CATALOG_PY, "check", legacy_path], capture_output=True, text=True)
+    record(
+        "check refuses a Meter its harness's probe does not report, and names the ones it does",
+        res_typo.returncode != 0
+        and "meter 'codex-plus' is not one the codex probe reports; it reports codex" in res_typo.stderr
+        and res_legacy.returncode == 0,
+        res_typo.stderr + res_legacy.stderr,
+    )
+
 # Broken file
 with tempfile.TemporaryDirectory() as td:
     broken_file = os.path.join(td, "broken.json")

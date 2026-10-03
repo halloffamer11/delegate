@@ -97,8 +97,10 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         raise ValueError(f"invalid tier range [{floor}, {ceiling}]")
 
     routing = cat.get("routing", {})
-    margin = routing.get("margin", 0.2)
-    gate = routing.get("gate", 0.1)
+    # merged routing always carries both (`catalog.load_catalog`); no second
+    # default lives here
+    margin = routing["margin"]
+    gate = routing["gate"]
     metering = catalog.meters_enabled(routing)
     reason_label = reason_label or "tier"
 

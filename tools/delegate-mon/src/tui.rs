@@ -22,7 +22,7 @@ use ratatui::{
 
 use crate::event::{parse_event, Event, UsageDoc};
 use crate::store::{
-    activity_log, clamp_fraction, fold, hide_unspendable, spendable_meters_from_lanes_tsv,
+    activity_log, clamp_fraction, fold, hide_unspendable, spendable_meters_from_lanes_json,
     ActivityRow, Snapshot, Window,
 };
 
@@ -55,6 +55,18 @@ pub fn resolve_ledger_path() -> PathBuf {
         PathBuf::from(home).join(".cache/delegate/ledger.jsonl")
     } else {
         PathBuf::from(".cache/delegate/ledger.jsonl")
+    }
+}
+
+/// The global catalog's `lanes.json`: `$DELEGATE_CONFIG_DIR`, else
+/// `~/.config/delegate`, as catalog.py reads it.
+pub fn resolve_lanes_path() -> PathBuf {
+    if let Ok(dir) = std::env::var("DELEGATE_CONFIG_DIR") {
+        PathBuf::from(dir).join("lanes.json")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config/delegate/lanes.json")
+    } else {
+        PathBuf::from(".config/delegate/lanes.json")
     }
 }
 
@@ -184,8 +196,8 @@ impl Model {
             }
         }
 
-        let spendable = std::fs::read_to_string(resolve_script("lanes.tsv"))
-            .map(|s| spendable_meters_from_lanes_tsv(&s))
+        let spendable = std::fs::read_to_string(resolve_lanes_path())
+            .map(|s| spendable_meters_from_lanes_json(&s))
             .unwrap_or_default();
 
         let window = Window::Hour1;
