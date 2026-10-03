@@ -100,7 +100,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   file template and the spawn line. `resolve()` takes `--orchestrator`, then
   `$DELEGATE_ORCHESTRATOR`, then detection; `none`, an unknown name or nothing detected is the
   default path, where every Lane is relayed. No other script names an orchestrator
-  (`tests/test_orchestrators.py` greps for it).
+  (`tests/test_orchestrators.py` greps for it). A profile's optional `agents` lists agent files only
+  that orchestrator uses, kept beside it and linked by `make install` (`orchestrators.py agents`):
+  Claude's `claude/courier.md`, the glue a Claude Workflow script needs because it has no shell.
 - `scripts/harnesses/`: the harness registry, one module per harness behind one interface
   (`base.Harness`): binary, efforts, model listing and parsing, the Meter probe, relay flags. Every
   other script iterates the registry; adding a harness is one module and one `REGISTRY` entry.

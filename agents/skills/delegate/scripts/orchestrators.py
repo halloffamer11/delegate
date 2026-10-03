@@ -23,6 +23,11 @@ do beyond that:
                 spawn       the one-line spawn instruction dispatch prints,
                             from {agent} {prompt}
   launch      optional: the headless command eval 3 starts it with
+  agents      optional: agent files only this orchestrator uses, each
+              {"file": path beside the profile, "dir": where it is linked};
+              Claude's courier, the glue a Claude Workflow script needs
+              because it has no shell. `make install` links them
+              (`orchestrators.py agents`), so no other harness carries them
 
 Profiles ship in assets/orchestrators/; a machine adds or overrides one in
 ~/.config/delegate/orchestrators/ ($DELEGATE_ORCHESTRATORS_DIR), with no code
@@ -31,6 +36,7 @@ $DELEGATE_ORCHESTRATOR, else the first profile whose detect_env is set; `none`,
 an unknown name or nothing detected all mean the default path.
 
     python3 orchestrators.py            the profiles and which one is detected
+    python3 orchestrators.py agents     each shipped profile agent: <source>\t<link>
 """
 import json
 import os
@@ -70,8 +76,15 @@ def _validate(name, doc, path):
         template = native.get("template")
         if not isinstance(template, list) or not all(isinstance(v, str) for v in template):
             raise ProfileError(f"{path}: native.template must be a list of lines")
+    agents = doc.get("agents", [])
+    if not isinstance(agents, list) or not all(
+            isinstance(a, dict) and all(isinstance(a.get(k), str) and a[k] for k in ("file", "dir"))
+            for a in agents):
+        raise ProfileError(f"{path}: agents must be a list of {{file, dir}} objects")
     out = dict(doc)
     out["name"] = name
+    out["source_dir"] = os.path.dirname(os.path.abspath(path))
+    out["agents"] = [dict(a) for a in agents]
     out["detect_env"] = list(env)
     return out
 
@@ -170,7 +183,25 @@ def spawn_line(profile, lane, prompt):
     return _fill(profile["native"]["spawn"], {"agent": agent_name(profile, lane), "prompt": prompt})
 
 
+def agent_links(profiles=None):
+    """[(source, link)] for every profile agent file: the file beside its
+    profile, and where it is linked (~ expanded)."""
+    profiles = load() if profiles is None else profiles
+    links = []
+    for profile in profiles.values():
+        for agent in profile["agents"]:
+            source = os.path.join(profile["source_dir"], agent["file"])
+            link = os.path.join(os.path.expanduser(agent["dir"]), os.path.basename(agent["file"]))
+            links.append((source, link))
+    return links
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["agents"]:
+        for source, link in agent_links(load([SHIPPED_DIR])):
+            print(f"{source}\t{link}")
+        return 0
     profiles = load()
     found = resolve()
     for name, profile in profiles.items():

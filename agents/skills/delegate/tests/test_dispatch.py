@@ -24,7 +24,7 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
-COURIER_MD = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents", "courier.md"))
+COURIER_MD = os.path.join(HERE, "..", "assets", "orchestrators", "claude", "courier.md")
 # Relay output copied from real runs, trimmed of paths and signatures. Each
 # directory is a run directory as the relay leaves it, before map_result.
 RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")

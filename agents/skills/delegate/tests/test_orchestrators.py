@@ -111,6 +111,23 @@ def test_local_profile():
         record("a malformed profile is an error, not a silent default", raised)
 
 
+def test_profile_agents():
+    links = orchestrators.agent_links(orchestrators.load([orchestrators.SHIPPED_DIR]))
+    names = {os.path.basename(link): (source, link) for source, link in links}
+    courier = names.get("courier.md")
+    record("Claude's profile ships the courier, and no other profile ships an agent",
+           courier is not None and len(links) == 1 and os.path.isfile(courier[0])
+           and courier[1].endswith(os.path.join(".claude", "agents", "courier.md")), links)
+    with tempfile.TemporaryDirectory() as d:
+        write_profile(d, "bad", {"harness": "x", "agents": [{"file": "a.md"}]})
+        try:
+            orchestrators.load([d])
+            ok = False
+        except orchestrators.ProfileError as e:
+            ok = "agents must be" in str(e)
+        record("an agent entry with no dir is an error", ok)
+
+
 def test_no_script_names_an_orchestrator():
     """Orchestrator behaviour lives in profiles: no script outside the harness
     adapters checks CLAUDECODE or writes into ~/.claude/agents."""
@@ -132,5 +149,6 @@ if __name__ == "__main__":
     test_resolution()
     test_agent_file()
     test_local_profile()
+    test_profile_agents()
     test_no_script_names_an_orchestrator()
     sys.exit(1 if fails else 0)

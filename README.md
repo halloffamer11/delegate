@@ -10,7 +10,7 @@ Needs Python 3.9 or newer as `python3` (macOS ships 3.9 at `/usr/bin/python3`) a
 
 ```sh
 git clone https://github.com/halloffamer11/delegate ~/projects/delegate
-make -C ~/projects/delegate install          # skills, courier agent, `delegate` command, codex home
+make -C ~/projects/delegate install          # skills, Claude's courier agent, `delegate` command, codex home
 make -C ~/projects/delegate delegate-wizard  # write this machine's catalog
 ```
 

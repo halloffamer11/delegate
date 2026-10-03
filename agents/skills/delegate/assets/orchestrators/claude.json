@@ -23,5 +23,12 @@
     "note": "Headless, for eval 3. /delegate must be typed: the skill is user-invoked only, and in -p mode the leading slash command is the user's own invocation.",
     "argv": ["claude", "-p", "{prompt}", "--allowedTools", "Bash,Read"],
     "prompt": "/delegate {cls} job, brief {brief}, working directory {cwd}. When it finishes, print the run directory."
-  }
+  },
+  "agents": [
+    {
+      "note": "The courier: a Claude Workflow script has no shell, so this agent runs one delegate dispatch for it and relays return.json. No other harness needs it.",
+      "file": "claude/courier.md",
+      "dir": "~/.claude/agents"
+    }
+  ]
 }

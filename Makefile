@@ -1,7 +1,7 @@
 # delegate/Makefile — install delegate on this machine and run its tools.
 #
 # Usage:
-#   make install             # link the skills, the courier agent and the `delegate` command; write the codex home
+#   make install             # link the skills, each orchestrator's agents (Claude's courier) and the `delegate` command; write the codex home
 #   make test                # every script test and the dashboard test (stdlib only, no network);
 #                            # PYTHON=python3.X picks the interpreter, 3.9 or newer
 #   make eval-ping           # eval 1: a pong job on every installed harness (spends a little quota);
@@ -50,7 +50,9 @@ install: delegate-codex-home
 		if [ -L "$$l" ] && [ ! -e "$$l" ]; then case "$$(readlink "$$l")" in $(CURDIR)/agents/skills/*) echo "rm stale $$l"; rm "$$l";; esac; fi; \
 	done; done
 	mkdir -p $(HOME)/.claude/agents $(HOME)/.local/bin
-	ln -sfn $(CURDIR)/agents/agents/courier.md $(HOME)/.claude/agents/courier.md
+	@# Agent files one orchestrator needs (Claude's courier) are declared in its profile.
+	$(PYTHON) $(CURDIR)/agents/skills/delegate/scripts/orchestrators.py agents | while IFS='	' read -r src link; do \
+		mkdir -p "$$(dirname "$$link")" && ln -sfn "$$src" "$$link" && echo "link $$link"; done
 	ln -sfn $(CURDIR)/bin/delegate $(HOME)/.local/bin/delegate
 
 test:

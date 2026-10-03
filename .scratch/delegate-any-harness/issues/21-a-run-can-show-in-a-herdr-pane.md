@@ -28,8 +28,12 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** needs-triage, raised by Orin 2026-10-03. Waits on Orin: keep the courier as the
-Workflow-only extra and add this (recommended), or require Herdr everywhere.
+**Status:** wontfix, 2026-10-03. Orin narrowed the question to the courier, which is Claude
+Workflow glue only, and asked whether Herdr inside the courier adds anything beyond visibility. It
+does not: the Workflow dies with its session whatever pane the run is in, relays are headless so
+Herdr's `blocked` state never fires, and the cost is a Herdr dependency nested inside a Haiku
+subagent plus panes to clean up. Herdr stays available to a person, never required by delegate.
+The courier moved under Claude's orchestrator profile instead.
 
 - [ ] Orin picks opt-in or required (Orin's box).
 - [ ] `delegate run --herdr` opens a pane, runs the dispatch there, and prints the same finish

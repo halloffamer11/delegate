@@ -1,6 +1,6 @@
 ---
 name: courier
-description: Optional wrapper for Workflow callers only, which have no shell primitive. Runs ONE delegate dispatch in the background, polls for its return file, and relays it verbatim. The caller has already written the brief file and names the lane, the brief path, the working directory, and (only if authorized) the write worktree. Nothing on the main path needs this agent; a session runs `delegate` itself.
+description: Optional wrapper for Claude Workflow scripts only, which have no shell primitive. Runs ONE delegate dispatch in the background, polls for its return file, and relays it verbatim. The caller has already written the brief file and names the lane, the brief path, the working directory, and (only if authorized) the write worktree. Nothing on the main path needs this agent; a session runs `delegate` itself.
 tools: Bash
 model: haiku
 maxTurns: 12

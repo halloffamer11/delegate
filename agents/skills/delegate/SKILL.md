@@ -97,7 +97,7 @@ That file also holds the ranking rule, for explaining a pick.
   [references/catalog.md](references/catalog.md#focused-changes).
 - **What the benchmarks say about a model**: see
   [references/catalog.md](references/catalog.md#model-evidence).
-- **A Workflow script** has no shell. The optional `courier` agent runs the
+- **A Claude Workflow script** has no shell. Claude's optional `courier` agent runs the
   same `delegate dispatch` and relays `return.json`; nothing else needs it.
 
 ## References
