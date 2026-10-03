@@ -2,7 +2,9 @@
 
 Adding a harness means adding one module here (see `base.Harness`) and one
 entry in REGISTRY. Everything else in delegate iterates the registry or asks
-`get(name)`, and no other script names a harness.
+`get(name)`, and no other script names a harness. The Lane name
+`<model-effort>@<harness>` is spelled and split here too (`lane_name`,
+`split_lane`), the lowest module every script imports.
 """
 import shutil
 
@@ -47,3 +49,20 @@ def slug_family(slug):
             if effort is not None:
                 return base, effort
     return slug or "", None
+
+
+def lane_name(stem, effort, harness):
+    """`<stem>-<effort>@<harness>`: the one spelling of a Lane name. `effort`
+    None means `stem` already carries it (`sol-high`)."""
+    model_effort = stem if effort is None else f"{stem}-{effort}"
+    return f"{model_effort}@{harness}"
+
+
+def split_lane(name):
+    """(model_effort, harness) for a Lane name: `("sol-high", "codex")` from
+    `sol-high@codex`. The harness is what follows the last `@`, the suffix the
+    catalog checks; a name with no `@` is (name, None)."""
+    if "@" not in (name or ""):
+        return name or "", None
+    model_effort, harness = name.rsplit("@", 1)
+    return model_effort, harness

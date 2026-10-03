@@ -11,7 +11,8 @@
     },
     "impl": {
       "floor": 2,
-      "ceiling": 3
+      "ceiling": 3,
+      "leash": false
     },
     "review": {
       "floor": 3,
@@ -19,7 +20,8 @@
     },
     "hard-impl": {
       "floor": 3,
-      "ceiling": 3
+      "ceiling": 3,
+      "leash": false
     }
   },
   "margin": 0.2,

@@ -14,6 +14,7 @@ import bench_page
 import catalog
 import discover
 import effort
+import harnesses
 import orchestrators
 import setup_tui
 from catalog import CatalogError, HARNESSES, load_json, validate_lanes, validate_routing, write_json
@@ -491,7 +492,7 @@ def save_native_agents(refresh, lanes_doc, agents_dir, profile):
             f.write(native_agent_text(name, lane, profile))
         lines.append(f"wrote {path}")
     for name in refresh.get("removed") or ():
-        if not name.endswith("@" + harness) or name in lanes:
+        if harnesses.split_lane(name)[1] != harness or name in lanes:
             continue
         path = orchestrators.agent_path(profile, name, agents_dir)
         if os.path.isfile(path) or os.path.islink(path):

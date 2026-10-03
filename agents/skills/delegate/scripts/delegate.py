@@ -167,7 +167,7 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
 
     if not lane_name or lane_name not in lanes:
         shown = lane_name or ""
-        harness = shown.split("@")[-1] if "@" in shown else None
+        harness = harnesses.split_lane(shown)[1]
         if harness and harness in HARNESSES:
             avail = [l for l, d in lanes.items() if d.get("harness") == harness]
             if avail:
@@ -277,20 +277,19 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
     }
 
 
-def should_leash(class_name, no_leash=False):
-    # The leash sentence is present for scout, mechanical and review, and absent
-    # for impl and hard-impl. Review is a reading job bounded by the diff, so it
-    # keeps the leash. Impl and hard-impl drop it because the real limit is the
-    # lane timeout. --no-leash drops the leash for one job of any class.
-    # If class is unspecified, conservative reading is to keep the leash.
+def should_leash(class_name, no_leash=False, routing=None):
+    # The leash is a Class's `leash` in the effective routing (catalog.class_leash).
+    # The shipped catalog sets it false for impl and hard-impl, whose real limit
+    # is the lane timeout; scout, mechanical and review keep it (review is a
+    # reading job bounded by the diff). A Class without the key, or no Class,
+    # keeps the conservative leash. --no-leash drops it for one job of any class.
     if no_leash:
         return False
-    if class_name in ("impl", "hard-impl"):
-        return False
-    return True
+    return catalog.class_leash(routing, class_name)
 
 
-def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_=None, no_leash=False):
+def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_=None, no_leash=False,
+                 routing=None):
     preamble_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble.md"))
     leash_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble-leash.md"))
     schema_path = os.path.abspath(os.path.join(HERE, "..", "assets", "schemas", "return.json"))
@@ -298,7 +297,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     with open(preamble_path, "rb") as f:
         preamble_bytes = f.read()
 
-    leash_active = should_leash(class_, no_leash=no_leash)
+    leash_active = should_leash(class_, no_leash=no_leash, routing=routing)
     if leash_active:
         with open(leash_path, "rb") as f:
             leash_bytes = f.read().strip()
@@ -806,7 +805,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     child_cwd = resolved["child_cwd"]
     ads_d = resolved["ads_dir"]
 
-    effective_leash = should_leash(class_, no_leash=no_leash)
+    effective_leash = should_leash(class_, no_leash=no_leash, routing=resolved["routing"])
 
     # Step 2: Build the prompt
     prompt_bytes, _ = build_prompt(
@@ -816,6 +815,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         brief_path=brief,
         class_=class_,
         no_leash=no_leash,
+        routing=resolved["routing"],
     )
 
     # Step 3: Allocate the run directory

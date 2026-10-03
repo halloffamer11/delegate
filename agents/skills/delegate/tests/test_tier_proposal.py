@@ -140,6 +140,26 @@ def walk_to_tier_four(w):
     w.handle("enter")      # carry -> tier 4
 
 
+def test_order_is_a_list():
+    """The proposal order is a list of Lane names, not text a caller parses:
+    highest Tier first, each Tier's Lanes by place, and the `<lane> <tier>`
+    lines and the wizard's `p` both follow it."""
+    proposals = tier_proposal.propose(LANES, AA_ROWS, SETTINGS)
+    names = tier_proposal.ordered(proposals)
+    keys = [(-proposals[n]["tier"], proposals[n]["place"]) for n in names]
+    record("ordered() names every proposal, highest Tier first, then by place",
+           sorted(names) == sorted(proposals) and keys == sorted(keys), repr(names))
+    record("proposal_lines prints that order",
+           tier_proposal.proposal_lines(proposals)
+           == "".join(f"{n} {proposals[n]['tier']}\n" for n in names))
+    w = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, set(catalog.HARNESSES),
+               "/tmp/lanes.json", "/tmp/routing.json", effort_rows=AA_ROWS, class_guide={})
+    walk_to_tier_four(w)
+    w.handle("p")
+    record("taking the proposals keeps that order",
+           sorted(w._line_order, key=w._line_order.get) == names, repr(w._line_order))
+
+
 def test_wizard_confirm_and_quit():
     def fresh():
         return Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, set(catalog.HARNESSES),
@@ -179,5 +199,6 @@ if __name__ == "__main__":
     test_bands_and_frontier()
     test_diversity()
     test_switching_the_benchmark()
+    test_order_is_a_list()
     test_wizard_confirm_and_quit()
     sys.exit(1 if fails else 0)

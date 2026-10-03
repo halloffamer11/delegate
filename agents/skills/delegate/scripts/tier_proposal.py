@@ -127,10 +127,14 @@ def propose(lanes_doc, effort_rows, settings, names=None):
     return out
 
 
+def ordered(proposals):
+    """The proposed Lane names, highest Tier first, each Tier's in its order."""
+    return sorted(proposals, key=lambda n: (-proposals[n]["tier"], proposals[n]["place"]))
+
+
 def proposal_lines(proposals):
     """The proposals as `<lane> <tier>` lines, each Tier's Lanes in order."""
-    ordered = sorted(proposals, key=lambda n: (-proposals[n]["tier"], proposals[n]["place"]))
-    return "".join(f"{name} {proposals[name]['tier']}\n" for name in ordered)
+    return "".join(f"{name} {proposals[name]['tier']}\n" for name in ordered(proposals))
 
 
 def describe(proposal):

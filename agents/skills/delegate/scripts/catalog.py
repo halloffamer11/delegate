@@ -88,11 +88,23 @@ EFFORTS = harnesses.EFFORTS
 # The efforts each harness offers, and so the only efforts a lane on it may
 # carry (ticket 19). Each adapter records its source.
 HARNESS_EFFORTS = {h.name: tuple(h.efforts) for h in harnesses.REGISTRY}
-# The five shipped Classes (ticket 16). A catalog gets them, with the Ranges
-# in assets/samples/routing.json, when it defines none; a catalog may give one
-# a Range of its own, and may add a Class of its own beside them (a Range in
-# routing.json and a section in a Class guide), but never loses one.
-CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
+# The starting catalog's routing: the shipped Classes and the Tier proposal
+# rule a catalog falls back to.
+SHIPPED_ROUTING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                                    "assets", "samples", "routing.json")
+
+
+def _shipped_routing():
+    with open(SHIPPED_ROUTING_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+# The five shipped Classes (ticket 16), in the order the starting catalog
+# writes them. A catalog gets them, with their Ranges, when it defines none; a
+# catalog may give one a Range of its own, and may add a Class of its own
+# beside them (a Range in routing.json and a section in a Class guide), but
+# never loses one.
+CLASSES = tuple(_shipped_routing()["classes"])
 DEFAULT_CLASSES_SOURCE = "default"
 # A Class name a catalog adds: lower case, digits and hyphens, as the shipped
 # ones are, so it reads the same in a Lane header, a flag and a guide heading.
@@ -405,7 +417,7 @@ def validate_lanes(doc, source="lanes.json"):
                 f"{source}: lane '{lane_name}': harness must be one of {', '.join(HARNESSES)}, got {harness!r}"
             )
         expected_suffix = f"@{harness}"
-        if not lane_name.endswith(expected_suffix):
+        if harnesses.split_lane(lane_name)[1] != harness:
             raise CatalogError(
                 f"{source}: lane '{lane_name}': lane name must end with '{expected_suffix}'"
             )
@@ -714,10 +726,15 @@ def validate_routing(doc, source="routing.json", partial=False):
                     f"{source}: classes: class '{cls_name}': must be an object with 'floor' and 'ceiling'"
                 )
             for fld in cls_range:
-                if fld not in ("floor", "ceiling"):
+                if fld not in ("floor", "ceiling", "leash"):
                     raise CatalogError(
                         f"{source}: classes: class '{cls_name}': unknown field '{fld}'"
                     )
+            if "leash" in cls_range and type(cls_range["leash"]) is not bool:
+                raise CatalogError(
+                    f"{source}: classes: class '{cls_name}': leash must be true or false, "
+                    f"got {cls_range['leash']!r}"
+                )
             if not partial:
                 for req in ("floor", "ceiling"):
                     if req not in cls_range:
@@ -832,9 +849,7 @@ def tier_proposal_settings(routing):
     catalog's (assets/samples/routing.json)."""
     if isinstance(routing, dict) and "tier_proposal" in routing:
         return copy.deepcopy(routing["tier_proposal"])
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets",
-                           "samples", "routing.json"), encoding="utf-8") as f:
-        return json.load(f)["tier_proposal"]
+    return _shipped_routing()["tier_proposal"]
 
 
 def merge_routing(global_doc, project_doc=None, global_source="routing.json", project_source=None):
@@ -849,8 +864,9 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
     for k in global_doc:
         sources[k] = g_src
     # The shipped Classes come first, then the global document's own: a
-    # catalog's Range for a shipped Class replaces the default, and a Class it
-    # adds sorts after the shipped five.
+    # catalog's Range for a shipped Class replaces the default, a key it leaves
+    # out (`leash`) keeps the shipped one, and a Class it adds sorts after the
+    # shipped five.
     classes = {}
     for c, c_val in default_class_ranges().items():
         classes[c] = c_val
@@ -860,7 +876,10 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
     if "classes" in global_doc and isinstance(global_doc["classes"], dict):
         sources["classes"] = g_src
         for c, c_val in global_doc["classes"].items():
-            classes[c] = copy.deepcopy(c_val)
+            if isinstance(c_val, dict) and isinstance(classes.get(c), dict):
+                classes[c] = {**classes[c], **copy.deepcopy(c_val)}
+            else:
+                classes[c] = copy.deepcopy(c_val)
             sources[f"classes.{c}"] = g_src
             if isinstance(c_val, dict):
                 for sub_k in c_val:
@@ -894,11 +913,9 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
 
 
 def default_class_ranges():
-    """{class: {floor, ceiling}} for the shipped Classes: the Ranges the
+    """{class: {floor, ceiling[, leash]}} for the shipped Classes: what the
     starting catalog (assets/samples/routing.json) gives them."""
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets",
-                           "samples", "routing.json"), encoding="utf-8") as f:
-        shipped = json.load(f)["classes"]
+    shipped = _shipped_routing()["classes"]
     return {c: dict(shipped[c]) for c in CLASSES}
 
 
@@ -919,6 +936,17 @@ def class_names(routing):
     Classes the catalog adds, in the order it writes them."""
     own = [c for c in (routing or {}).get("classes", {}) if c not in CLASSES]
     return list(CLASSES) + own
+
+
+def class_leash(routing, cls):
+    """Whether a job of this Class gets the leash sentence: the effective
+    routing's `classes.<cls>.leash`, else the shipped Class's, else true. A
+    job with no Class, or a Class the catalog adds without the key, keeps the
+    leash."""
+    entry = ((routing or {}).get("classes") or {}).get(cls)
+    if isinstance(entry, dict) and "leash" in entry:
+        return entry["leash"]
+    return default_class_ranges().get(cls, {}).get("leash", True)
 
 
 def meters_enabled(routing):
@@ -1835,7 +1863,7 @@ def _catalog_from_docs(lanes_doc, routing_doc, project_doc, files, project_lanes
 def _rank_preview(cat, meters_doc, present):
     rank = _rank_mod()
     picks = {}
-    for cls in CLASSES:
+    for cls in class_names(cat["routing"]):
         rows = rank.rank(cls, cat, meters_doc, present)
         picks[cls] = next((row["lane"] for row in rows if row.get("pick")), None)
     leaders = [

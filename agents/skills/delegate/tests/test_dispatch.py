@@ -946,6 +946,35 @@ def main():
         record("27. --no-leash scout prompt lacks leash, dispatch.json leash=False", ok27, f"rc={res27.returncode}")
 
         # -------------------------------------------------------------
+        # 27a. the leash is the Class's routing field: a catalog that sets
+        #      scout's leash false drops it, and one written before the key
+        #      existed (impl with no `leash`) keeps the shipped impl's false.
+        # -------------------------------------------------------------
+        leash_env = dict(t_env)
+        leash_env["config_dir"] = os.path.join(os.path.dirname(t_env["config_dir"]), "config-leash")
+        shutil.copytree(t_env["config_dir"], leash_env["config_dir"])
+        leash_routing_path = os.path.join(leash_env["config_dir"], "routing.json")
+        leash_routing = json.load(open(leash_routing_path))
+        leash_routing["classes"]["scout"]["leash"] = False
+        leash_routing["classes"]["impl"].pop("leash", None)
+        with open(leash_routing_path, "w") as f:
+            json.dump(leash_routing, f)
+        seen27a = {}
+        for cls in ("scout", "impl", "review"):
+            b27a = make_brief(f"b27a-{cls}.md", f"fake-relay: status=completed final={done_final}\nBrief 27a.")
+            res27a = run_dispatch(leash_env, ["--lane", "terra-high@codex", "--class", cls, "--brief", b27a, "--cwd", cwd])
+            dir27a = parse_run_dir_from_stdout(res27a.stdout)
+            if res27a.returncode != 0 or dir27a is None:
+                seen27a[cls] = f"rc={res27a.returncode} err={res27a.stderr[-300:]}"
+                continue
+            prompt27a = open(os.path.join(dir27a, "prompt.md"), "r", encoding="utf-8").read()
+            disp27a = json.load(open(os.path.join(dir27a, "dispatch.json")))
+            seen27a[cls] = (leash_sentence in prompt27a, disp27a.get("leash"))
+        record("27a. routing classes.<name>.leash decides the leash; a missing key keeps the shipped one",
+               seen27a == {"scout": (False, False), "impl": (False, False), "review": (True, True)},
+               repr(seen27a))
+
+        # -------------------------------------------------------------
         # 27b. run --harness: the user's constraint runs that harness's Pick, and
         #      a harness that is not installed starts nothing (any-harness 12).
         # -------------------------------------------------------------

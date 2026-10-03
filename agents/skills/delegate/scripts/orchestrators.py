@@ -48,6 +48,9 @@ SHIPPED_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "orchestrators"
 LOCAL_DIR = "~/.config/delegate/orchestrators"
 DEFAULT = "none"
 
+sys.path.insert(0, HERE)
+import harnesses  # noqa: E402
+
 
 class ProfileError(ValueError):
     pass
@@ -156,7 +159,7 @@ def _fill(text, values):
 
 
 def agent_name(profile, lane):
-    model_effort = lane.split("@", 1)[0]
+    model_effort = harnesses.split_lane(lane)[0]
     return _fill(profile["native"]["agent"], {"model_effort": model_effort, "lane": lane})
 
 

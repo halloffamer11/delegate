@@ -43,6 +43,40 @@ def test_registry_is_the_list():
            == sorted(harnesses.get(n).catalog_models for n in harnesses.discovery_order()))
 
 
+def test_lane_name():
+    """One owner spells and splits `<model-effort>@<harness>`; the scripts
+    that build or read a Lane name agree with it."""
+    import discover
+    import orchestrators
+    record("lane_name joins a stem, an effort and a harness",
+           harnesses.lane_name("sol", "high", "codex") == "sol-high@codex"
+           and harnesses.lane_name("sol-high", None, "codex") == "sol-high@codex")
+    record("split_lane is lane_name's inverse; no `@` is no harness",
+           harnesses.split_lane("sol-high@codex") == ("sol-high", "codex")
+           and harnesses.split_lane("sol-high") == ("sol-high", None)
+           and harnesses.split_lane("") == ("", None)
+           and harnesses.split_lane(None) == ("", None))
+    sample = catalog.load_json(os.path.join(SCRIPTS, "..", "assets", "samples", "lanes.json"))
+    lanes = sample["lanes"]
+    record("every sample Lane name splits to its own harness",
+           all(harnesses.split_lane(name)[1] == lane["harness"] for name, lane in lanes.items()))
+    record("discovery's names and stems go through the pair",
+           discover._free_name("sol", "high", "codex", {"sol-high@codex"}) == "sol2-high@codex"
+           and discover._lane_stem_of("sol-high@codex") == "sol"
+           and set(discover.generate_efforts_stanzas("codex", "gpt-5.6-sol", ["high"])[2])
+           == {harnesses.lane_name(discover.derive_short_name("gpt-5.6-sol")[0], "high", "codex")})
+    profile = {"native": {"agent": "lane-{model_effort}"}}
+    record("an orchestrator's agent name takes the Lane's model-effort",
+           orchestrators.agent_name(profile, "fable-xhigh@claude") == "lane-fable-xhigh")
+    try:
+        catalog.validate_lanes(dict(sample, lanes={"sol-high@agy": dict(lanes["sol-high@codex"])}))
+        msg = ""
+    except catalog.CatalogError as e:
+        msg = str(e)
+    record("the catalog refuses a Lane whose name names another harness",
+           "must end with '@codex'" in msg, msg)
+
+
 def test_binary_need_not_be_the_name():
     """A harness whose CLI is not named after it (Kiro: kiro-cli) is installed
     exactly when its binary is on PATH."""
@@ -231,6 +265,7 @@ def test_claude_model_meter():
 
 if __name__ == "__main__":
     test_registry_is_the_list()
+    test_lane_name()
     test_effort_words()
     test_claude_model_meter()
     test_binary_need_not_be_the_name()

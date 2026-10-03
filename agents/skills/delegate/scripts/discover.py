@@ -30,8 +30,9 @@ Efforts per harness (ticket 19):
   - agy: in the slug. `gemini-3.8-flash-high`, `-medium` and `-low` are one
     model family, `gemini-3.8-flash`, with efforts high, medium and low, and
     a stanza for one of them names the suffixed slug.
-  - grok: `catalog.HARNESS_EFFORTS["grok"]`; `grok --help` lists no values and
-    the CLI accepts any, so only the effort a lane has run at is offered.
+  - grok: the grok adapter's `efforts` (scripts/harnesses/grok.py, which
+    `catalog.HARNESS_EFFORTS` copies); `grok --help` lists no values and the
+    CLI accepts any, so only the effort a lane has run at is offered.
 
 Drift detection:
   - Slugs with no lane: models offered by a present harness that have no
@@ -595,11 +596,11 @@ def _free_name(stem, effort, harness, *taken):
     can collide; a counter after the stem is the smallest thing that separates
     them and stays the same on every run.
     """
-    name = f"{stem}-{effort}@{harness}"
+    name = harnesses.lane_name(stem, effort, harness)
     counter = 1
     while any(name in names for names in taken):
         counter += 1
-        name = f"{stem}{counter}-{effort}@{harness}"
+        name = harnesses.lane_name(f"{stem}{counter}", effort, harness)
     return name
 
 
@@ -637,7 +638,7 @@ def _starter(harness, doc):
 
 def _lane_stem_of(lane_name):
     """`sol` from `sol-high@codex`: what the start page prints as `sol-*@codex`."""
-    return lane_name.rsplit("@", 1)[0].rsplit("-", 1)[0]
+    return harnesses.split_lane(lane_name)[0].rsplit("-", 1)[0]
 
 
 def refresh_catalog(lanes_doc, discovery, published_models=()):
@@ -935,7 +936,7 @@ def generate_efforts_stanzas(harness, slug, efforts):
     short_name, derivation = derive_short_name(slug)
     stanzas = {}
     for effort in efforts:
-        lane_name = f"{short_name}-{effort}@{harness}"
+        lane_name = harnesses.lane_name(short_name, effort, harness)
         stanza = {
             "harness": harness,
             # a harness whose effort is in the slug accepts it only there

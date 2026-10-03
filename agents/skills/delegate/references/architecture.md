@@ -192,7 +192,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   board's tier lines — keeping only the tier view toggle (`page.resetAll`, ticket 36); "Price per
   model" below the plots is one row per model with the vendor's list price in and out on one shared
   log axis, efforts collapsed because every effort of a model is charged the same and an agy model's
-  slugs joined through `catalog.agy_family` (`bench_page.price_rows`, `drawPrices`): an open dot for
+  slugs joined through `harnesses.family` (`bench_page.price_rows`, `drawPrices`): an open dot for
   input, a filled one for output, colour the meter, the value beside each dot, a model with no
   published price saying so and drawing nothing, two efforts that disagree drawing the range, and
   the same figures in a table under it; a tier view puts the digit in each dot; the page's tiers
@@ -300,10 +300,10 @@ down one Tier; Tier 1 requires Carry to switch off.
   a family key, not the model string (ticket 30): `bench.model_families(lanes_doc)` keys every
   harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
   because agy names each effort as its own model. The harness decides, never the spelling. That
-  family rule has one implementation, `catalog.agy_family`, which discovery groups a harness listing
-  with (`discover.group_agy_models`). `dominating_effort`, `dominating_row` and `_first_domination`
-  take the map; without one every model is its own family. `setup_tui` re-exports the policy
-  helpers.
+  family rule has one implementation, the adapter's `family` (`harnesses/agy.py`, reached through
+  `harnesses.family` and `catalog.slug_family`), which the agy adapter's `group` also groups its
+  model listing with. `dominating_effort`, `dominating_row` and `_first_domination` take the map;
+  without one every model is its own family. `setup_tui` re-exports the policy helpers.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
   `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.

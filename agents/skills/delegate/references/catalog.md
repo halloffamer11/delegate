@@ -23,7 +23,11 @@ The catalog is machine-local: each machine keeps its own, never in the repo.
   class), `margin`, `gate`, optional `meters` and `overflow` (booleans, on by
   default), and optional `tier_proposal` (the rule the wizard proposes tiers
   by). A catalog that writes no `classes` gets the five shipped classes with
-  the ranges in `assets/samples/routing.json`.
+  the ranges in `assets/samples/routing.json`. A class may also set `leash`
+  (a boolean): false drops the preamble's leash sentence for its jobs.
+  Shipped, impl and hard-impl set it false; a class without it inherits the
+  shipped class's value, else keeps the leash. `--no-leash` drops it for one
+  job.
 - `<git-root>/.delegate/routing.json`: a project's override of any routing
   key; `classes` merges per class and per key. `project_order` places lanes
   inside a tier for this project.

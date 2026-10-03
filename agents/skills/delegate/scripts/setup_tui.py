@@ -266,14 +266,15 @@ def refresh_lines(refresh, width=80):
         return []
     lines = []
     for item in refresh.get("models") or []:
-        family = f"{item['stem']}-*@{item['harness']}"
+        family = harness_registry.lane_name(item["stem"], "*", item["harness"])
         count = plural(len(item["new"]), "Lane")
         if item.get("predecessor"):
             replaced = len(set(item["replaced"]))
             tail = count if replaced == len(item["new"]) else f"{count} for {replaced}"
             lines.append(fit_line(
                 f"{item['predecessor']} → {item['model']}: {family} replace "
-                f"{item['predecessor_stem']}-*@{item['harness']} ({tail})", width))
+                f"{harness_registry.lane_name(item['predecessor_stem'], '*', item['harness'])} "
+                f"({tail})", width))
         else:
             lines.append(fit_line(f"new {item['model']}: {family} ({count})", width))
     # a superseded lane with no successor at its effort leaves with no line of
@@ -742,7 +743,7 @@ class Wizard:
                    if assigned == tier and self._enabled[name]}
             for tier in range(1, 5)
         }
-        ordered = tier_proposal.proposal_lines(proposals).split()[::2]
+        ordered = tier_proposal.ordered(proposals)
         self._line_order = {name: index for index, name in enumerate(ordered)}
         self._tier_order = {tier: [] for tier in range(1, 5)}
         unscored = len(self._carried()) - len(proposals)
@@ -1392,7 +1393,7 @@ class Wizard:
             refresh = self.refresh or {}
             new = {name: (self.lanes_doc["lanes"].get(name) or {}).get("harness")
                    for name in refresh.get("new") or ()}
-            removed = [name.rsplit("@", 1)[-1] for name in refresh.get("removed") or ()]
+            removed = [harness_registry.split_lane(name)[1] for name in refresh.get("removed") or ()]
             rows = []
             for name in HARNESSES:
                 info = harnesses.get(name) if isinstance(harnesses.get(name), dict) else None

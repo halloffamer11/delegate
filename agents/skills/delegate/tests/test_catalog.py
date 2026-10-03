@@ -2992,4 +2992,53 @@ record(
     f"{check_catalog_error(catalog.validate_lanes, xhigh)} / {mismatch_msg}",
 )
 
+
+# The shipped Classes are the starting catalog's, read from it, not a copy.
+record("21.1 CLASSES is the sample routing's class list, in its order",
+       catalog.CLASSES == tuple(routing_sample["classes"]), repr(catalog.CLASSES))
+
+# A Class's leash is a routing field: a boolean, merged per key, and a catalog
+# that leaves it out keeps the shipped Class's value.
+bad_leash = copy.deepcopy(routing_sample)
+bad_leash["classes"]["scout"]["leash"] = "no"
+bad_leash_msg = check_catalog_error(catalog.validate_routing, bad_leash)
+good_leash = copy.deepcopy(routing_sample)
+good_leash["classes"]["scout"]["leash"] = False
+record("21.2 classes.<name>.leash must be a boolean",
+       bool(bad_leash_msg and "scout" in bad_leash_msg and "leash" in bad_leash_msg)
+       and check_catalog_error(catalog.validate_routing, good_leash) is None
+       and check_catalog_error(catalog.validate_routing,
+                               {"classes": {"impl": {"leash": True}}}, partial=True) is None,
+       f"{bad_leash_msg}")
+record("21.3 the shipped leash: impl and hard-impl off, the rest and no Class on",
+       [catalog.class_leash(None, c) for c in catalog.CLASSES + (None, "triage")]
+       == [True, True, False, True, False, True, True],
+       repr([catalog.class_leash(None, c) for c in catalog.CLASSES]))
+with tempfile.TemporaryDirectory() as td:
+    old_classes = copy.deepcopy(routing_sample["classes"])
+    for c_val in old_classes.values():
+        c_val.pop("leash", None)
+    old_classes["scout"]["leash"] = False
+    old_classes["triage"] = {"floor": 1, "ceiling": 2}
+    config, cwd = class_world(td, old_classes, guide=TRIAGE_GUIDE,
+                              project={"classes": {"hard-impl": {"leash": True}}})
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    leashes = {c: catalog.class_leash(cat["routing"], c) for c in catalog.class_names(cat["routing"])}
+    record("21.4 a catalog's leash wins, a missing one keeps the shipped value, a project's merges per key",
+           leashes == {"scout": False, "mechanical": True, "impl": False, "review": True,
+                       "hard-impl": True, "triage": True}
+           and cat["sources"]["classes.impl.leash"] == catalog.DEFAULT_CLASSES_SOURCE
+           and cat["routing"]["classes"]["impl"]["floor"] == 2
+           and cat["sources"]["classes.hard-impl.leash"] == os.path.join(cwd, ".delegate", "routing.json"),
+           f"{leashes} {cat['sources'].get('classes.impl.leash')} {cat['sources'].get('classes.hard-impl.leash')}")
+
+# An edit's preview shows a Class the catalog adds, not only the shipped five.
+with tempfile.TemporaryDirectory() as td:
+    config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config)
+    picks, _leaders = catalog._rank_preview(cat, {}, set(catalog.HARNESSES))
+    record("21.5 the rank preview picks for every Class the catalog defines",
+           list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
+           repr(picks))
+
 sys.exit(1 if fails else 0)
