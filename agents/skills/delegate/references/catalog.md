@@ -30,7 +30,10 @@ The catalog is machine-local: each machine keeps its own, never in the repo.
   job.
 - `<git-root>/.delegate/routing.json`: a project's override of any routing
   key; `classes` merges per class and per key. `project_order` places lanes
-  inside a tier for this project.
+  inside a tier for this project. A lane it does not name, such as one the
+  wizard added later, takes its place by global order: right after the last
+  named lane the global order puts ahead of it. A lane with no global order
+  goes last.
 - `<git-root>/.delegate/lanes.json`: a project's tier for a lane the global
   catalog has, and nothing else: `{"lanes": {"<lane>": {"tier": 2}}}`. The
   effective tier is the project's where it names one; range, gate, overflow

@@ -989,7 +989,7 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
         named_in_tier = [
             name for name in project_order if effective[name]["tier"] == tier
         ]
-        fallback = sorted(
+        unnamed = sorted(
             (
                 (name, lane)
                 for name, lane in effective.items()
@@ -1003,7 +1003,7 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
                 item[0],
             ),
         )
-        ordered_names = named_in_tier + [name for name, _lane in fallback]
+        ordered_names = _place_by_global_order(named_in_tier, unnamed, effective)
         for order, lane_name in enumerate(ordered_names, 1):
             effective[lane_name]["order"] = order
             sources[f"lanes.{lane_name}.order"] = (
@@ -1011,6 +1011,33 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
             )
 
     return effective
+
+
+def _place_by_global_order(named, unnamed, lanes):
+    """The Tier's order: the project's named Lanes in its sequence, and each
+    Lane it does not name placed by global Order (ticket 30).
+
+    A Lane the project has not placed goes right after the last named Lane
+    whose global Order is ahead of its own, so a successor the wizard gave its
+    predecessor's `order` lands where the predecessor sat rather than at the
+    bottom. One with no global Order goes last, by name. `unnamed` arrives
+    sorted by global Order then name, so ties keep that order. `lanes` are
+    the effective records before this Tier is numbered: a Lane a project Tier
+    moved has no global Order here.
+    """
+    out = list(named)
+    for name, lane in unnamed:
+        place = lane.get("order")
+        if place is None:
+            out.append(name)
+            continue
+        after = -1
+        for index, other in enumerate(out):
+            other_place = (lanes.get(other) or {}).get("order")
+            if other_place is not None and other_place <= place:
+                after = index
+        out.insert(after + 1, name)
+    return out
 
 
 def project_lanes_path(cwd=None):

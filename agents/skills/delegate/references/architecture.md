@@ -14,7 +14,10 @@ the scripts; `SKILL.md` is the authority for how a session routes.
 ## Project routing
 
 Project routing changes go through `catalog.load_catalog()`: a flat `project_order`
-projects carried lanes within their effective Tiers and preserves Order provenance.
+projects carried lanes within their effective Tiers and preserves Order provenance. A
+carried Lane it does not name takes its place by global Order (`_place_by_global_order`,
+ticket 30), so a successor the wizard gave its predecessor's `order` lands where the
+predecessor sat.
 Validate complete save proposals with `catalog.validate_project_routing()` against
 the original global documents, not projected lane records. A project may also set a
 Lane's Tier in `<git-root>/.delegate/lanes.json`, that field and nothing else
