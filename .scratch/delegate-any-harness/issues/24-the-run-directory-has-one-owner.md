@@ -1,4 +1,4 @@
-# 23 — The run directory has one owner
+# 24 — The run directory has one owner
 
 **What to build:** A `runs.py` module owns the run directory: a Run with `create`, `finish`, `fail` and `read`, the `dispatch.json` and `return.json` schemas, and `finish_line` / `parse_finish_line`. `delegate.py` makes one native-or-relayed decision that yields a Run. `delegate run` and `delegate dispatch` gain `--json`, so `evals.py`, `browser_probes.py` and the courier stop parsing text three ways.
 

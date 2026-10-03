@@ -1,4 +1,4 @@
-# 25 — catalog.py splits along its seams
+# 26 — catalog.py splits along its seams
 
 **What to build:** Move the edit engine (`catalog.py:1595-2486`) to `catalog_edit.py`, which removes the lazy import cycle with `rank`; give the class-guide checker its own module; move tier-lines next to the wizard and published-name identity next to bench; delete the registry facade (`catalog.py:46-92`). `catalog.py` keeps one job: load, validate and project the effective catalog.
 

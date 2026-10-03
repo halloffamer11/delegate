@@ -1,4 +1,4 @@
-# 24 — Meter identity is explicit and checked
+# 25 — Meter identity is explicit and checked
 
 **What to build:** Each adapter declares the Meter names its probe reports. `delegate catalog check` refuses a Lane whose Meter no installed adapter reports, so a typo stops failing open. The usage row key `lane` becomes `meter` (old caches still read). Gate and Margin defaults come from merged routing only. The unused `probe` Meter field is dropped. The Rust monitor reads each Lane's Meter from `lanes.tsv` instead of re-deriving agy's split.
 

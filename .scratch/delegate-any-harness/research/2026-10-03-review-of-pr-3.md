@@ -80,11 +80,11 @@ Ranked recommendations:
 
 1. Turn the harness flags into adapter verbs (`installed()`, a `meters()` template, `owns()`,
    `effort_for()`, `blocked_reason()`, a `models()` strategy the Claude adapter implements).
-   Size M. Ticket 22.
+   Size M. Ticket 23.
 2. Give the run directory one owner, `runs.py`, with `delegate run|dispatch --json`. Size M.
-   Ticket 23.
+   Ticket 24.
 3. Finish the data abstractions where they leak: one lane-name pair, a per-class leash, previews
    over every class, tier_proposal's ordered names, doc drift. Size S. Done in PR #3.
-4. Make Meter identity explicit and checked by `catalog check`. Size S-M. Ticket 24.
-5. Split `catalog.py` along its seams (edit engine first). Size L, mechanical. Ticket 25.
-6. One carry-policy module over `bench.py`, one "same model" rule. Size M-L. Ticket 26.
+4. Make Meter identity explicit and checked by `catalog check`. Size S-M. Ticket 25.
+5. Split `catalog.py` along its seams (edit engine first). Size L, mechanical. Ticket 26.
+6. One carry-policy module over `bench.py`, one "same model" rule. Size M-L. Ticket 27.

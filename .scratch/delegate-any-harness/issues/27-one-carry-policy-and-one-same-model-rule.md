@@ -1,4 +1,4 @@
-# 26 — One carry policy and one same-model rule
+# 27 — One carry policy and one same-model rule
 
 **What to build:** A `carry.py` module owns `families()`, `decisions()` (structured `{kind, source, competitor}`) and `beats()`, used by the wizard, the bench page and `tier_proposal`; renderers keep their wording. `bench.model_group` and `harnesses.slug_family` go, leaving the adapter's `family` as the one rule for which slugs are the same model.
 
