@@ -1,4 +1,4 @@
-# 21 — Codex does not invoke delegate on its own
+# 22 — Codex does not invoke delegate on its own
 
 **What to build:** Codex runs `/delegate` without being asked. `disable-model-invocation: true`
 is Claude Code frontmatter; Codex reads the same symlinked skill from `~/.agents/skills`
