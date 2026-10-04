@@ -1348,7 +1348,10 @@ def main():
         ok32 = (
             "you may read and write in a disposable browser only" in prompt24_text and
             "every other network write stays forbidden" in prompt24_text and
-            "no commits, no pushes, no messages" in prompt24_text
+            "no commits, no pushes, no messages" in prompt24_text and
+            # browser ticket 06: the agent profile only where the brief lists it
+            "only on the sites and for the actions the brief lists under `# Agent profile`" in prompt24_text and
+            "not at all when it lists none" in prompt24_text
         )
         record("32. prompt preamble permits disposable browser and forbids other network writes", ok32)
 

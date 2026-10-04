@@ -18,7 +18,7 @@ Two ledgers exist and they are not the same file:
                 knows this, so only the lead writes it.
 Run ledger path: $DELEGATE_RUNS else ~/.cache/delegate/runs.jsonl.
 """
-import argparse, json, os, re, sys, time
+import argparse, json, os, re, shutil, sys, time
 from collections import Counter
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -30,9 +30,9 @@ except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
 try:
-    from rank import rank, tier_leaders
+    from rank import rank, tier_leaders, eligible_order, choose
 except ImportError:
-    from .rank import rank, tier_leaders
+    from .rank import rank, tier_leaders, eligible_order, choose
 
 try:
     import usage
@@ -724,7 +724,14 @@ def cmd_statusline(a):
 
         out_lines.append(line.rstrip())
 
-    if a.popup:
+    if a.popup and metering and present:
+        # The popup's own layout (ticket 40): Pace as its calculation, then
+        # each Tier on the same Pace axis. With Meters off there is no Pace to
+        # draw, and with no CLI on PATH no Tier has a lane, so those keep the
+        # rows above and the plain lane block.
+        width = a.width or shutil.get_terminal_size((118, 24)).columns
+        out_lines = popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now)
+    elif a.popup:
         out_lines += lane_lines(catalog, usage_doc, present, picks, c)
 
     for l in out_lines:
@@ -772,6 +779,254 @@ def lane_lines(catalog, usage_doc, present, picks, c):
     return lines
 
 
+# ------------------------------------------------------------- popup
+# The Herdr popup (ticket 40, layout D): each Meter's weekly Pace as its
+# calculation, then each Tier's Lanes on the same Pace axis with the steal line
+# (leader Pace + Margin) and how far the leader's Meter can fall before the Tier
+# hands over. Everything reads the cached Meters at the moment of display: no
+# usage history and no burn rate (ADR 0001), so a distance is in quota points at
+# today's readings, never a time.
+POPUP_LEGEND = ("Pace = weekly Remaining ÷ share of the week left: 1 on track, above 1 spend it"
+                " · ┊ = the Pace that Meter needs to lead the Tier")
+POPUP_NUM_HEAD = "Pace = left ÷ time  5h      resets"
+POPUP_NUM_W = 36
+POPUP_LANE_W = 16
+POPUP_METER_W = 7
+HANDOVER_STEP = 0.005
+
+
+def clip(s, w):
+    """Cut a coloured line to w visible cells, keeping its colour codes."""
+    out, n, i = [], 0, 0
+    while i < len(s):
+        m = ANSI.match(s, i)
+        if m:
+            out.append(m.group())
+            i = m.end()
+            continue
+        if n < w:
+            out.append(s[i])
+            n += 1
+        i += 1
+    return "".join(out)
+
+
+def popup_meters(catalog, by_meter, won_by_meter, now):
+    """One entry per Meter a Lane spends, in the statusline's order."""
+    used = {l.get("meter") for l in catalog.get("lanes", {}).values() if l.get("enabled", True)}
+    all_meters = catalog.get("meters", {})
+    order = list(all_meters)
+    out = []
+    for key in order:
+        if key not in used:
+            continue
+        row = by_meter.get(key) or {}
+        weekly = row.get("remaining_weekly")
+        reset = row.get("reset_weekly")
+        left = row.get("cycle_left")
+        if left is None and reset:
+            left = min(1.0, max(usage.CYCLE_FLOOR, (reset - now) / (WEEK_DAYS * 86400)))
+        shares5 = bool(all_meters[key].get("model_meter")) or row.get("remaining_weekly_model") is not None
+        out.append({"key": key, "label": get_meter_label(key, all_meters[key], all_meters),
+                    "weekly": weekly, "left": left, "pace": row.get("pace"), "reset": reset,
+                    "f5": None if shares5 else row.get("remaining_5h"),
+                    "reset5": None if shares5 else row.get("reset_5h"),
+                    "won": won_by_meter.get(key, set())})
+    out.sort(key=lambda m: (0 if m["won"] else 1, min(m["won"] or {99}), order.index(m["key"])))
+    return out
+
+
+def handover(preview, meter, margin, gate):
+    """How far the Tier leader's Meter can fall before another Lane leads.
+
+    Replays rank's choice (`rank.choose`) with only the leader's Meter
+    spending: its weekly Remaining drops in small steps, the Pace of every Lane
+    on it follows, and the first step where the Pick changes, or the Meter
+    falls under the Gate, is the answer. Returns (points, new leader or None),
+    or None when the leader's Meter has no weekly figure to spend.
+    """
+    rows = [r for r in preview["rows"] if r["eligible"]]
+    lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
+    if lead is None or not meter or meter["weekly"] is None or not meter["left"]:
+        return None
+    others = [r for r in rows if r["meter"] != lead["meter"]]
+    five = meter["f5"]
+    spent = 0.0
+    while True:
+        spent += HANDOVER_STEP
+        weekly = meter["weekly"] - spent
+        remaining = weekly if five is None else min(five, weekly)
+        if remaining < gate:
+            # the leader's Meter is vetoed: the rest of the Tier decides
+            pool = sorted(others, key=lambda r: eligible_order(r, True))
+            return min(spent, meter["weekly"]), (choose(pool, margin, True)[0]["lane"] if pool else None)
+        trial = [dict(r, pace=weekly / meter["left"]) if r["meter"] == lead["meter"] else r for r in rows]
+        trial.sort(key=lambda r: eligible_order(r, True))
+        pick = choose(trial, margin, True)[0]["lane"]
+        if pick != lead["lane"]:
+            return spent, pick
+
+
+def pace_to_lead(preview, meter_key, top):
+    """The lowest Pace at which a Lane on `meter_key` would lead the Tier, by
+    rank's own choice (Pace order, then a steal by the Margin across Order),
+    with every other Meter as it reads now; None when none up to `top` does."""
+    rows = [r for r in preview["rows"] if r["eligible"]]
+    margin = preview.get("margin", 0)
+    pace = 0.0
+    while pace <= top:
+        trial = [dict(r, pace=pace) if r["meter"] == meter_key else r for r in rows]
+        trial.sort(key=lambda r: eligible_order(r, True))
+        if choose(trial, margin, True)[0]["meter"] == meter_key:
+            return pace
+        pace = round(pace + 0.01, 2)
+    return None
+
+
+def pace_axis(paces, width):
+    """(top of the scale, value -> cell) for a Pace axis `width` cells wide."""
+    top = max(3.0, min(8.0, float(int(max([p for p in paces if p is not None] + [1]) + 1))))
+    return top, (lambda v: min(width - 1, max(0, round(v / top * (width - 1)))))
+
+
+def axis_labels(top, x, width, c):
+    cells = [" "] * width
+    for k in range(int(top) + 1):
+        text = str(k)
+        pos = min(width - len(text), x(k))
+        cells[pos:pos + len(text)] = list(text)
+    return c["DIM"] + "".join(cells) + c["R"]
+
+
+def track(top, x, width, c, dot=None, steal=None, steal_col=""):
+    """One row of the Pace axis: the grid, Pace 1 as │, the steal line, the dot."""
+    cells = [(c["MUTE"], "─")] * width
+    for k in range(int(top) + 1):
+        cells[x(k)] = (c["MUTE"], "│" if k == 1 else "┼")
+    if steal is not None:
+        cells[x(steal)] = (steal_col, "┊")
+    if dot is not None and dot[0] is not None:
+        cells[x(dot[0])] = (dot[1], dot[2])
+    return "".join(f"{col}{ch}{c['R']}" for col, ch in cells)
+
+
+def when_short(t):
+    return time.strftime("%a %H:%M", time.localtime(t)) if t else "—"
+
+
+def popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now):
+    routing = catalog.get("routing", {})
+    margin, gate = routing["margin"], routing["gate"]
+    by_meter = usage.observations(usage_doc) or {}
+    meters = popup_meters(catalog, by_meter, won_by_meter, now)
+    by_key = {m["key"]: m for m in meters}
+    try:
+        previews = tier_leaders(catalog, usage_doc, present)
+    except Exception:
+        previews = []
+
+    left_w = 2 + POPUP_METER_W + POPUP_LANE_W + 1
+    axis_w = max(24, width - left_w - 2 - POPUP_NUM_W)
+    steals = [r["pace"] + margin for p in previews for r in p["rows"]
+              if r["lane"] == p["leader"] and r["pace"] is not None]
+    top, x = pace_axis([m["pace"] for m in meters] + steals, axis_w)
+
+    age = dur_short(now, usage_doc.get("probed_at") or now) or "0m"
+    lines = [f"{c['BOLD']}delegate usage{c['R']}  {c['DIM']}read {age} ago · Margin {margin:.2f} · "
+             f"Gate {gate:.0%}{c['R']}",
+             f"{c['DIM']}{POPUP_LEGEND}{c['R']}",
+             f"{c['DIM']}{'Meter':<{left_w}}{c['R']}{axis_labels(top, x, axis_w, c)}  "
+             f"{c['DIM']}{POPUP_NUM_HEAD}{c['R']}"]
+    for m in meters:
+        won = sorted(m["won"])
+        col = c["TIER_COL"][won[0]] if won else c["FG"]
+        label = pad(format_badge(m["won"], c), 3) + f"{col}{c['BOLD']}{m['label']}{c['R']}"
+        pace = "  ?" if m["pace"] is None else f"{m['pace']:.2f}"
+        calc = ("" if m["weekly"] is None or m["left"] is None
+                else f"= {m['weekly']:.0%} ÷ {m['left']:.0%}")
+        five = (f"{c['MUTE']}—{c['R']}" if m["f5"] is None
+                else f"{pct_cell(m['f5'], c=c)}{c['DIM']}·{dur_short(m['reset5'], now)}{c['R']}")
+        lines.append(f"{pad(label, left_w)}{track(top, x, axis_w, c, (m['pace'], col + c['BOLD'], '●'))}  "
+                     f"{c['BOLD']}{pace:>5}{c['R']} {c['DIM']}{calc:<12}{c['R']} {pad(five, 8)}"
+                     f"{c['DIM']}{when_short(m['reset'])}{c['R']}")
+    lines.append("")
+    for p in previews:
+        lines += tier_block(p, by_key, margin, gate, c, top, x, axis_w)
+    lines.append(classes_line(picks, routing.get("classes", {}), c))
+    return [clip(l, width).rstrip() for l in lines]
+
+
+def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
+    """A Tier's header (its leader and what changes next), then one row per
+    Meter with Lanes in the Tier: the leader's Meter first, then by Pace."""
+    t = preview["tier"]
+    tc = c["TIER_COL"][t]
+    head = f"{tc}{c['BOLD']}{TIER_GLYPH[t]} Tier {t}{c['R']}  "
+    rows = [r for r in preview["rows"] if r["veto"] in (None, "gate", "cli")]
+    if not rows:
+        return [head + f"{c['MUTE']}no eligible lane{c['R']}"]
+    lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
+    preview = dict(preview, margin=margin)
+    out = [head + f"{c['DIM']}leader{c['R']} {tc}{c['BOLD']}{preview['leader'] or 'none'}{c['R']}  "
+           f"{c['DIM']}{handover_note(preview, lead, by_key, margin, gate)}{c['R']}"]
+    groups = {}
+    for r in rows:
+        groups.setdefault(r["meter"], []).append(r)
+    keys = sorted(groups, key=lambda k: (0 if lead and k == lead["meter"] else 1,
+                                         -(groups[k][0]["pace"] or 0), str(k)))
+    for key in keys:
+        group = groups[key]
+        r = group[0]
+        is_lead = lead is not None and r["lane"] == lead["lane"]
+        col = tc if is_lead else c["FG"]
+        bold = c["BOLD"] if is_lead else ""
+        name = r["lane"].split("@")[0] + (f" +{len(group) - 1}" if len(group) > 1 else "")
+        dot = (r["pace"], c["RED"], "✗") if r["veto"] == "gate" else (r["pace"], col + c["BOLD"], "●")
+        need = None
+        if r["veto"] == "gate":
+            note = f"{c['RED']}under the Gate{c['R']}"
+        elif r["veto"] == "cli":
+            note = "no CLI here"
+        elif is_lead or lead is None or r["pace"] is None:
+            note = ""
+        else:
+            need = pace_to_lead(preview, key, top)
+            note = "cannot lead on Pace" if need is None else f"needs {need:.2f} (+{max(0.0, need - r['pace']):.2f})"
+        if len(group) > 1:
+            note = (note + " · " if note else "") + "with " + ", ".join(o["lane"].split("@")[0] for o in group[1:])
+        label = by_key[key]["label"] if key in by_key else str(key)
+        cell = f"  {c['DIM']}{label[:POPUP_METER_W - 1]:<{POPUP_METER_W}}{c['R']}{col}{bold}{name[:POPUP_LANE_W - 1]:<{POPUP_LANE_W}}{c['R']}"
+        pace = "  ?" if r["pace"] is None else f"{r['pace']:.2f}"
+        out.append(f"{cell} {track(top, x, axis_w, c, dot, need, tc)}  {bold}{pace:>5}{c['R']}  "
+                   f"{c['DIM']}{note}{c['R']}")
+    return out
+
+
+def handover_note(preview, lead, by_key, margin, gate):
+    if lead is None:
+        return ""
+    meter = by_key.get(lead["meter"])
+    found = handover(preview, meter, margin, gate)
+    if found is None:
+        return ""
+    points, new = found
+    label = meter["label"]
+    if new is None:
+        return f"only lane · {label} is {points * 100:.0f} pts above the Gate"
+    return f"→ {new} leads after {label} drops {points * 100:.1f} pts"
+
+
+def classes_line(picks, classes, c):
+    parts = []
+    for cls, row in picks.items():
+        t = row.get("tier")
+        floor = (classes.get(cls) or {}).get("floor")
+        up = f"{c['RED']}↑{c['R']}" if floor and t and t > floor else ""
+        parts.append(f"{cls} {c['TIER_COL'].get(t, '')}{TIER_GLYPH.get(t, '?')}{c['R']}{up}")
+    return (f"{c['DIM']}classes{c['R']}  " + "  ".join(parts)
+            + f"   {c['DIM']}↑ = Pace pulled it above its floor Tier{c['R']}")
+
+
 # ---------------------------------------------------------------- main
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -815,7 +1070,9 @@ def main():
     sl.add_argument("--no-color", action="store_true", help="strip ANSI color escapes")
     sl.add_argument("--no-running", action="store_true", help="suppress the running agents column")
     sl.add_argument("--popup", action="store_true",
-                    help="the Herdr popup view: ignore the off switch and add the Tier leaders")
+                    help="the Herdr popup view: ignore the off switch; Pace per Meter and per Tier")
+    sl.add_argument("--width", type=int, default=None,
+                    help="popup width in columns (default: the terminal's)")
     sl.add_argument("state", nargs="?", choices=["on", "off", "toggle", "status"],
                     help="switch the rows instead of printing them (flag file ~/.cache/delegate/statusline.off)")
     sl.set_defaults(fn=cmd_statusline)

@@ -5,12 +5,15 @@ on its own credit Meter, so a Lane on Kiro runs a model this catalog may also
 run on that vendor's own harness, against a different subscription. Facts here
 are from kiro.dev, read 2026-10-02/03:
 
-- headless is `kiro-cli chat --no-interactive`, which needs `KIRO_API_KEY`
-  (Pro tier and up) (docs/cli/headless);
+- headless is `kiro-cli chat --no-interactive` (docs/cli/headless). The docs
+  name `KIRO_API_KEY` (Pro tier and up), but a machine signed in to kiro-cli
+  runs headless without it (Orin's Mac, 2026-10-04);
 - `kiro-cli chat --list-models --format json` lists the models
-  (docs/reference/cli-commands); the JSON's field names are not documented, so
-  `parse_models` reads the plausible spellings and the fixture stands in until
-  a real listing replaces it;
+  (docs/reference/cli-commands). kiro-cli 2.27.1 (2026-10-04) gives
+  `{"models": [{"model_id", "model_name", ...}], "default_model"}` with no
+  effort field (fixture `kiro-models-2.27.1.json`), so every model takes the
+  harness's efforts. `parse_models` still reads other plausible spellings, and
+  per-model efforts, in case a later listing adds them;
 - `--effort` takes low, medium, high, xhigh or max, and not every model
   supports every level (docs/models/effort); `--model` and `--effort` apply to
   the one session in V3;

@@ -25,11 +25,19 @@ switch layouts).
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human
+**Status:** ready-for-human. Layout D built 2026-10-04 as the recommended pick, pending Orin's choice; the prototype branch is pushed (`968e534`).
 
 - [ ] Orin picks a layout, or parts of several.
-- [ ] `report.py statusline --popup` renders it from the cached Meters only, with tests in
-      `test_report.py`, and it fits the popup (85% × 40%, about 118 × 20).
+- [x] `report.py statusline --popup` renders it from the cached Meters only, with tests in
+      `test_report.py`, and it fits the popup (85% × 40%, about 118 × 20). Built as D: the
+      Meter rows write Pace as `= Remaining ÷ share of week`, and each Tier shows its leader,
+      how many points its Meter can fall before the Tier hands over, and for each other
+      Meter the Pace it needs to lead. Both figures replay `rank.choose`, now shared, so
+      the popup cannot disagree with a Pick. `┊` marks a rival's needed Pace, not leader +
+      Margin: without an Order a rival needs only the leader's Pace, and the Margin
+      applies only across Order. The test catalog renders in 19 rows; a real catalog with
+      seven Meters needs about 30, so the Herdr popup's height goes to 60% in dotfiles.
+      With Meters off, or no harness CLI on PATH, the popup keeps the old rows.
 - [ ] The prototype branch is removed after the pick is recorded here.
 
 Open detail: the handover figure for Tier 4 assumes the `claude-fable` Meter does not

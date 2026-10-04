@@ -40,16 +40,24 @@ class; when two fit, the counter-examples decide.
 
 ### 2. Write the brief
 
-A Markdown file with exactly two headings, `# Objective` and
+A Markdown file with two headings, `# Objective` and
 `# Definition of done`. Name every file the worker must read. Put the gate
 commands the worker must run in the definition of done. Save it in the
 session scratchpad and use its absolute path.
+
+A job that needs a signed-in site adds a third heading, `# Agent profile`,
+with one line per site: the site and the actions allowed there (`github.com:
+read issues and PRs; no comments`). Without that heading a worker uses only the
+disposable browser.
 
 ### 3. Run it
 
 Run exactly this, in the background so the session keeps working:
 
     delegate run <class> --brief </abs/brief.md> --cwd </abs/project>
+
+In a headless session that ends with its turn (`claude -p`, `codex exec`), run
+it in the foreground and wait: the session's exit kills a background worker.
 
 Add only what the job needs:
 

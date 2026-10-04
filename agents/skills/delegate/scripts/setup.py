@@ -473,9 +473,12 @@ def save_native_agents(refresh, lanes_doc, agents_dir, profile):
     and the wizard writes it before it exits (ticket 33). A link left at a
     Lane's path — the stow link of a lane file the repo used to carry — is
     removed first, so the write never lands in the repo through it.
+
+    An existing file of a Lane in the catalog that no longer matches the
+    template is rewritten, so a template change (browser ticket 02's `tools`
+    line) reaches the Lanes already placed.
     """
-    if not refresh:
-        return []
+    refresh = refresh or {}
     harness = profile["harness"]
     lanes = lanes_doc.get("lanes") or {}
     if agents_dir is None:
@@ -504,6 +507,20 @@ def save_native_agents(refresh, lanes_doc, agents_dir, profile):
         if os.path.isfile(path) or os.path.islink(path):
             os.remove(path)
             lines.append(f"removed {path}")
+    fresh = set(refresh.get("new") or ())
+    for name, lane in lanes.items():
+        if name in fresh or not isinstance(lane, dict) or lane.get("harness") != harness:
+            continue
+        path = orchestrators.agent_path(profile, name, agents_dir)
+        if not os.path.isfile(path) or os.path.islink(path):
+            continue
+        text = native_agent_text(name, lane, profile)
+        with open(path, encoding="utf-8") as f:
+            if f.read() == text:
+                continue
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        lines.append(f"updated {path}")
     return lines
 
 

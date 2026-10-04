@@ -1,5 +1,5 @@
 {
-  "note": "Claude Code as the orchestrator. It can run a claude Lane in-process, as a subagent, so its claude Lanes are native. Claude Code sets CLAUDECODE=1 in the shell it gives its Bash tool.",
+  "note": "Claude Code as the orchestrator. It can run a claude Lane in-process, as a subagent, so its claude Lanes are native. Claude Code sets CLAUDECODE=1 in the shell it gives its Bash tool. A subagent with no `tools` line inherits every tool and MCP server of the session (Gmail, Drive, a signed-in Chrome, computer use), so the template allows only the file, shell and web tools and the disposable Playwright browser (browser ticket 02, Orin 2026-10-04).",
   "harness": "claude",
   "detect_env": ["CLAUDECODE"],
   "native": {
@@ -12,6 +12,7 @@
       "description: \"Delegate native lane {lane}. Use only when /delegate prints a native line that names this agent, or when Orin names this lane.\"",
       "model: {model}",
       "effort: {effort}",
+      "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright",
       "---",
       "",
       "You are a delegate worker. Read the prompt file named in your task and follow it exactly. Your final message is the return block that the prompt asks for.",
@@ -20,9 +21,9 @@
     "spawn": "spawn {agent} with the Agent tool in the background (subagent_type {agent}), prompt `Read {prompt} and follow it.`; its final message is the return claim"
   },
   "launch": {
-    "note": "Headless, for eval 3. /delegate must be typed: the skill is user-invoked only, and in -p mode the leading slash command is the user's own invocation.",
+    "note": "Headless, for eval 3. /delegate must be typed: the skill is user-invoked only, and in -p mode the leading slash command is the user's own invocation. The job runs in the foreground: claude -p exits after its turn and SIGTERMs a background job (any-harness 13, live run 2026-10-04).",
     "argv": ["claude", "-p", "{prompt}", "--allowedTools", "Bash,Read"],
-    "prompt": "/delegate {cls} job, brief {brief}, working directory {cwd}. When it finishes, print the run directory."
+    "prompt": "/delegate {cls} job, brief {brief}, working directory {cwd}. Run delegate in the foreground and wait for it; when it finishes, print the run directory."
   },
   "agents": [
     {

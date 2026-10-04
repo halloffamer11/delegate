@@ -196,6 +196,14 @@ def test_kiro():
            and efforts["claude-sonnet-5.5"] == ["low", "medium", "high"]
            and efforts["gpt-5.6-sol"] == list(kiro.efforts)
            and efforts["claude-haiku-4.5"] == [], repr(efforts))
+    with open(os.path.join(KIRO_FIXTURES, "kiro-models-2.27.1.json")) as f:
+        real = kiro.parse_models(f.read())
+    record("kiro-cli 2.27.1's real listing gives its eight models, each with every Kiro effort",
+           [m["slug"] for m in real] == ["claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5",
+                                         "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5",
+                                         "qwen3-coder-next"]
+           and all(m["efforts"] == list(kiro.efforts) and m["unknown_efforts"] == [] for m in real)
+           and real[0]["display_name"] == "claude-sonnet-4.5", repr(real))
     record("a read-only kiro run passes the effort, the timeout and --read-only to the relay",
            kiro.run_args("high", "30m", None) == (["--effort", "high", "--timeout", "30m", "--read-only"], None))
     absent = kiro.meters()
