@@ -1,0 +1,120 @@
+# How a job is routed: the README diagram (ticket 20). Rebuild both SVGs from the repo root:
+#   sh docs/diagrams/render.sh
+# Native results return directly; return.json belongs to the relayed path.
+direction: down
+classes: {
+  zone: {style: {fill: transparent; stroke-width: 2; font-size: 28; bold: true}}
+  policy: {
+    shape: hexagon
+    width: 210
+    height: 75
+    style: {fill: "#81521C"; stroke: "#B67F36"; font-color: "#FFFFFF"; font-size: 26; bold: true}
+  }
+  model: {
+    shape: oval
+    width: 240
+    height: 85
+    style: {fill: "#59458A"; stroke: "#9B87C7"; font-color: "#FFFFFF"; font-size: 26; bold: true}
+  }
+  script: {
+    shape: rectangle
+    width: 250
+    height: 62
+    style: {fill: "#165E56"; stroke: "#57A89C"; font-color: "#FFFFFF"; font-size: 26; bold: true}
+  }
+  file: {
+    shape: document
+    width: 235
+    height: 95
+    style: {fill: "#E1E7F0"; stroke: "#74839B"; font-color: "#202C40"; font-size: 24; bold: false}
+  }
+  seam: {style: {stroke-width: 3; font-size: 22; bold: true}}
+  side: {style: {stroke-width: 2; stroke-dash: 5; font-size: 22}}
+}
+
+# Grids retain B's four-zone composition. Transparent boxes only align nodes.
+grid-columns: 1
+vertical-gap: 38
+human: Human {
+  class: zone
+  grid-columns: 3
+  horizontal-gap: 185
+  lanes: "Tier + Order\nlanes.json" {class: file}
+  set: Set policy {class: policy}
+  routing: "Range + Gate\nrouting.json" {class: file}
+  set -> lanes
+  set -> routing
+}
+flow: "" {
+  style: {fill: transparent; stroke: transparent}
+  grid-columns: 2
+  horizontal-gap: 100
+  orchestrator: Orchestrator model {
+    class: zone
+    grid-columns: 1
+    vertical-gap: 115
+    choose: "Choose Class\nclasses.md" {class: model; height: 100}
+    brief: Write Brief {class: model}
+    adjudicate: Adjudicate {class: model}
+    native: Native lane {class: model}
+    choose -> brief
+  }
+  scripts: delegate scripts {
+    class: zone
+    grid-columns: 1
+    vertical-gap: 70
+    spine: "" {
+      style: {fill: transparent; stroke: transparent}
+      direction: down
+      range: Range {class: script}
+      lanes: Eligible Lanes {class: script}
+      gate: Meters + Gate {class: script}
+      pace: Pace + Margin {class: script}
+      pick: "Pick\nrank.py" {class: script; height: 88}
+      run: "Run\ndelegate.py" {class: script; height: 88}
+      range -> lanes
+      lanes -> gate
+      gate -> pace
+      pace -> pick
+      pick -> run
+      gate -> range: Overflow Tier {class: side}
+    }
+    handoff: "" {
+      style: {fill: transparent; stroke: transparent}
+      grid-columns: 2
+      horizontal-gap: 70
+      result: return.json {class: file; width: 205; height: 75}
+      relay: Relay {class: script; width: 190}
+      relay -> result
+    }
+    spine.run -> handoff.relay: Relayed lane {class: seam}
+  }
+}
+worker: Worker model {
+  class: zone
+  label.near: bottom-center
+  grid-columns: 3
+  horizontal-gap: 0
+  # Invisible spacing symbols are excluded from the visible node count.
+  space_left: "" {width: 580; height: 1; style.opacity: 0}
+  execute: Execute Brief {class: model}
+  space_right: "" {width: 440; height: 1; style.opacity: 0}
+}
+# Policy, dispatch, execution and result seams.
+human -> flow.scripts: Policy {class: seam}
+flow.orchestrator.brief -> flow.scripts.spine.range: Class + Brief {class: seam}
+flow.orchestrator -> flow.scripts.spine.run: Named dispatch {class: side}
+flow.scripts.spine.run -> flow.orchestrator.native {class: seam}
+flow.orchestrator.native <-> worker.execute: Brief / Result {class: seam}
+flow.scripts.handoff.relay <-> worker.execute: Brief / Result {class: seam}
+flow.scripts.handoff.result -> flow.orchestrator.adjudicate {class: seam}
+flow.orchestrator.native -> flow.orchestrator.adjudicate: Native result {class: seam}
+legend: Legend {
+  class: zone
+  grid-columns: 4
+  horizontal-gap: 150
+  policy: Policy {class: policy; width: 145; height: 60}
+  model: Judgment {class: model; width: 160; height: 65}
+  script: Deterministic {class: script; width: 190; height: 60}
+  file: Data {class: file; width: 125; height: 65}
+}

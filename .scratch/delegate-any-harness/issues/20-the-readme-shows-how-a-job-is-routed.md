@@ -10,7 +10,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-03 on `worktree/delegate-any-harness-20` (PR #5). All boxes done.
+**Status:** landed 2026-10-04 on `worktree/delegate-any-harness-20` (PR #5), reworked after Orin's review. All boxes done.
 
 - [x] The format is chosen and the reason recorded here (Mermaid by default).
 - [x] The README shows the routing chain with each step's owning file, in the glossary's terms from `CONTEXT.md`.
@@ -28,3 +28,13 @@ The table follows the code where the docs are loose: `rank.py` sorts an unknown 
 last before Tier, Project order lives in `.delegate/routing.json` (`project_order`),
 and a Native lane writes no `return.json`. No local Mermaid renderer was installed. The
 render was checked on github.com on the branch's README, in light and dark themes.
+
+## Reworked, 2026-10-04
+
+Orin's review on PR #5: the Mermaid chain hid the seams between the human, the models
+and the scripts, and the first redraw was a design review, not an executive view.
+`astra-xhigh@codex` drew three D2 options (swim lanes, layered, sequence); Orin picked
+the layered one and asked for symbolic labels. The README now shows that diagram as
+two SVGs (light and dark through `<picture>`) from `docs/diagrams/routing.d2`, rebuilt
+by `sh docs/diagrams/render.sh`, and a six-row ownership table. Format changed from
+Mermaid to D2 because the zones, shapes and legend need D2's layout.
