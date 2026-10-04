@@ -19,7 +19,7 @@ history. The repo is public.
   `claude/courier.md` is the one shipped agent, for Claude Workflow scripts only.
 - `bin/delegate`: the `delegate` command, the contract every harness calls
   (`rank`, `run`, `dispatch`, `status`, `catalog`, `global`, `project`, ...).
-- `tools/delegate-dashboard/` (Herdr plugin) and `tools/delegate-mon/` (Rust monitor).
+- `tools/delegate-dashboard/`: the Herdr plugin and `deck` dashboard.
 
 ## Where state lives
 
