@@ -8,7 +8,7 @@ five manual steps: `discover.py`, `discover.py --efforts` with `TODO` stanzas pa
 by hand, a hand-written Claude agent file, `effort.py aa` copied over the accepted
 rows, then the wizard.
 
-Orin, 2026-09-22: "I just want a simple interface to the tool not a list of commands to
+The user, 2026-09-22: "I just want a simple interface to the tool not a list of commands to
 remember … why not add it to the delegate-wizard so it's one command that refreshes
 efficiently?" · "new generation models supersede old one" · "the screening page in the
 tool should always have the refreshed list of current generation models at each tier.
@@ -19,8 +19,8 @@ expectation is for all models to be shown initially for screening."
 
 ## Rule
 
-Orin's rules are the three quotes above. The points below are session decisions that
-put them into practice; Orin may overrule any of them.
+The user's rules are the three quotes above. The points below are session decisions that
+put them into practice; the user may overrule any of them.
 
 **What each harness offers.** The harness's own list is the source: `codex debug
 models`, `agy models` and `grok models`, which `discover.py` already reads. Claude Code
@@ -33,7 +33,7 @@ haiku). A level keeps its catalog model unless a newer version is named.
 **Current generation.** Each harness shows its own vendor's models only: `gpt-*` on
 codex, `gemini-*` on agy, `grok-*` on grok and `claude-*` on claude. Other vendors'
 models that agy serves (`claude-sonnet-4-6`, `claude-opus-4-6-thinking`,
-`gpt-oss-120b`) are not shown; Orin, 2026-09-22, on the unused `agy-claude-gpt`
+`gpt-oss-120b`) are not shown; the user, 2026-09-22, on the unused `agy-claude-gpt`
 usage pool they would drain: "ignore the Gemini Claude pool". A model hidden by its harness (codex
 `"visibility": "hide"`) is not shown. A model's **level** is its slug with the version
 number removed, after the agy effort suffix is stripped (`catalog.agy_family`). For
@@ -59,7 +59,7 @@ written until the wizard's confirm, and quitting writes nothing.
   Lane starts carried, `ultra` apart, because a predecessor switched off at an effort
   judged that model, not the one replacing it; the rest of the list still holds.
 - A new Lane with no predecessor starts carried. It is marked on no Tier page, so it
-  ends on Tier 1 unless Orin marks it higher. Its meter, `meter_weight` and `timeout`
+  ends on Tier 1 unless the user marks it higher. Its meter, `meter_weight` and `timeout`
   are copied from the same harness's Lane at the same effort, with the same
   `UNMEASURED` note. An `ultra` Lane is always generated off (settled, ticket 15).
 - Every new Lane gets `price` with all four keys `null` and the note `UNPRICED`. Prices
@@ -114,7 +114,7 @@ root:
 The root `CLAUDE.md` is the session's to update at landing.
 
 Out of scope:
-- prices (the session fills them in after Orin's run);
+- prices (the session fills them in after the user's run);
 - a Terminal-Bench refresh;
 - measuring `meter_weight` and `timeout`;
 - the carry rule;
@@ -128,11 +128,11 @@ Fixtures captured 2026-09-22 were in the worktree's git-ignored `_work/`, gone w
 - `aa-accepted-2026-09-22.json`
 
 Trim what the tests need into `tests/fixtures/`. Tests use no network and no live CLI.
-They check the rule on fixtures, never Orin's Tiers.
+They check the rule on fixtures, never the user's Tiers.
 
 ## Acceptance
 
-**Status:** landed 2026-09-22 (`3d90491`, `0af3650`, `f9a2aa0`, `33158fa`, `967462f`, review fixes `f861916`, `01de19d`, `eb9f335`); merged and pushed by Orin (`71c6661`), and his first refreshed `delegate global` run is `776df1a`. All boxes ticked. Ticket 35 changed the inheritance rule below: a new Lane no longer inherits `enabled`. Orin may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`3d90491`, `0af3650`, `f9a2aa0`, `33158fa`, `967462f`, review fixes `f861916`, `01de19d`, `eb9f335`); merged and pushed by the user (`71c6661`), and his first refreshed `delegate global` run is `776df1a`. All boxes ticked. Ticket 35 changed the inheritance rule below: a new Lane no longer inherits `enabled`. The user may overrule the session decisions under Landed.
 
 - [x] On today's fixtures and the repo catalog, the refresh proposes these changes:
   - new: `sol6-*@codex` (low…ultra), `luna6-*@codex` (low…max), `opus55-*@claude`
@@ -202,7 +202,7 @@ nothing until the confirm.
   above, with the catalog of 2026-09-22 frozen beside them — the refresh's own
   first run changes the live one, so the tests never read it.
 
-Decisions this session made where the ticket left the code a choice; Orin may
+Decisions this session made where the ticket left the code a choice; the user may
 overrule any of them:
 
 - A variant level is named from the level it extends, and only a
@@ -222,7 +222,7 @@ overrule any of them:
 - `--no-discover` skips the row fetch as well, since it means acquire nothing.
 - Prices: `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`
   holds the figures for the lanes this refresh adds. Filling them in is the
-  session's, after Orin's run.
+  session's, after the user's run.
 
 Review fixes, from the session's read of the first pass:
 

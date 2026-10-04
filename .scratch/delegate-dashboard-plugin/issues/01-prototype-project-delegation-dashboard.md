@@ -13,7 +13,7 @@ throwaway branch. 09 closes this ticket's boxes.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** done — technical acceptance, independent review and Orin's 2026-09-15 verdict complete
+**Status:** done — technical acceptance, independent review and the user's 2026-09-15 verdict complete
 
 ## Acceptance
 
@@ -59,9 +59,9 @@ Project order, Gate, and Margin provide useful manual steering?
 Technical verdict: Herdr is suitable for this prototype. The same entrypoint
 worked as a split and tab, stayed pinned, and saved all three controls with the
 predicted canonical leader changes. Invalid and stale input preserved existing
-bytes. This establishes correct hosting and steering behavior, not Orin's
+bytes. This establishes correct hosting and steering behavior, not the user's
 usability verdict or production readiness. Ticket 09 records the live evidence;
-Orin's prediction check remains open.
+The user's prediction check remains open.
 
 Verification after review fixes: all 13 delegate test scripts passed, as did all 28 dashboard tests,
 Python compilation, and `git diff --check`. The report tests ran with
@@ -69,7 +69,7 @@ Python compilation, and `git diff --check`. The report tests ran with
 fixture output.
 
 Independent two-axis review used baseline `ea60b33` and frozen implementation
-`51b9328`: Grok checked Standards; Claude checked Spec. Orin chose remaining
+`51b9328`: Grok checked Standards; Claude checked Spec. The user chose remaining
 Grok/Claude capacity below Gate for these narrow tasks; global Gate was unchanged
 and no Antigravity permission exception was used. Reports, adjudication, and fix
 evidence are in [the review record](../research/2026-09-14-review.md).
@@ -78,7 +78,7 @@ evidence are in [the review record](../research/2026-09-14-review.md).
 
 Question tested: is a Herdr plugin the right host for a persistent delegation control
 surface, and do project-level Order, Gate and Margin controls give useful manual
-steering? Orin: yes to both. Branch: `worktree/delegate-monitor-herdr`. Backend
+steering? The user: yes to both. Branch: `worktree/delegate-monitor-herdr`. Backend
 integration into `main` is prepared as branch `dashboard-backend`; ticket 09 lists
 its commits and checks. Production work on a control surface is the next decision,
 not part of this ticket.

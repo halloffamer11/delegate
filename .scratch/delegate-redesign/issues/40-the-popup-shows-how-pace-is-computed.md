@@ -4,10 +4,10 @@
 Pace as its calculation (week quota left ÷ share of the week left), and for each Tier
 where its Lanes stand against the steal line (leader + margin). It says how far each
 Tier leader is from handing over, in quota points at the current reading. Raised by
-Orin 2026-09-27.
+The user 2026-09-27.
 
 Everything reads the Meters at the moment of display. No usage history and no burn
-rate: Orin, 2026-09-27, "We can only make a decision based on the usage at the time of
+rate: the user, 2026-09-27, "We can only make a decision based on the usage at the time of
 sending a delegation" (`docs/adr/0001-settled-delegate-decisions.md`).
 
 **Prototype:** branch `worktree/delegate-redesign-popup`, file
@@ -15,7 +15,7 @@ sending a delegation" (`docs/adr/0001-settled-delegate-decisions.md`).
 `python3 .scratch/delegate-redesign/prototype/popup_variants.py` (left and right arrows
 switch layouts).
 
-- Round one (`556f439`): A worksheet, B dot plot per Tier, C quota-vs-time bars. Orin
+- Round one (`556f439`): A worksheet, B dot plot per Tier, C quota-vs-time bars. The user
   picked B, and found C too busy, with "quota" and "week" undefined.
 - Round two (`36d0aaa`): Meters at the top, then each Tier's lanes grouped by harness,
   visual first, in the glossary's terms. D puts the Meters and the Tiers on one Pace
@@ -25,7 +25,7 @@ switch layouts).
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human. The user picked D on 2026-10-04, and D shipped in delegate#13. Only the last box remains: deleting the prototype branch.
+**Status:** done 2026-10-04. The user picked D, D shipped in delegate#13, and the prototype branch is deleted.
 
 - [x] Orin picks a layout, or parts of several. The user picked D on 2026-10-04.
 - [x] `report.py statusline --popup` renders it from the cached Meters only, with tests in
@@ -38,7 +38,7 @@ switch layouts).
       applies only across Order. The test catalog renders in 19 rows; a real catalog with
       seven Meters needs about 30, so the Herdr popup's height goes to 60% in dotfiles.
       With Meters off, or no harness CLI on PATH, the popup keeps the old rows.
-- [ ] The prototype branch is removed after the pick is recorded here. The cloud session cannot delete `worktree/delegate-redesign-popup` (`968e534`) on origin, so the user deletes it from the Mac: `git -C ~/projects/delegate push origin --delete worktree/delegate-redesign-popup`, then `git -C ~/projects/delegate worktree remove ~/.herdr/worktrees/delegate/worktree-delegate-redesign-popup`.
+- [x] The prototype branch is removed after the pick is recorded here. The user deleted `worktree/delegate-redesign-popup` (`968e534`) on origin, its worktree and the local branch on 2026-10-04.
 
 Open detail: the handover figure for Tier 4 assumes the `claude-fable` Meter does not
 drop when `claude-general` is spent. Whether the two weekly pools move together is not

@@ -1,7 +1,7 @@
 # 34 — One short command for global and project settings
 
-**What to build:** a `delegate` command on PATH with two subcommands, so Orin never
-types a checkout path. Orin, 2026-09-22: "I also want to make sure there is clear
+**What to build:** a `delegate` command on PATH with two subcommands, so the user never
+types a checkout path. The user, 2026-09-22: "I also want to make sure there is clear
 commands for global settings and a project specific setting that is a compact command
 not a long directory".
 
@@ -10,7 +10,7 @@ not a long directory".
 
 ## Rule
 
-The session decisions below are Orin's to overrule.
+The session decisions below are the user's to overrule.
 
 - `delegate global` runs the global wizard: `make -C <checkout> delegate-wizard`,
   passing any further arguments through as `WIZARD_ARGS`. The Makefile stays the only
@@ -42,7 +42,7 @@ The session decisions below are Orin's to overrule.
 
 ## Acceptance
 
-**Status:** landed 2026-09-22 (`44b21b5`); merged and pushed by Orin (`71c6661`), and `make configs` has linked `~/.local/bin/delegate`. All boxes ticked. Orin may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`44b21b5`); merged and pushed by the user (`71c6661`), and `make configs` has linked `~/.local/bin/delegate`. All boxes ticked. The user may overrule the session decisions under Landed.
 
 - [x] `delegate global` runs the wizard target in the command's own checkout, from any
   directory.
@@ -78,7 +78,7 @@ which are stow links into `~/dotfiles` and so are not this worktree's to own; th
 the same thing on `main` today and have nothing to do with this ticket. The real
 `make configs` runs from `~/dotfiles`, where stow owns them.
 
-Session decisions, Orin's to overrule:
+Session decisions, the user's to overrule:
 
 - The command spells out the Git-project walk rather than importing
   `catalog.find_git_root`. A command on PATH that has to load the skill to say it

@@ -10,7 +10,7 @@
 
 **Status:** wontfix, triaged 2026-10-04: no longer reproduces.
 
-On Orin's Mac (claude 2.1.288, delegate `b5825b8`), with stdin closed and a 60 s
+On the user's Mac (claude 2.1.288, delegate `b5825b8`), with stdin closed and a 60 s
 limit, from inside a Claude Code session:
 
 | command | ~/dotfiles | ~/projects/delegate | ~ |
@@ -23,5 +23,5 @@ returned both Meters in 3.0 s. The 2026-09-18 hang's cause cannot be recovered; 
 fixed since, or a one-time trust or hook state, are the likely ones. The probe keeps
 running from `~` (`fb845e3`), which is harmless.
 
-- [x] The cause inside the project is known, or Orin closes this ticket: it no longer
+- [x] The cause inside the project is known, or the user closes this ticket: it no longer
       reproduces (above). Reopen with a new reading if a probe hangs again.

@@ -777,7 +777,7 @@ record(
 # 7.9 ticket 19: every Claude name an accepted rows file prints resolves to the
 #     lane model it denotes in a catalog, and a Claude model that is nobody's
 #     lane resolves to none. A new Claude name in the rows fails here until
-#     someone decides which it is. The catalog is machine-local (Orin,
+#     someone decides which it is. The catalog is machine-local (the user,
 #     2026-09-29), so the repo has none to read: these are its Claude lanes as
 #     they stood that day, one effort each.
 _data_dir = os.path.abspath(os.path.join(
@@ -2140,7 +2140,7 @@ with tempfile.TemporaryDirectory() as td:
 
 # 12. Ticket 29 A: one Meter serving every carried Lane of a Tier is a warning.
 # It names the Tier and the one Meter, never fails a check, and never says the
-# Tier is wrong: which Lanes a Tier carries is Orin's decision.
+# Tier is wrong: which Lanes a Tier carries is the user's decision.
 sample_tiers = catalog.single_meter_tiers(lanes_sample["lanes"])
 sample_lines = catalog.meter_dependency_lines(lanes_sample["lanes"])
 record(

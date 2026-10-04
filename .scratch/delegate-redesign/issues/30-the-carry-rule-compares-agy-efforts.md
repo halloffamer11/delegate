@@ -26,7 +26,7 @@ Paths are relative to `agents/skills/delegate/`.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`4177aa5`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is Orin's.
+**Status:** implemented 2026-09-18 (`4177aa5`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's.
 
 - [x] A fixture with two agy efforts scored by one source, one beating the other for no
       more money, proposes the beaten Lane off and names the competitor effort.
@@ -37,7 +37,7 @@ Paths are relative to `agents/skills/delegate/`.
       pass.
 - [x] Run against the accepted rows in `.scratch/delegate-redesign/_data/` and record in
       the Landed note which agy Lanes, if any, the rule now proposes off. The stowed
-      catalog is not edited: a proposal is Orin's to accept on the carry page.
+      catalog is not edited: a proposal is the user's to accept on the carry page.
 
 ## Landed, 2026-09-18
 

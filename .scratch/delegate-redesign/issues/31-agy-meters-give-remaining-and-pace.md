@@ -12,11 +12,11 @@ Meter, so the Gate applies to them, a Margin steal can go to them, and the statu
 Modular ticket 13 made agy Remaining and Pace unknown "until a vendor joint bound
 exists", after quota-axi's own refusal to publish one. The effect (ticket 29, evidence):
 agy sorts last in its Tier, can never win a Margin steal, and is never under the Gate.
-Orin, 2026-09-18, on seeing the dashboard's `no Meter reading` rows: "fix the agy meter,
+The user, 2026-09-18, on seeing the dashboard's `no Meter reading` rows: "fix the agy meter,
 gate, and usage monitor"; earlier the same day: "agy is a workhorse and tends to be
 underutilized". That is his word to reopen ticket 13.
 
-## Rule (session decision; Orin may overrule)
+## Rule (session decision; the user may overrule)
 
 Treat an agy Meter as the Claude Meters are treated, which also have a 5-hour and a
 weekly Window:
@@ -42,13 +42,13 @@ null, Windows present) must give the new figures with no fresh probe.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`50e8035`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is Orin's, and the rule is a session decision he may overrule.
+**Status:** implemented 2026-09-18 (`50e8035`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's, and the rule is a session decision he may overrule.
 
 - [x] A fresh and a cached agy observation with both Windows give Remaining = the lower
       fraction and a Pace; with one Window missing, the documented fallback of the other
       Meters applies.
 - [x] An agy Lane under the Gate is vetoed `gate`; an agy Lane with the needed Pace wins a
-      Margin steal; fixtures only, no live probe, and no test reads Orin's Tiers.
+      Margin steal; fixtures only, no live probe, and no test reads the user's Tiers.
 - [x] `report.py statusline` and `report.py limits` print agy figures, not `unknown`.
 - [x] Every suite under `tests/` exits 0.
 - [x] The Landed note records the live `rank.py scout` and `rank.py impl` Picks before

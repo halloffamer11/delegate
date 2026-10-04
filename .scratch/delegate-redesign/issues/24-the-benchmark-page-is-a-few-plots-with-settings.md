@@ -7,7 +7,7 @@ held 22 and then 23 on its branch: its commit `221283c` says 22, and `71b8b47` s
 **What to build:** The page the wizard's `o` key opens drew one static chart per
 board (ten on the AA rows alone) and labelled nearly every point, so the labels
 printed over each other, and the AA-LCR board pressed its scores into one thin
-line on a 0-2 axis. Orin (2026-09-11, from two screenshots): make a couple of
+line on a 0-2 axis. The user (2026-09-11, from two screenshots): make a couple of
 plots, each with settings to turn models, harnesses and efforts on and off; keep
 the tables but collapse them; and show the frontier at each cost, so the tiers
 can suggest a model, effort and harness for each lane. The frontier is advice, not
@@ -15,7 +15,7 @@ a default, because the best score for the money is not the whole decision.
 
 **Blocked by:** None.
 
-**Status:** landed 2026-09-11 (`221283c`) on `main`. Orin read the page and
+**Status:** landed 2026-09-11 (`221283c`) on `main`. The user read the page and
 approved it ("much better").
 
 - [x] Each plot shows one board, chosen from a menu grouped by source. The page opens on two plots: the board a decision is made on, and the best board from another source (or the next board of the same source). "Add a plot" adds more, and each plot can be removed.
@@ -44,7 +44,7 @@ Decisions:
   can use; "every point shown" shows what the catalog does not carry.
 - **One cost axis per plot, as before.** A plot shows one source's benchmark, so no
   plot puts two sources' dollars on one axis.
-- **The composite AA index opens first** among boards that tie on lanes: Orin found
+- **The composite AA index opens first** among boards that tie on lanes: the user found
   it the most readable board. It is labelled "(composite)" and the legend says the
   pre-screen never counts it.
 

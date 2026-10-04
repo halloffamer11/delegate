@@ -2,13 +2,13 @@
 
 **What to build:** a project customizes Lanes for itself. Today `lanes.json` is global
 only, and a project's `.delegate/routing.json` may reorder Lanes inside a Tier
-(`project_order`) but "never changes a Tier". Orin, 2026-09-18, on the dashboard's `H`/`L`
+(`project_order`) but "never changes a Tier". The user, 2026-09-18, on the dashboard's `H`/`L`
 keys, which would otherwise write his live global catalog: "add to scope - allow projects
 to have a lanes customization".
 
 **Blocked by:** 31 lands first in the same worktree (both touch `rank.py`).
 
-## Rule (session decisions; Orin may overrule)
+## Rule (session decisions; the user may overrule)
 
 - The customization lives in `<git-root>/.delegate/lanes.json`, beside the project's
   `routing.json`, the same pair as the global files: `{"lanes": {"<lane>": {"tier": n}}}`,
@@ -41,7 +41,7 @@ changes a Tier" is corrected by the session at landing.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`0f76bac`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is Orin's, and the rule is a session decision he may overrule.
+**Status:** implemented 2026-09-18 (`0f76bac`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's, and the rule is a session decision he may overrule.
 
 - [x] A fixture project that moves a Tier 3 Lane to Tier 2 makes it eligible for a
       Range 1–2 Class and not for a Range 3–3 Class; the same catalog with no project
@@ -53,7 +53,7 @@ changes a Tier" is corrected by the session at landing.
 - [x] `catalog.py set lanes.<lane>.tier N --scope project` previews and applies, refuses
       a stale revision, writes only the project file, and removes an entry that equals
       the global Tier.
-- [x] No test reads Orin's Tiers; every suite under `tests/` exits 0.
+- [x] No test reads the user's Tiers; every suite under `tests/` exits 0.
 
 ## Landed, 2026-09-18
 

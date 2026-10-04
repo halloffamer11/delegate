@@ -21,9 +21,9 @@ Keep observed agy window values for display, but emit unknown combined Remaining
 
 ## Recorded, 2026-09-16
 
-Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+Cut after the user accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
 
-The accepted decision is recorded in the [grok comparison](../research/2026-09-15-quota-axi-comparison-grok.md), opportunity 8 and maintainer question 5. Orin answered “1/ per rec 2/ proceed” in Fable session `e64493bf-d730-47f6-a381-b2320973452f` at 2026-09-16 01:17 UTC (September 15 local time).
+The accepted decision is recorded in the [grok comparison](../research/2026-09-15-quota-axi-comparison-grok.md), opportunity 8 and maintainer question 5. The user answered “1/ per rec 2/ proceed” in Fable session `e64493bf-d730-47f6-a381-b2320973452f` at 2026-09-16 01:17 UTC (September 15 local time).
 
 ## Landed, 2026-09-16
 

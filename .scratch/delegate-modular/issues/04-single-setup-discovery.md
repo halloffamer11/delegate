@@ -20,7 +20,7 @@ Use discover.discover for setup facts. Remove discover.mjs from the default setu
 
 ## Recorded, 2026-09-16
 
-Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+Cut after the user accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
 
 ## Landed, 2026-09-16
 

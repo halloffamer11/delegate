@@ -14,10 +14,10 @@ ceiling routing this reads.
 **Category:** enhancement
 
 **Status:** landed. Implemented 2026-09-11 (`4a9f815`, `2191462`, `fec4395`, `ddbb9f7`)
-on `main`; Orin confirmed the ⌥⌘D toggle on 2026-09-22. Raised by Orin 2026-09-11 ("some sort of TUI thing
+on `main`; the user confirmed the ⌥⌘D toggle on 2026-09-22. Raised by the user 2026-09-11 ("some sort of TUI thing
 in Claude that will give me some indication of how many agents are running on
 which harness and then some of the harness usage levels ... ideally it's
-something collapsible"). Prototyped the same day; Orin chose variant H. Branch
+something collapsible"). Prototyped the same day; the user chose variant H. Branch
 `prototype/delegate-statusline` holds the prototype.
 
 - [x] `python3 scripts/report.py statusline` prints one row per catalog meter in the form below, and prints nothing (exit 0) when the usage cache is missing or unreadable, so the status line never breaks
@@ -29,13 +29,13 @@ something collapsible"). Prototyped the same day; Orin chose variant H. Branch
 - [x] `usage.py` writes `remaining_weekly_model` on a model meter (claude-fable): the model's own weekly figure, while `remaining_weekly` stays `min(all-models, model)` for ranking. The fable row shows `remaining_weekly_model`
 - [x] `stow/claude/.claude/statusline.sh` appends the rows after its second line and drops its own `🕔` segment, which duplicated the claude 5h cell; bash 3.2 and BSD userland still work; a missing `python3` or `report.py` adds no rows and no error
 - [x] `tests/test_report.py` covers the rows from fixture usage, ledger and the sample catalog through `--config-dir`, `DELEGATE_CACHE` and `DELEGATE_LEDGER`; `tests/test_usage_reset.py` (or `test_events.py`) covers the new field. Full suite green
-- [x] Orin sees the rows in a live session (his): seen 2026-09-11 23:14, which showed the unbadged rows pulled to column 0
+- [x] The user sees the rows in a live session (his): seen 2026-09-11 23:14, which showed the unbadged rows pulled to column 0
 - [x] Every row starts with a non-space glyph, so Claude Code's per-row trim cannot shift the columns: an unbadged row carries a dim `·` in the badge column
 - [x] `report.py statusline off|on|toggle|status` switches the rows through the flag file `~/.cache/delegate/statusline.off` (`DELEGATE_STATUSLINE_SWITCH` in tests); while it exists `statusline` prints nothing and exits 0. Covered in `test_report.py`
 - [x] A keyboard shortcut runs the toggle from any terminal: ⌥⌘D in `stow/hammerspoon/.hammerspoon/init.lua`, next to the ⌥⌘R recorder
-- [x] Orin presses ⌥⌘D once in each direction (his; Hammerspoon is running since 2026-09-11 21:04 and `~/.hammerspoon` is the Makefile's whole-directory symlink into the repo, so the binding is live after the merge, and stow must never touch that package). Confirmed by Orin 2026-09-22: the toggle works both ways and takes 2-3 s. `report.py` takes 0.05 s, so Claude Code's status line redraw sets the delay; `refreshInterval` stays 30 (Orin, 2026-09-22)
+- [x] The user presses ⌥⌘D once in each direction (his; Hammerspoon is running since 2026-09-11 21:04 and `~/.hammerspoon` is the Makefile's whole-directory symlink into the repo, so the binding is live after the merge, and stow must never touch that package). Confirmed by the user 2026-09-22: the toggle works both ways and takes 2-3 s. `report.py` takes 0.05 s, so Claude Code's status line redraw sets the delay; `refreshInterval` stays 30 (the user, 2026-09-22)
 - [x] The Herdr popup (`prefix+shift+U`) runs `report.py statusline --popup` under `/bin/zsh -lic`: it ignores the ⌥⌘D flag and adds each Tier leader with the Classes that pick it (`1512f28`, `94526cd`)
-- [ ] Orin opens the popup after `herdr server reload-config` and sees a lane on every Tier (his)
+- [ ] The user opens the popup after `herdr server reload-config` and sees a lane on every Tier (his)
 
 ## The row
 
@@ -57,7 +57,7 @@ in its lane's tier, for example `②②` after agy's weekly cell.
   `claude`, `claude-fable` → `fable`, `agy-gemini` → `agy`).
 - Colour: label and badge in the tier colour (① green, ② cyan, ③ yellow,
   ④ magenta — the `statusline.sh` fallback hex values); `✗` red; everything
-  else foreground or dim. No red/yellow/green on percentages: Orin rejected
+  else foreground or dim. No red/yellow/green on percentages: the user rejected
   load colouring in round 2.
 - Bar: five cells, eighth-block fractions, remaining from the left; `·····`
   when the window does not exist.
@@ -74,10 +74,10 @@ timer and on each assistant message. The `⇄` running column is the
 "collapsible" part: it is blank when nothing runs. The `delegate-mon` crate
 stays the full cockpit for a herdr pane; this ticket does not touch it.
 
-**Remaining, not used.** Rounds 1–2 showed percent used; Orin: "I'd like it to
+**Remaining, not used.** Rounds 1–2 showed percent used; the user: "I'd like it to
 be percent remaining. So 100% is full capacity. It's like a fuel gauge."
 
-**Colour means tier, not load.** Orin: "what I want is to know which harness is
+**Colour means tier, not load.** The user: "what I want is to know which harness is
 getting which tier currently." The badge is the tier of the lane `rank.py`
 picks for each class, evaluated live with the effective routing. The first
 prototype run showed fable winning ③ by stealing from grok; ticket 22's ceiling
@@ -85,7 +85,7 @@ fixed that the same afternoon, and the badges now read ② agy, ③ grok. No cla
 routes to tier 4, by design (ticket 01 q1b), so ④ appears only in the running
 column.
 
-**Fable is its own row** (Orin), sharing claude's 5h window. `usage.py` today
+**Fable is its own row** (the user), sharing claude's 5h window. `usage.py` today
 folds the model figure into `remaining_weekly` as a min, and the model's own
 number survives only in the `note` text; the prototype regex-parsed the note,
 which the real build must not.
@@ -126,7 +126,7 @@ sits above claude in the live file. Reorder `lanes.json` to change it.
 
 ## Tweaks, 2026-09-11
 
-Orin's first live screenshot (23:14) showed fable, claude and codex starting
+The user's first live screenshot (23:14) showed fable, claude and codex starting
 at column 0 while agy and grok started after their badge. `report.py` emitted
 three leading spaces on those rows; Claude Code trims leading whitespace from
 each status line row before drawing it (not documented on the statusline page,
@@ -134,7 +134,7 @@ established from the screenshot against the script's bytes). Fix: the badge
 column is never blank; an unbadged row shows a dim `·`. Trailing whitespace
 was already stripped by the script.
 
-Orin also asked for an on/off switch, "best-case a keyboard shortcut". Claude
+The user also asked for an on/off switch, "best-case a keyboard shortcut". Claude
 Code's `keybindings.json` binds built-in actions only (checked against the
 keybindings reference the same day: no action runs a command, a skill, or
 touches the status line), so the switch is a flag file that the next refresh
@@ -145,7 +145,7 @@ python3 ~/.claude/skills/delegate/scripts/report.py statusline off|on|toggle|sta
 ```
 
 Typed at the Claude prompt as `! python3 … statusline toggle` it costs no
-model turn. Orin is moving from WezTerm to Ghostty, and Ghostty keybinds send
+model turn. The user is moving from WezTerm to Ghostty, and Ghostty keybinds send
 text or escape sequences only (checked against the Ghostty keybind reference
 the same day: `text:`, `csi:`, `esc:`, no action runs a program), so the
 shortcut lives in Hammerspoon, which already runs a shell task on ⌥⌘R:
@@ -159,9 +159,9 @@ zero rows and `toggle` restored five against a scratch flag path, and
 
 ## Herdr popup, 2026-09-26
 
-Orin: the popup went blank and showed no lanes. Two causes. It ran plain
+The user: the popup went blank and showed no lanes. Two causes. It ran plain
 `statusline`, so the ⌥⌘D off flag hid it too; `--popup` now ignores the flag
-and appends the Tier leaders from `rank.tier_leaders`. Then Orin's screenshot
+and appends the Tier leaders from `rank.tier_leaders`. Then the user's screenshot
 read "no eligible lane" on all four Tiers: the popup shell has no
 `~/.local/bin`, `~/.grok/bin` or `/opt/homebrew/bin`, so every Lane was vetoed
 for a missing harness. The command now runs in a login, interactive zsh, and

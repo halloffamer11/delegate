@@ -1,8 +1,8 @@
 # 28 — An order inside each tier
 
-**Status:** done 2026-09-13; Orin's wizard run wrote the catalog (see the run note)
+**Status:** done 2026-09-13; the user's wizard run wrote the catalog (see the run note)
 
-**What to build:** From Orin's review of ticket 27 (2026-09-12). The page places
+**What to build:** From the user's review of ticket 27 (2026-09-12). The page places
 lanes in tiers; the wizard's review page, where j/k already works, becomes where he
 orders the lanes inside each tier: "stacked ranking, which is probably the right
 way about it within each tier." Today the ranker orders a tier by pace and then by
@@ -12,7 +12,7 @@ first lane always wins and the rest never run. Work in `setup_tui.py`, `setup.py
 
 ## Paste
 
-1. **A carried lane the lines do not name goes off.** Orin, 2026-09-12: "if it's
+1. **A carried lane the lines do not name goes off.** The user, 2026-09-12: "if it's
    not in the tier list, it's not used, so it drops off." The summary line says how
    many went off because they were not named. This replaces ticket 27's "a lane with
    no line keeps what it has", and with it the case where such a lane took tier 1 on
@@ -26,7 +26,7 @@ first lane always wins and the rest never run. Work in `setup_tui.py`, `setup.py
    j/k moves the cursor; J/K (and shift-up/down) moves the lane under the cursor up
    or down inside its tier; 1-4 moves it to that tier, at the bottom; the key line
    says so. The model grouping of ticket 26 does not apply on this page, since the
-   order is Orin's.
+   order is the user's.
 4. **Enter writes the order**: each carried lane gets `order`, its position inside
    its tier from 1.
 
@@ -38,7 +38,7 @@ first lane always wins and the rest never run. Work in `setup_tui.py`, `setup.py
    every lane with one), pace descending, lane name ascending.** The first is the
    pick unless a later lane's pace beats the pick's pace by `margin`, which steals
    the job, as today. Because pace no longer orders a tier, a steal can now happen
-   inside a tier: that is the load balance, a lane lower in Orin's order runs when
+   inside a tier: that is the load balance, a lane lower in the user's order runs when
    its meter is well ahead of the pick's. A catalog with no `order` field ranks
    exactly as before.
 7. **Every statement of the rule agrees**: `SKILL.md`, `CONTEXT.md`, the skill's
@@ -47,7 +47,7 @@ first lane always wins and the rest never run. Work in `setup_tui.py`, `setup.py
 
 ## Decisions already made
 
-- Tests check the rule on fixtures, never Orin's tiers or order.
+- Tests check the rule on fixtures, never the user's tiers or order.
 - The page places tiers and off; the wizard orders and writes (tickets 26, 27).
 - The Fable meter needs no change: `usage.py` already reads its weekly figure as
   the smaller of Claude's all-models week and the Fable week, which matches
@@ -63,7 +63,7 @@ first lane always wins and the rest never run. Work in `setup_tui.py`, `setup.py
 - [x] 5 `order` validated
 - [x] 6 rank sort with `order`; no-order catalogs unchanged
 - [x] 7 every statement of the rule agrees
-- [x] Orin orders his tiers in the wizard (2026-09-13)
+- [x] The user orders his tiers in the wizard (2026-09-13)
 
 ## Landed, 2026-09-12
 
@@ -95,7 +95,7 @@ What shipped:
   included; the cursor stays on the lane. Moves survive routing and back. The
   footer is `j/k: cursor  J/K: move lane  1-4: tier  v: paste  enter: next
   b: back  q: quit` (79 places); two legend lines spell out the moves and what the
-  order does to ranking. Model grouping does not apply here. Two choices Orin may
+  order does to ranking. Model grouping does not apply here. Two choices the user may
   want to check: the four `T4 T3 T2 T1` boxes are gone, since the section states
   the tier and the line's decision is now its place (the root "Settled" bullet on
   one `[x]`/`[ ]` marker per page was written before this page ordered anything);
@@ -149,22 +149,22 @@ Verification:
   agy-gemini 0.90) picked `sonnet-high@claude` (tier 2, order 1) over
   `flash-high@agy` (order 2, higher pace); with agy-gemini at 1.10 it picked
   `flash-high@agy`, `stolen by pace: 1.1 >= 0.8 + 0.2`, inside tier 2. These tiers
-  and meters are fixtures, not Orin's.
+  and meters are fixtures, not the user's.
 - The same lines through `Wizard.apply_tier_lines` on the stowed catalog, walked to
   the review page with one J, rendered at 200x50 through `layout_lines`: tier 3 read
   terra, grok, opus after opus moved down one place. The render is in the return.
 - Not verified: the curses page under a real terminal. Whether a given terminal
   sends `KEY_SF`/`KEY_SR` for shift-down/up was not checked; J/K do not depend on it.
-  Orin's own order is his box.
+  The user's own order is his box.
 
-## Orin's run, 2026-09-13
+## The user's run, 2026-09-13
 
 `make delegate-wizard` on this branch (`5f22b61`), the page opened with `o`, tiers
 drawn there and pasted with `v`, tiers ordered on the review page, written at
 confirm. `catalog.py check` says `ok` for both files; the lanes diff is only `tier`,
 `order` and `enabled` (18 lanes on and ordered, 25 off), plus the commas the new
 key needs; `routing.json` moved `scout` from floor 2 / ceiling 3 to floor 1 /
-ceiling 2. The tiers and order are Orin's and are not restated here. The
+ceiling 2. The tiers and order are the user's and are not restated here. The
 PROVISIONAL notes on the generated lanes still say "Confirm in the wizard"; the
 tiers are now confirmed, `meter_weight`, `timeout` and the `astra-high@codex`
 price are not. The suite is green after the write: 12 files, 517 PASS, 0 FAIL.

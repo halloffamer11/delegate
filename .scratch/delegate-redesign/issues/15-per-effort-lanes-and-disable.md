@@ -1,6 +1,6 @@
 # 15 — One lane per effort level, and a way to switch lanes off
 
-**What to build:** Today one model appears once, at one effort chosen when the lane was authored — `luna-low@codex` exists and `luna-medium@codex` does not, so the medium setting is unreachable without hand-editing the catalog. Orin wants every effort level a harness offers to be its own lane, and a way to switch off the ones he does not want in play.
+**What to build:** Today one model appears once, at one effort chosen when the lane was authored — `luna-low@codex` exists and `luna-medium@codex` does not, so the medium setting is unreachable without hand-editing the catalog. The user wants every effort level a harness offers to be its own lane, and a way to switch off the ones he does not want in play.
 
 `codex debug models` reports six efforts for `gpt-6-astra`, `gpt-5.6-sol` and `gpt-5.6-terra` (`low, medium, high, xhigh, max, ultra`) and five for `gpt-5.6-luna` (no `ultra`), confirmed 2026-09-09. Enumerating them turns six lanes into roughly thirty. That is fine for ranking, which is a sort, but it makes the wizard's tier screens long and most of those rows will never be used — hence the switch.
 
@@ -54,7 +54,7 @@ the research says.
 ## Decision 2026-09-10 — what the pre-screen is
 
 CLAUDE.md referred to "the ticket-15 pre-screen" as settled, but this ticket
-never defined it and no other file did either. Confirmed by Orin 2026-09-10:
+never defined it and no other file did either. Confirmed by the user 2026-09-10:
 
 **The pre-screen is a narrowing pass that runs before the tier screens.** It
 takes the ~30 enumerated per-effort lanes and proposes which ones are worth
@@ -67,13 +67,13 @@ construction.
 
 It proposes; the human disposes. The pre-screen never writes the catalog on its
 own — its output is the starting mark state on the tier screens, which the human
-overrides with the toggle. Orin ruled on 2026-09-10 that there is no constraint
+overrides with the toggle. The user ruled on 2026-09-10 that there is no constraint
 on what it may write (see CLAUDE.md), since `lanes.json` carries nothing
 sensitive.
 
 **Blocked by:** 13 (discovery), 12 (the wizard screens this adds a toggle to).
 
-**Status:** implemented 2026-09-10 (`8d1dbb2`, `5994965`, `1ab5cb2`, `bc0f773`). Every effort each codex model offers is now a lane — 26 in the catalog — and the pre-screen proposes the dominated ones off. The one unticked box is Orin's: enumerating the efforts he wants in one wizard run. The chunk-dispatch measurements in the last section are still the open engineering problem and are listed in the project CLAUDE.md.
+**Status:** implemented 2026-09-10 (`8d1dbb2`, `5994965`, `1ab5cb2`, `bc0f773`). Every effort each codex model offers is now a lane — 26 in the catalog — and the pre-screen proposes the dominated ones off. The one unticked box is the user's: enumerating the efforts he wants in one wizard run. The chunk-dispatch measurements in the last section are still the open engineering problem and are listed in the project CLAUDE.md.
 
 - [x] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
 - [x] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
@@ -84,7 +84,7 @@ sensitive.
 - [x] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
 - [x] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
-- [x] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run (2026-09-13; ticket 28)
+- [x] The user enumerates the codex efforts he wants and switches off the rest in one wizard run (2026-09-13; ticket 28)
 
 ## Schema and generator landed 2026-09-10
 
@@ -131,7 +131,7 @@ The pre-screen consumes `effort.py check` output through `--effort-rows` rather
 than running the pipeline. `extract` is an LLM call — 121s on one packet — and a
 curses wizard has to stay deterministic and fast.
 
-Two defects found in review, both of which would have switched off a lane Orin
+Two defects found in review, both of which would have switched off a lane the user
 uses:
 
 - **A row at an effort no lane can select must never dominate.** Every published
@@ -152,7 +152,7 @@ lane on, `luna-low` on, `luna-xhigh` off because `max` scores 10.5 at $2.8 again
 its 5.5 at $2.9, `ultra` off. That is the rule doing real work rather than
 switching off whatever it has no data for.
 
-One box left, and only Orin can close it: enumerate the codex efforts he wants and
+One box left, and only the user can close it: enumerate the codex efforts he wants and
 switch off the rest in one wizard run.
 
 ## A sequential chunk sweep does not fit one agy window — measured 2026-09-10

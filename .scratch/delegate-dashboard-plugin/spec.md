@@ -1,11 +1,11 @@
 # Project delegation dashboard prototype
 
 Date: 2026-09-13. Status: prototype implemented on `worktree/delegate-monitor-herdr`,
-checked and independently reviewed 2026-09-14; Orin's verdict 2026-09-15 is on tickets 01
+checked and independently reviewed 2026-09-14; the user's verdict 2026-09-15 is on tickets 01
 and 09; the compatibility pass with current main (ticket 10) is implemented 2026-09-18.
 
 **Superseded in part, 2026-09-20.** The prototype answered its two questions (tickets 01
-and 09), Orin accepted the layout `deck` (ticket 11), and on 2026-09-20 he said "lock in the
+and 09), the user accepted the layout `deck` (ticket 11), and on 2026-09-20 he said "lock in the
 deck layout as the production version". From that date the dashboard is production code and
 ships from main (tickets 12 and 13). These rules below no longer hold: the dashboard is
 throwaway, it is marked as throwaway, and its UI stays on a branch and is not merged. Every

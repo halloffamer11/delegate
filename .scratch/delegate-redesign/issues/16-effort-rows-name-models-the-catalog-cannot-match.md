@@ -109,7 +109,7 @@ catalog plus the four missing astra lanes:
 
 `stow/delegate/.config/delegate/lanes.json` gained the one entry the derived
 rule cannot reach — `"published_as": ["Fable 5.1"]` on `fable-xhigh@claude`
-(Orin, 2026-09-10). The live `~/.config/delegate/lanes.json` was left alone: it
+(the user, 2026-09-10). The live `~/.config/delegate/lanes.json` was left alone: it
 is a regular file that nothing propagates to, and which of the two catalogs is
 authoritative is still open, so writing to both would have answered that
 quietly. The stowed catalog now differs from the live one by this field as well
@@ -144,6 +144,6 @@ Two defects were found by running it, both fixed on this branch:
   shared six colours and the astra pair plotted 5px apart with overprinted
   labels).
 
-Suite 347 assertions, 0 failures. Still outstanding, and Orin's: the four astra
+Suite 347 assertions, 0 failures. Still outstanding, and the user's: the four astra
 lanes exist in no catalog, so a live run cannot reproduce the finding until they
 are added.

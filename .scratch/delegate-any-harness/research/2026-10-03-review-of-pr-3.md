@@ -1,6 +1,6 @@
 # Review of PR #3: release fragility and module depth
 
-Two read-only checks run on 2026-10-03 at `1cac49b`, answering Orin's review of PR #3:
+Two read-only checks run on 2026-10-03 at `1cac49b`, answering the user's review of PR #3:
 
 - "are we hardcoding in too much? ... is it going to break when new models are released?"
   (on `harnesses/agy.py`);

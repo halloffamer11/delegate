@@ -641,7 +641,7 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 "timeout": source["timeout"],
                 "price": {"in": None, "cache_read": None, "cache_write": None, "out": None},
                 # a lane with no predecessor is marked on no tier page, so it
-                # lands on tier 1 unless Orin marks it higher
+                # lands on tier 1 unless the user marks it higher
                 "tier": source["tier"] if pred_name else 1,
                 "basis": ULTRA_BASIS if effort == "ultra" else basis,
                 "note": (f"UNMEASURED: meter_weight and timeout copied from {source_name}. "

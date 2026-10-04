@@ -35,7 +35,7 @@
       "4": 50
     },
     "diversity": true,
-    "note": "the wizard proposes each carried Lane's Tier from these score bands; Orin keeps or changes each proposal"
+    "note": "the wizard proposes each carried Lane's Tier from these score bands; the user keeps or changes each proposal"
   },
   "note": "floor is the default tier; ceiling is the maximum tier. override per project: e.g. {\"classes\": {\"scout\": {\"floor\": 3}}}"
 }

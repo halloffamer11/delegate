@@ -1,6 +1,6 @@
 # 12 — `deck` is the production dashboard
 
-**What to build:** Orin, 2026-09-20: "lock in the deck layout as the production version."
+**What to build:** The user, 2026-09-20: "lock in the deck layout as the production version."
 The dashboard stops being a prototype with layout variants. `deck` is the one view.
 
 **Blocked by:** None — can start immediately.
@@ -28,12 +28,12 @@ with main merged).
 - The root `Makefile` keeps the `delegate-dashboard` target.
 - The root `CLAUDE.md` and the spec
   `.scratch/delegate-dashboard-plugin/spec.md` say the UI now ships
-  from main; the older "UI stays on the branch" rule is recorded as superseded by Orin's
+  from main; the older "UI stays on the branch" rule is recorded as superseded by the user's
   word of 2026-09-20.
 
 ## Acceptance
 
-**Status:** landed 2026-09-20 (`a067fd5`, `972face`), merged to `main` by Orin as `0ffffea`. Open, Orin's: confirm `v` does nothing in a pane (box 1); the last box is met by his merge, and his drive verdict is not recorded yet.
+**Status:** landed 2026-09-20 (`a067fd5`, `972face`), merged to `main` by the user as `0ffffea`. Open, the user's: confirm `v` does nothing in a pane (box 1); the last box is met by his merge, and his drive verdict is not recorded yet.
 
 - [ ] `python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"` opens `deck`; `--layout`
       is rejected as an unknown argument; `v` does nothing.
@@ -41,7 +41,7 @@ with main merged).
 - [x] `python3 tools/delegate-dashboard/test_dashboard.py` passes, and `--json` exits 0.
 - [x] No `.delegate/` directory is tracked on the branch.
 - [x] Every suite under `agents/skills/delegate/tests/` still exits 0.
-- [ ] Orin drives the production dashboard once in a Herdr pane and merges the branch.
+- [ ] The user drives the production dashboard once in a Herdr pane and merges the branch.
 
 ## Landed, 2026-09-20
 
@@ -64,4 +64,4 @@ one pressed `v` in a TTY.
 
 Not done: the root `CLAUDE.md` and the spec still say the UI stays on the branch. The
 worker's permission check refused both edits, so the session did not apply the worker's
-text either. Orin said yes on 2026-09-20 and the session wrote both in its own words (`972face`).
+text either. The user said yes on 2026-09-20 and the session wrote both in its own words (`972face`).

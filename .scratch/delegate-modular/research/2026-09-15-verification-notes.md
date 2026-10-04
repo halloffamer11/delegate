@@ -58,7 +58,7 @@ Claims checked: 6 supported, 7 partial, 3 unsupported. Refuted 2 of 3 lenses.
   `usage.py:149-167`.
 - Contradiction with the grok note: this note keeps `min(5h, weekly)` for agy; the grok note
   says stop inventing an agy combined bound and sort agy unknown-last until a vendor shows a
-  joint bound. Orin's call; the grok position matches quota-axi's own code.
+  joint bound. The user's call; the grok position matches quota-axi's own code.
 - Required reading not cited: `SKILL.md`, the delegate `CLAUDE.md`, redesign spec §4–5,
   quota-axi's `AGENTS.md`, `CHANGELOG.md` and its test files. `AGENTS.md` says never probe
   Claude through the CLI because it spends the quota being measured; `usage.py:151` does

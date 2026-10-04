@@ -107,7 +107,7 @@
         "out": 1.2
       },
       "tier": 1,
-      "basis": "benchmarks overstate it (Orin)"
+      "basis": "benchmarks overstate it (the user)"
     },
     "flash-high@agy": {
       "harness": "agy",

@@ -4,7 +4,7 @@
 A tote board for one project: one Lane to a row, Tiers stacked as decks behind
 a coloured rail on the left edge.
 
-Orin's verdict of 2026-09-18 chose each part from two compared layouts.  From
+The user's verdict of 2026-09-18 chose each part from two compared layouts.  From
 one: the vertical coloured Tier line at the left edge, the terminal's own
 background, and Remaining drawn as a solid rectangle.  From the other: the
 quiet palette with gold for the selected Lane, the icon in the first content

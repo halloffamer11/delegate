@@ -6,7 +6,7 @@ The wizard's start page stops teaching those words and shows only what the run
 will do: the two files it will write, the benchmark page path, and the discovery
 notices.
 
-**Why.** Orin's first run of the wizard (2026-09-11): "People know what class,
+**Why.** The user's first run of the wizard (2026-09-11): "People know what class,
 tier, lane, model, harness, and so forth are." Today the start page spends four of
 its lines on what a tier is and how to assign one, and the tier legend repeats
 one of them on every tier page. The definitions are not wrong; they are in the

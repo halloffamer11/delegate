@@ -8,7 +8,7 @@ model at every effort with the figures measured at that effort:
    way it already does for codex, and the catalog refuses a lane at an effort its
    harness does not offer. The carry page then shows Fable, Opus 5, Sonnet 5,
    Haiku 4.5, Grok 4.6 and Gemini 3.8 Flash at every effort their CLIs accept
-   (Orin, 2026-09-12: "Fable is only shown as extra high", "we only have Opus High").
+   (the user, 2026-09-12: "Fable is only shown as extra high", "we only have Opus High").
 2. **Every Claude model reaches its rows** (from a draft ticket, never committed). Terminal-Bench's
    `Opus 5` and `Sonnet 5` are dropped as unmatched, and Haiku has no rows at all.
 3. **The tier pages and the benchmark page read the per-effort AA rows** (was
@@ -68,7 +68,7 @@ first page, with a pagination key `bench.py` does not follow; on 2026-09-11 that
 page held 11 of the 31 catalog variants. `build_aa_section` then keeps the one entry
 nearest the lane's effort and drops the rest, so every AA figure carries a caveat
 and `flash-high@agy` has none. The tier pages meanwhile show Epoch and swerb columns
-that are empty for most lanes (Orin, 2026-09-12). Ticket 17's rule
+that are empty for most lanes (the user, 2026-09-12). Ticket 17's rule
 (`effort_attributes`) already keeps only figures measured at a lane's own effort;
 with per-effort rows it has one for every lane. The page payload carries component
 scores (Terminal-Bench 2.1, AutomationBench, AA-LCR, IFBench, Omniscience, GPQA
@@ -77,7 +77,7 @@ asks.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented 2026-09-12, pending Orin's review
+**Status:** implemented 2026-09-12, pending the user's review
 
 Efforts:
 - [x] `discover.py` has one effort list per harness: codex from its JSON, claude from its CLI, agy from the slug suffix family (`strip_effort_suffix` already knows it), grok from a probe of its accepted values recorded here with the command that proved it. Claude: `claude --help` (Claude Code 2.1.269) prints `--effort <level>` and, on the next line, `(low, medium, high, xhigh, max)`; `parse_claude_help` reads that line, and the fixture is a copy of the real output. The same five are in https://code.claude.com/docs/en/model-config. If the help ever lists none, `catalog.HARNESS_EFFORTS["claude"]` stands in and discovery says so. Grok: `grok --help` prints `--reasoning-effort <EFFORT>` with no values, and `grok --reasoning-effort bogus models` exits 0, so the CLI checks nothing locally and no non-paid probe proves a value. Grok stays at `high`, the effort `grok46-high@grok` has run at; proving more costs a paid run, and grok's meter was at 12%. Agy: `agy --help` prints `--effort (low|medium|high)`, and `agy models` lists `-low`, `-medium` and `-high` slugs.
@@ -100,7 +100,7 @@ Report:
 
 ## Consolidated, 2026-09-12
 
-Orin asked for fewer, larger tickets. Ticket 21 (per-effort AA rows in the report)
+The user asked for fewer, larger tickets. Ticket 21 (per-effort AA rows in the report)
 and a draft ticket on Claude rows, never committed, folded in here: all three
 change the lanes and the data the wizard reads, not the wizard's pages.
 

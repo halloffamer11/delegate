@@ -1,8 +1,8 @@
 # 27 — The page is the first input
 
-**Status:** implemented 2026-09-12, pending Orin's review (the last box is his)
+**Status:** implemented 2026-09-12, pending the user's review (the last box is his)
 
-**What to build:** From Orin's use of the ticket 26 page (2026-09-12): "The HTML has
+**What to build:** From the user's use of the ticket 26 page (2026-09-12): "The HTML has
 now surpassed the TUI." The page becomes where carry and tier decisions are made,
 and the wizard takes them in one paste. The wizard stays the place files are
 written; retiring its carry and tier pages is later work. Work in `bench_page.py`,
@@ -28,8 +28,8 @@ written; retiring its carry and tier pages is later work. Work in `bench_page.py
 4. **Sensitivity across boards.** A table under the tier panel's plots: one row per
    placed lane, grouped as the panel groups; one column per board the page plots.
    A cell is the tier that board alone would give the lane if each tier held the
-   share of lanes Orin gave it: rank the placed lanes that board measured by
-   score, and cut them in the proportions of Orin's tier counts. A cell that
+   share of lanes the user gave it: rank the placed lanes that board measured by
+   score, and cut them in the proportions of the user's tier counts. A cell that
    differs from the lane's tier is marked. The last column is how many boards
    agree out of how many measured the lane. The composite index is shown and
    never counted in that column (ticket 18). It updates as tiers change.
@@ -45,11 +45,11 @@ written; retiring its carry and tier pages is later work. Work in `bench_page.py
 
 ## Decisions already made
 
-- Tests check behaviour on fixtures, never Orin's tiers.
+- Tests check behaviour on fixtures, never the user's tiers.
 - Nothing on the page writes `lanes.json`; the wizard writes it.
 - The frontier and item 5 are display aids; the carry rule is the only thing that
   proposes a lane off.
-- How the ranker orders lanes inside a tier is not changed here; Orin decides that
+- How the ranker orders lanes inside a tier is not changed here; the user decides that
   separately (question raised 2026-09-12).
 
 ## Boxes
@@ -60,7 +60,7 @@ written; retiring its carry and tier pages is later work. Work in `bench_page.py
 - [x] 4 sensitivity table
 - [x] 5 beaten by another model, shown
 - [x] 6 colour by meter, Fable its own shade
-- [ ] Orin pastes his page decisions into the wizard
+- [ ] The user pastes his page decisions into the wizard
 
 ## Landed, 2026-09-12
 
@@ -156,7 +156,7 @@ Verification:
   Fable dots use `var(--h-claude-1, ...)` (`#43207e`), the opus and sonnet dots
   `var(--h-claude, ...)`. A reload kept all 11 decisions. At 600 px the page was
   600 px wide. The only console error was the test server's missing favicon. These
-  tiers are a fixture for the check, not Orin's.
+  tiers are a fixture for the check, not the user's.
 - The copied lines were fed to `setup.py --plain --tiers-from` against a scratch
   copy of `stow/delegate/.config/delegate`. It printed
   `Lines: 10 took a tier; 1 went off; 32 not named.` and wrote nothing (stdin
@@ -166,4 +166,4 @@ Verification:
   unnamed lanes took tier 1 through T1's opening rule (ticket 25). The render is in
   the return.
 - Not verified: the curses TUI under a real terminal with a real `pbpaste`, and
-  Orin's own decisions (his box).
+  The user's own decisions (his box).

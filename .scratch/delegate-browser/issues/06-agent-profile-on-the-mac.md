@@ -1,15 +1,15 @@
 # 06 — Workers can use the agent profile on the Mac
 
-**What to build:** Workers on all four harnesses can use the agent profile — the Helium profile "GenAI", signed in to a few accounts Orin chose — through the Playwright extension, and only for the sites and actions a brief names. Orin chose to have it on every run for all four harnesses. The guard is the worker preamble and the brief. Workers never reach Orin's personal profile, because the extension is installed only in GenAI.
+**What to build:** Workers on all four harnesses can use the agent profile — the Helium profile "GenAI", signed in to a few accounts the user chose — through the Playwright extension, and only for the sites and actions a brief names. The user chose to have it on every run for all four harnesses. The guard is the worker preamble and the brief. Workers never reach the user's personal profile, because the extension is installed only in GenAI.
 
 Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 01, 02, 03 and 04.
 
-**Status:** ready-for-human, raised by Orin 2026-09-10. The two code boxes are built (2026-10-04); what is left is the Mac setup with Orin: the Playwright extension goes into Helium's GenAI profile through its GUI, signed in to the accounts he picks.
+**Status:** ready-for-human, raised by the user 2026-09-10. The two code boxes are built (2026-10-04); what is left is the Mac setup with the user: the Playwright extension goes into Helium's GenAI profile through its GUI, signed in to the accounts he picks.
 
 - [x] The worker preamble allows the agent profile only for the sites and actions the brief names, and not otherwise. Built 2026-10-04 (`assets/preamble.md`; dispatch test 32 checks the wording).
 - [x] The delegate `SKILL.md` tells the session how a brief names those sites and actions: an optional `# Agent profile` heading, one line per site with the actions allowed there.
-- [ ] Setup on the Mac, in conversation with Orin: the Playwright extension in Helium GenAI only, and an `agent-browser` server in all four harness configs following the setup rules. The token stays on the machine; a search of the repo finds no token.
+- [ ] Setup on the Mac, in conversation with the user: the Playwright extension in Helium GenAI only, and an `agent-browser` server in all four harness configs following the setup rules. The token stays on the machine; a search of the repo finds no token.
 - [ ] A manual check recorded here shows the personal profile has no Playwright extension.
 - [ ] Proof on the Mac: all four agent-profile rows pass with Helium open on GenAI, and the disposable rows still pass.
