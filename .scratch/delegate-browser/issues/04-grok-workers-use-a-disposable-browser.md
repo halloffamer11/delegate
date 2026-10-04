@@ -35,6 +35,14 @@ a path, and `sandbox.toml` has no field for Mach or IPC, so no grant can fix it.
 - Playwright's bundled browser (`--browser chromium`): Playwright maps it to chrome-for-testing,
   which is not installed (only chromium-1134 to 1234 are), so no browser started.
 
+First write-run probe, 2026-10-04 evening (`~/tmp/grok-write-probe`, run
+`20261004T184209Z-grok47-high@grok-e3542c35`): blocked after 3 s by grok's own limit, "You've
+reached your free Grok Build usage limit". The grok CLI on the Mac runs on the free Grok Build
+tier, while the catalog prices the meter as SuperGrok ($30), and the day's test runs used up
+the free quota. The probe also showed `browser_probes.py --dry-run` printing `--effort low`,
+which grok (high only) refuses; fixed: a probe keeps the Lane's effort on a harness that does
+not offer low. Waits on the user: which account the grok CLI signs in with, then the rerun.
+
 Two untested ways remain: Chrome with `--no-sandbox` (drops Chrome's own isolation; grok's
 Seatbelt still wraps it), or installing chrome-for-testing (a download). Otherwise a grok
 read-only run cannot browse on macOS, and a browser job on grok goes as a write run, which

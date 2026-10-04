@@ -91,8 +91,11 @@ def build_dispatch_cmd(lane, harness, brief_path, cwd):
         "--brief", brief_path,
         "--cwd", cwd,
     ]
-    effort = harnesses.get(harness).browser_probe_effort()
-    if effort:
+    adapter = harnesses.get(harness)
+    effort = adapter.browser_probe_effort()
+    # dispatch refuses an effort the harness does not offer (grok offers only
+    # high), so a probe keeps the Lane's own effort there
+    if effort and effort in adapter.efforts:
         cmd.extend(["--effort", effort])
     return cmd
 

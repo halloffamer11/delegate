@@ -125,7 +125,8 @@ def main():
         record("6b. grade empty dir fails missing return.json", verdict == "FAIL" and "missing return.json" in reason, f"verdict={verdict} reason={reason}")
 
     # -------------------------------------------------------------
-    # 7. --dry-run with fake catalog: prints --effort low for non-agy, not for agy
+    # 7. --dry-run with fake catalog: prints --effort low where the harness offers
+    # it (codex), not for agy, and not for grok, which offers only high
     # -------------------------------------------------------------
     with tempfile.TemporaryDirectory() as tmpdir:
         fake_config = os.path.join(tmpdir, "config")
@@ -183,12 +184,16 @@ def main():
             "lane=fable-xhigh@claude" in ln and "agent=lane-fable-xhigh" in ln and "dispatch" not in ln
             for ln in native_lines
         )
-        all_non_agy_have_effort_low = len(non_agy_lines) == 4 and all("--effort low" in ln for ln in non_agy_lines)
+        codex_lines = [ln for ln in non_agy_lines if "@codex" in ln]
+        grok_lines = [ln for ln in non_agy_lines if "@grok" in ln]
+        all_non_agy_have_effort_low = (
+            len(codex_lines) == 2 and all("--effort low" in ln for ln in codex_lines)
+            and len(grok_lines) == 2 and all("--effort" not in ln for ln in grok_lines))
         agy_has_no_effort = len(agy_lines) == 2 and all("--effort" not in ln for ln in agy_lines)
 
         ok7 = res.returncode == 0 and has_8_lines and native_ok and all_non_agy_have_effort_low and agy_has_no_effort
         record(
-            "7. dry-run with fake catalog: native claude rows, --effort low for other relays, omitted for agy",
+            "7. dry-run with fake catalog: native claude rows, --effort low where offered, omitted for agy and grok",
             ok7,
             f"rc={res.returncode} total={len(lines)} native_ok={native_ok} non_agy_ok={all_non_agy_have_effort_low} agy_ok={agy_has_no_effort}\n{res.stdout}",
         )
