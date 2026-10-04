@@ -338,7 +338,9 @@ def orchestrate_one(sandbox, orchestrator, reference, profiles):
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     else:
         argv = [prompt if a == "{prompt}" else a for a in spec["argv"]]
-        proc = subprocess.run(argv, capture_output=True, text=True,
+        # An empty stdin: `claude -p` reads its input too, and a headless
+        # launch must see only the prompt it was given.
+        proc = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                               env=env, cwd=sandbox.cwd, timeout=1800)
     new = sorted(sandbox.run_dirs() - before)
     if not new:
