@@ -1,3 +1,5 @@
+**Removed 2026-10-04.** The user removed the `delegate-mon` crate: nothing installed or tested it, the `deck` dashboard (`tools/delegate-dashboard/`) covers meters and routing, and every Meter change had to be ported to it by hand. This spec and `plan.md` are history; `git log -- tools/delegate-mon` has the code.
+
 Note: crate moved to tools/delegate-mon/ on 2026-09-09.
 
 # Delegate monitoring TUI — Design Spec

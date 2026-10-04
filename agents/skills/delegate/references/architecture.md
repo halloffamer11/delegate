@@ -136,7 +136,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
   on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
   its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
-  `scripts/events.py`: the monitor ledger encoder (schema unchanged).
+  `scripts/events.py`: the ledger encoder (schema unchanged); the statusline reads the ledger.
 - `scripts/model_queue.py`: models the catalog lacks, queued for the next `delegate global`
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.
