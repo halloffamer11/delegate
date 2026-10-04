@@ -3,6 +3,28 @@
 Agent skills that route worker jobs to Claude Code, Codex, Antigravity (`agy`) or Grok
 by task class, model capability and remaining subscription usage.
 
+## How a job is routed
+
+You set policy, the orchestrator model chooses a Class and writes a Brief, delegate's
+scripts rank the Lanes and pick one, and a worker model runs the Brief. Terms are
+defined in `CONTEXT.md`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/routing-dark.svg">
+  <img alt="How delegate routes a job: policy, Class and Brief, ranking to a Pick, a Run, and the result back to adjudication" src="docs/diagrams/routing-light.svg" width="900">
+</picture>
+
+| Step | Owner | File |
+| --- | --- | --- |
+| Policy: Tier, Order, Range, Gate, Margin | Human | `lanes.json`, `routing.json` (global, or `.delegate/` per project) |
+| Class and Brief | Orchestrator model | `assets/classes.md` |
+| Range, Meters and Gate, Pace and Margin, Pick | Scripts | `scripts/rank.py` |
+| Run, Relay, `return.json` | Scripts | `scripts/delegate.py`, `scripts/ads.sh` |
+| Execute the Brief | Worker model | the Run's `prompt.md` |
+| Adjudicate | Orchestrator model | `return.json`, or the native agent's final message |
+
+Source: `docs/diagrams/routing.d2`; rebuild with `sh docs/diagrams/render.sh`.
+
 ## Install
 
 Needs Python 3.9 or newer as `python3` (macOS ships 3.9 at `/usr/bin/python3`) and
