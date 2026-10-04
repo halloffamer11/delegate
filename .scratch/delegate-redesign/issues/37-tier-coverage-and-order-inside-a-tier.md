@@ -28,4 +28,7 @@ The new Lanes are priced from
 **Status:** ready-for-human
 
 - [ ] Orin sets Tier 1 coverage, in the wizard or per project.
-- [ ] Orin answers the Order question, or makes it a ticket of its own.
+- [ ] Orin answers the Order question, or makes it a ticket of its own. Answered in
+      code since: any-harness ticket 17's proposal orders each Tier cheapest first
+      (cost per task, then score), and `p` on a tier page writes that Order. That is
+      the session's 2026-09-22 position. Recommended: tick this box and keep it.

@@ -16,7 +16,22 @@ What exists today:
 
 **Blocked by:** None — can start immediately.
 
-**Status:** needs-triage
+**Status:** ready-for-human, triaged 2026-10-04. Orin deferred the build on
+2026-09-27; what is left for him is the choice below.
+
+**Triage.** Pace is Remaining over the share of the Window left, so it is already a ratio
+without units: a Pace of 1.3 on any Meter means "30% ahead of using it all by the reset".
+What ranking does with it is spread load toward the Meter most likely to expire unused,
+and quota that expires is lost whatever the plan's size. So comparing Pace across Meters
+is right for that question. Where size does matter is how much work a steal moves: a
+Margin of 0.2 on a $20 plan is a fifth as many dollars as on a $100 plan.
+
+Recommended (no build): keep Pace as it is, and close this ticket. If the steal ever
+needs to be size-aware, the common unit is plan dollars per week, which needs no new
+data: each Meter already carries `price_month`, a plan change already updates it, and
+`report.py` already turns a used share into dollars with it (`price_month × 7/30.4375 ×
+share`). The alternative build is a steal that compares weekly dollars left instead of
+Pace, with Margin in dollars.
 
 - [ ] Orin decides the common unit, and how each Meter's factor is set and updated when
       a plan changes.
