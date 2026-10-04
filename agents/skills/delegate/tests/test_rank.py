@@ -1473,4 +1473,47 @@ record(
     res28b.stderr,
 )
 
+# case 29: routing.quota_unit plan_dollars weights each Meter's Pace by its plan
+# price per week (ticket 39). Sample prices: codex $20, grok $30, claude $100.
+cat29 = catalog.load_catalog(config_dir=_samples28)
+m29 = {"probed_at": 1700000000, "lanes": [
+    meter("codex", weekly=0.55, five_h=0.55, pace=0.90),
+    meter("grok", weekly=1.00, pace=0.80),
+    meter("claude-fable", weekly=0.70, five_h=0.70, pace=1.00),
+]}
+rows29a = rank.rank("impl", cat29, m29, ALL_HARNESSES)
+cat29["routing"]["quota_unit"] = "plan_dollars"
+rows29b = rank.rank("impl", cat29, m29, ALL_HARNESSES)
+record(
+    "case 29a by Pace codex leads Tier 2; by plan dollars grok does (0.8 x $30 > 0.9 x $20)",
+    rows29a[0]["lane"] == "terra-high@codex" and rows29b[0]["lane"] == "grok46-high@grok"
+    and rows29b[0]["reason"] == "pick" and "weight" not in rows29a[0]
+    and abs(rows29b[0]["weight"] - 30 * 7 / 30.4375) < 1e-9,
+    [(r["lane"], r["reason"]) for r in rows29a[:2] + rows29b[:2]],
+)
+cat29["routing"]["classes"]["impl"]["ceiling"] = 4
+rows29c = rank.rank("impl", cat29, m29, ALL_HARNESSES)
+record(
+    "case 29b with plan dollars the steal compares values and the Margin is a fraction",
+    rows29c[0]["lane"] == "fable-xhigh@claude"
+    and rows29c[0]["reason"].startswith("stolen by plan dollars: ")
+    and rows29c[0]["reason"].endswith("x (1 + 0.2)"),
+    rows29c[0]["reason"],
+)
+pick29 = {"lane": "a", "pace": 1.0, "weight": 10.0}
+record(
+    "case 29c a value 20% ahead steals at Margin 0.2, 19% ahead does not",
+    rank.steals({"lane": "b", "pace": 1.2, "weight": 10.0}, pick29, 0.2)
+    and not rank.steals({"lane": "b", "pace": 1.19, "weight": 10.0}, pick29, 0.2)
+    and not rank.steals({"lane": "b", "pace": 9.0, "weight": None}, pick29, 0.2),
+)
+for bad29 in ("dollars", 1, None):
+    try:
+        catalog.validate_routing({"version": catalog.ROUTING_VERSION, "margin": 0.2,
+                                  "gate": 0.1, "quota_unit": bad29}, "routing.json")
+        ok29 = False
+    except catalog.CatalogError as e:
+        ok29 = "quota_unit" in str(e)
+    record(f"case 29d quota_unit {bad29!r} is refused", ok29)
+
 sys.exit(1 if fails else 0)

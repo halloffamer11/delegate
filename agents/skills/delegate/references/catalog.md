@@ -21,7 +21,8 @@ The catalog is machine-local: each machine keeps its own, never in the repo.
   needed only where case and separators do not bridge the two).
 - `~/.config/delegate/routing.json`: `classes` (a floor and a ceiling per
   class), `margin`, `gate`, optional `meters` and `overflow` (booleans, on by
-  default), and optional `tier_proposal` (the rule the wizard proposes tiers
+  default), optional `quota_unit` (`pace`, the default, or `plan_dollars`; see
+  `routing.md`), and optional `tier_proposal` (the rule the wizard proposes tiers
   by). A catalog that writes no `classes` gets the five shipped classes with
   the ranges in `assets/samples/routing.json`. A class may also set `leash`
   (a boolean): false drops the preamble's leash sentence for its jobs.
@@ -76,7 +77,7 @@ never declares a floor or a ceiling.
 One field at a time, previewed before it is written:
 
     delegate catalog set lanes.<lane>.tier <n> --scope global|project
-    delegate catalog set routing.gate|routing.margin|routing.meters|routing.overflow <json> --scope global|project
+    delegate catalog set routing.gate|routing.margin|routing.meters|routing.overflow|routing.quota_unit <json> --scope global|project
     delegate catalog range <class> <floor> <ceiling> --scope global|project
     delegate catalog order <lane> <position> --scope global|project
 

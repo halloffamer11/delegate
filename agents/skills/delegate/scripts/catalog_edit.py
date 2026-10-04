@@ -27,6 +27,7 @@ _SET_ROUTING_FIELDS = {
     "margin": "routing.margin",
     "meters": "routing.meters",
     "overflow": "routing.overflow",
+    "quota_unit": "routing.quota_unit",
 }
 # The routing switches whose value is a boolean defaulting on, each with the
 # reader that says what the merged documents come to.
@@ -279,7 +280,7 @@ def parse_set_field(field):
     """Split an allowed set field on the known prefix and final name, not every dot."""
     if not isinstance(field, str) or not field.strip():
         raise catalog.CatalogError("field is required")
-    if field in ("routing.gate", "routing.margin", "routing.meters", "routing.overflow"):
+    if field in _SET_ROUTING_FIELDS.values():
         return ("routing", field.split(".", 1)[1])
     if field.startswith("routing.classes."):
         raise catalog.CatalogError(
@@ -726,6 +727,8 @@ def _changed_fields(op, values, original_doc, proposed_doc, dest):
                 changed.append("routing.meters")
             if field == "routing.overflow" and original_doc.get("overflow") != proposed_doc.get("overflow"):
                 changed.append("routing.overflow")
+            if field == "routing.quota_unit" and original_doc.get("quota_unit") != proposed_doc.get("quota_unit"):
+                changed.append("routing.quota_unit")
         return changed
     if op == "range":
         cls = values["class"]

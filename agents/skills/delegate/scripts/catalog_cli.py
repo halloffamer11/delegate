@@ -10,7 +10,7 @@ CLI forms:
   delegate catalog fmt FILE [--partial]
   delegate catalog set FIELD JSON_VALUE --scope global|project [--cwd DIR] [--config-dir DIR]
       FIELD is lanes.<lane>.tier, routing.gate, routing.margin, routing.meters,
-      or routing.overflow
+      routing.overflow or routing.quota_unit
   delegate catalog range CLASS FLOOR CEILING --scope global|project [--cwd DIR] [--config-dir DIR]
   delegate catalog order LANE POSITION --scope global|project [--cwd DIR] [--config-dir DIR]
   (set/range/order default to a JSON preview; --apply --expect REVISION writes)
@@ -147,7 +147,7 @@ def main(argv=None):
     p_set.add_argument(
         "field",
         help="lanes.<lane>.tier, routing.gate, routing.margin, routing.meters, "
-             "or routing.overflow",
+             "routing.overflow or routing.quota_unit",
     )
     p_set.add_argument("value", help="JSON value")
     add_edit_flags(p_set)

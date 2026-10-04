@@ -511,7 +511,7 @@ def validate_routing(doc, source="routing.json", partial=False):
             "cannot appear in global routing"
         )
 
-    allowed_top = {"version", "classes", "margin", "gate", "meters", "overflow", "note"}
+    allowed_top = {"version", "classes", "margin", "gate", "meters", "overflow", "quota_unit", "note"}
     if partial:
         allowed_top.add("project_order")
     else:
@@ -610,6 +610,13 @@ def validate_routing(doc, source="routing.json", partial=False):
                 "true lets a Range whose carried Lanes are all under the Gate admit the "
                 "next Tier instead of stopping"
             )
+
+    if "quota_unit" in doc and doc["quota_unit"] not in QUOTA_UNITS:
+        raise CatalogError(
+            f"{source}: key 'quota_unit': must be one of {', '.join(QUOTA_UNITS)}, "
+            f"got {doc['quota_unit']!r}; plan_dollars weights each Meter's Pace by its "
+            "plan's price (ticket 39)"
+        )
 
     if "project_order" in doc:
         project_order = doc["project_order"]
@@ -777,6 +784,31 @@ def meters_enabled(routing):
     if not isinstance(routing, dict) or "meters" not in routing:
         return True
     return routing["meters"] is True
+
+
+# How ranking compares Meters (ticket 39). `pace` compares Pace as a bare
+# ratio. `plan_dollars` multiplies each Lane's Pace by its Meter's plan price
+# per week, so spare quota on a pricier plan counts for more, and the Margin
+# becomes a fraction of the Pick's value.
+QUOTA_UNITS = ("pace", "plan_dollars")
+
+WEEK_DAYS = 7
+DAYS_PER_MONTH = 30.4375
+
+
+def quota_unit(routing):
+    """Effective routing.quota_unit: absent means `pace`."""
+    if not isinstance(routing, dict):
+        return "pace"
+    return routing.get("quota_unit", "pace")
+
+
+def week_dollars(meter):
+    """A Meter's plan price per week, or None when it has no price."""
+    pm = (meter or {}).get("price_month")
+    if type(pm) is bool or not isinstance(pm, (int, float)):
+        return None
+    return pm * WEEK_DAYS / DAYS_PER_MONTH
 
 
 def overflow_enabled(routing):

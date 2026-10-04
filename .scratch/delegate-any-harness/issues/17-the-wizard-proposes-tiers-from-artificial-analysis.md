@@ -20,6 +20,8 @@ Dry run on the user's real catalog, 2026-10-04 (AA Intelligence Index, threshold
 - Fable falls: `fable-high` 4 → 1, `fable-xhigh` and `fable-max` 4 → 3. Opus 5.5 scores higher at lower cost per task (e.g. `opus55-xhigh` 56.0 at $3.46 against `fable-xhigh` 53.2 at $5.98), so on this benchmark Fable sits off the frontier in every band. That is the benchmark's verdict, not a bug, and it is the first thing the user's box has to accept or override.
 - 43 Lanes have no score, among them all 35 Kiro Lanes. Not yet traced; the likely cause is that the accepted AA rows predate the Kiro Lanes (`effort.py aa` fetches a page per Lane model) or that AA prints those models under names formatting cannot bridge (`published_as` fixes that). A fresh `effort.py aa` run in the wizard shows which.
 
+The user's call, 2026-10-04: take the proposal as it stands (30/40/50 on the AA index), Fable's drop included. It is applied with `p` on a tier page and `y` to save, in `make delegate-wizard` on each machine.
+
 - [x] The benchmark, the Tier thresholds and the diversity rule are catalog data with a validator, not constants in code.
 - [x] Each Lane with a score shows its proposed Tier, the score and benchmark behind it, and its cost per task; a Lane without a score shows no proposal.
 - [x] A test proves the diversity rule: a harness whose best Lane clears a threshold but sits off the cost frontier still gets a proposal in that Tier.

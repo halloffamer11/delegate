@@ -16,8 +16,8 @@ What exists today:
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human, triaged 2026-10-04. The user deferred the build on
-2026-09-27; what is left for him is the choice below.
+**Status:** done 2026-10-04, as an opt-in setting. The user chose plan dollars on
+2026-10-04.
 
 **Triage.** Pace is Remaining over the share of the Window left, so it is already a ratio
 without units: a Pace of 1.3 on any Meter means "30% ahead of using it all by the reset".
@@ -33,6 +33,15 @@ data: each Meter already carries `price_month`, a plan change already updates it
 share`). The alternative build is a steal that compares weekly dollars left instead of
 Pace, with Margin in dollars.
 
-- [ ] The user decides the common unit, and how each Meter's factor is set and updated when
-      a plan changes.
-- [ ] Ranking compares converted quota, and a plan change needs only its factor changed.
+- [x] The user decides the common unit, and how each Meter's factor is set and updated when
+      a plan changes. Plan dollars per week, from each Meter's `price_month`; a plan
+      change updates `price_month` and nothing else.
+- [x] Ranking compares converted quota, and a plan change needs only its factor changed.
+
+**Built.** `routing.quota_unit` is `pace` (the default, ranking unchanged) or
+`plan_dollars`. With plan dollars each row carries `weight` (`price_month × 7/30.4375`),
+`rank.score` is Pace × weight, and the steal is relative: value ≥ the Pick's × (1 +
+Margin), because a Margin in fixed dollars would mean a different share on every plan.
+The popup's handover and pace-to-lead replay the same rule. Turn it on with
+`delegate catalog set routing.quota_unit '"plan_dollars"' --scope global`. Tests: rank
+case 29, report popup plan-dollar cases. `meter_weight` on Lanes stays unread.

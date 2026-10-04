@@ -380,10 +380,12 @@ nothing to do. **codex**: works, through a home of delegate's own — `run_relay
 worker reads one MCP server and nothing else in `~/.codex`; without that home a run keeps the old
 isolation and has no browser (`codex_home()`, ticket 03). **grok**: works on a write run only. Its
 built-in `read-only` sandbox kills every stdio MCP server on macOS, `context7` as well as
-Playwright, and only a custom sandbox profile fixes it, which needs a relay change (ticket 04).
+Playwright. A custom profile granting `~/.npm` restores the servers, but Chrome then crashes,
+because macOS's sandbox blocks its crash reporter and its own sandbox, and no path grant reaches
+either. So a browser job on grok goes as a write run (the user's call, ticket 04, 2026-10-04).
 **claude**: lanes are native since ticket 22, so the relay's MCP block is not on the path the user uses;
-a native worker inherits this session's servers, and the session must restart before it sees a new
-one (ticket 02). The rest is open work in `.scratch/delegate-browser/issues/`.
+a native worker gets only the file, shell and web tools and the Playwright server (the agent
+template's `tools` line), and the session must restart before it sees a new server (ticket 02). The rest is open work in `.scratch/delegate-browser/issues/`.
 
 ## Benchmark data
 

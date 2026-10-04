@@ -41,6 +41,19 @@ range; only overflow reaches past the ceiling.
 When nothing is eligible the command prints `STOP: no lane eligible for
 <class>` with the reasons, exits 1, and starts nothing.
 
+## Plan dollars
+
+Pace is a ratio, so by default 1% of one plan's week counts the same as 1% of
+another's. With `"quota_unit": "plan_dollars"` in `routing.json` ranking
+compares Pace times the meter's plan price per week
+(`price_month × 7/30.4375`) instead, so spare quota on a pricier plan counts
+for more. The margin then becomes a fraction: a lane steals when its value is
+at least the pick's times `1 + margin`. A plan change needs only its meter's
+`price_month` changed. `--json` rows carry the weekly price as `weight`, and
+the usage popup's handover points follow the same rule.
+
+    delegate catalog set routing.quota_unit '"plan_dollars"' --scope global
+
 ## Overflow
 
 Overflow is the one path past a ceiling. It applies when usage is the only
