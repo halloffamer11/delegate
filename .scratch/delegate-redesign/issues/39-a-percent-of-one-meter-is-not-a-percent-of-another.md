@@ -38,6 +38,11 @@ Pace, with Margin in dollars.
       change updates `price_month` and nothing else.
 - [x] Ranking compares converted quota, and a plan change needs only its factor changed.
 
+**2026-10-04, after the build:** the user finds plan price not the right measure and
+the whole question likely too complicated. `quota_unit` stays `pace` (every Meter counts
+the same). A user-set value per Meter is ticket 41, and plan detection is ticket 42, both
+backlog.
+
 **Built.** `routing.quota_unit` is `pace` (the default, ranking unchanged) or
 `plan_dollars`. With plan dollars each row carries `weight` (`price_month × 7/30.4375`),
 `rank.score` is Pace × weight, and the steal is relative: value ≥ the Pick's × (1 +
