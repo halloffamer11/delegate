@@ -12,7 +12,7 @@ Deterministic rendering, so every report has the same shape:
   report.py cost DIR          token-cost breakdown for one run.
 
 Two ledgers exist and they are not the same file:
-  ledger.jsonl  machine events from delegate.py / usage.py, for the monitor TUI.
+  ledger.jsonl  machine events from delegate.py / usage.py; the statusline reads it.
   runs.jsonl    what the LEAD concluded after verifying a dispatch — the work
                 label and whether the definition of done was met. Only the lead
                 knows this, so only the lead writes it.
