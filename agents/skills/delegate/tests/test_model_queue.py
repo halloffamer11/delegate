@@ -49,7 +49,8 @@ def main():
                                  present={"codex", "agy", "grok"})
         models = [(m["harness"], m["model"]) for m in model_queue.pending()]
         record("2. a scan queues the models no Lane runs, not new efforts of a model one does",
-               models == [("codex", "gpt-6-astra"), ("codex", "gpt-5.5"), ("agy", "gemini-3.1-pro")]
+               models == [("codex", "gpt-6-astra"), ("codex", "gpt-5.5"), ("agy", "gemini-3.1-pro"),
+                          ("agy", "claude-opus-5-5")]
                and all(m["via"] == "scan" and m["first_seen"] for m in added)
                and not model_queue.due(),
                repr(models))
@@ -59,7 +60,7 @@ def main():
         first = model_queue.pending()[0]["first_seen"]
         model_queue.note([{"harness": "codex", "model": "gpt-6-astra"}], "asked")
         record("3. a model already queued is not queued twice and keeps its first sighting",
-               again == [] and len(model_queue.pending()) == 3
+               again == [] and len(model_queue.pending()) == 4
                and model_queue.pending()[0]["first_seen"] == first
                and model_queue.pending()[0]["via"] == "scan")
 
@@ -80,7 +81,7 @@ def main():
         lines = setup_tui.refresh_lines({"models": [], "removed": [], "notices": [],
                                          "queued": model_queue.pending()}, width=200)
         record("6. the wizard's start facts name what dispatch noticed",
-               any(line.startswith("Dispatch noticed (3): gpt-6-astra, gpt-5.5, gemini-3.1-pro")
+               any(line.startswith("Dispatch noticed (4): gpt-6-astra, gpt-5.5, gemini-3.1-pro, claude-opus-5-5")
                    for line in lines),
                repr(lines))
 
@@ -88,7 +89,7 @@ def main():
         kept = len(model_queue.pending())
         setup.clear_queue({"models": [], "queued": model_queue.pending()})
         record("7. a write after a run that saw the queue empties it; one that saw none keeps it",
-               kept == 3 and model_queue.pending() == [])
+               kept == 4 and model_queue.pending() == [])
 
         # dispatch naming a model no Lane runs queues it, and still refuses
         env = dict(os.environ, DELEGATE_MODEL_SCAN="off", DELEGATE_CACHE=os.path.join(root, "usage.json"))

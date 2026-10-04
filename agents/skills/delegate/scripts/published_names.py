@@ -108,6 +108,36 @@ def resolve_published_model(published, lanes_doc, effort=None):
     return None
 
 
+def resolve_published_models(published, lanes_doc, effort=None):
+    """Every lane model a source's printed name denotes: one per harness.
+
+    `resolve_published_model` answers for the catalog as one pool, so when two
+    harnesses run one model it can name only one of them: with Opus on agy
+    (`claude-opus-5-5-high`) beside Claude Code's (`claude-opus-5-5`), a row at
+    effort high resolves to the agy member and Claude Code's lanes lose it. A
+    published score is the model's, whichever harness runs it, so here the same
+    rule is applied inside each harness and every harness that runs the model
+    gets the row (any-harness ticket 31). An explicit `published_as` still
+    names one model.
+    """
+    key = normalize_name(published)
+    if not key:
+        return []
+    explicit = published_as_map(lanes_doc)
+    if key in explicit:
+        return [explicit[key]]
+    by_harness = {}
+    for name, lane in (lanes_doc.get("lanes") or {}).items():
+        if isinstance(lane, dict):
+            by_harness.setdefault(lane.get("harness"), {})[name] = lane
+    out = []
+    for lanes in by_harness.values():
+        model = resolve_published_model(published, {"lanes": lanes}, effort=effort)
+        if model is not None and model not in out:
+            out.append(model)
+    return out
+
+
 def resolve_effort_rows(lanes_doc, effort_rows):
     """Returns (rows keyed by catalog model, published names that name no lane).
 
@@ -124,16 +154,17 @@ def resolve_effort_rows(lanes_doc, effort_rows):
     for row in effort_rows or []:
         if not isinstance(row, dict):
             continue
-        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
-        if model is None:
+        models = resolve_published_models(row.get("model"), lanes_doc, effort=row.get("effort"))
+        if not models:
             name = row.get("model")
             if isinstance(name, str) and name.strip() and name not in unmatched:
                 unmatched.append(name)
             continue
-        if model == row.get("model"):
-            resolved.append(row)
-        else:
-            copied = dict(row)
-            copied["model"] = model
-            resolved.append(copied)
+        for model in models:
+            if model == row.get("model"):
+                resolved.append(row)
+            else:
+                copied = dict(row)
+                copied["model"] = model
+                resolved.append(copied)
     return resolved, unmatched

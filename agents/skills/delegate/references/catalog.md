@@ -109,6 +109,20 @@ predecessor's place with its tier, order, meter, weight and timeout, and a
 superseded model's lanes removed. New lanes carry `UNMEASURED` and `UNPRICED`
 notes: prices are never proposed, so read them off the vendor's page.
 
+Each harness offers its own vendor's models, with one exception: agy also
+offers Opus. Its lanes go on `agy-claude-gpt`, the pool agy shares between
+Claude Opus, Claude Sonnet and GPT-OSS, which is separate from `agy-gemini`
+and from Claude Code's meters; the wizard adds that meter when the catalog
+lacks it. Sonnet and GPT-OSS on agy get no lane. An agy Opus lane competes on
+the carry page only with agy's own Opus efforts. A lane on it reads:
+
+    "opus55-high@agy": {
+      "harness": "agy", "model": "claude-opus-5-5-high", "effort": "high",
+      "meter": "agy-claude-gpt", "meter_weight": 5, "timeout": "40m",
+      "price": {"in": null, "cache_read": null, "cache_write": null, "out": null},
+      "tier": 3, "basis": "Opus on agy's own pool"
+    }
+
 The pages then decide, in order: which lanes to carry, each lane's tier (the
 tier pages show a proposed tier from the benchmark bands in `tier_proposal`;
 `p` takes them), the order inside each tier, and the routing values. Nothing

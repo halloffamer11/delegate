@@ -333,7 +333,46 @@ def test_meter_identity():
            and [r["group"] for r in rows] == ["gemini", "claude-gpt"], repr(rows))
 
 
+
+def test_agy_opus_pool():
+    """agy serves Opus on the pool `/usage` reports as its second group, shared
+    with Sonnet and GPT-OSS (any-harness ticket 31)."""
+    import json
+    import types
+    import usage
+    from unittest import mock
+    agy = harnesses.get("agy")
+    record("agy owns Gemini and Opus, and no other vendor's model",
+           agy.owns("gemini-3.8-flash-high") and agy.owns("claude-opus-5-5-high")
+           and not agy.owns("claude-sonnet-5-5-high") and not agy.owns("gpt-oss-120b-medium"))
+    record("an agy model's group decides its Meter",
+           agy.lane_meter("claude-opus-5-5-low") == "agy-claude-gpt"
+           and agy.lane_meter("gemini-3.8-flash-high") == "agy-gemini"
+           and harnesses.get("codex").lane_meter("gpt-6-sol") is None)
+    # The shape of Orin's `agy --print /usage --output-format json`, 2026-10-03:
+    # two groups, each with a 5h and a weekly bucket.
+    listing = {"command": {"data": {"groups": [
+        {"name": "Gemini Models", "buckets": [
+            {"window": "5h", "remaining_fraction": 0.9, "reset_time": "2026-10-03T18:00:00Z"},
+            {"window": "weekly", "remaining_fraction": 0.7, "reset_time": "2026-10-08T00:00:00Z"}]},
+        {"name": "Claude and GPT models", "buckets": [
+            {"window": "5h", "remaining_fraction": 0.4, "reset_time": "2026-10-03T17:00:00Z"},
+            {"window": "weekly", "remaining_fraction": 0.6, "reset_time": "2026-10-09T00:00:00Z"}]}]}}}
+    with mock.patch.object(agy, "installed", return_value=True), \
+         mock.patch.object(usage, "run", return_value=types.SimpleNamespace(
+             returncode=0, stdout=json.dumps(listing))):
+        rows = {r["meter"]: r for r in agy.meters()}
+    filled = all(rows.get(name, {}).get(key) is not None
+                 for name in ("agy-gemini", "agy-claude-gpt")
+                 for key in ("remaining_5h", "remaining_weekly", "reset_5h", "reset_weekly"))
+    record("agy's two-group usage gives agy-gemini and agy-claude-gpt with both Windows",
+           sorted(rows) == ["agy-claude-gpt", "agy-gemini"] and filled
+           and rows["agy-claude-gpt"]["remaining_5h"] == 0.4
+           and rows["agy-claude-gpt"]["remaining_weekly"] == 0.6, repr(rows))
+
+
 if __name__ == "__main__":
+    test_agy_opus_pool()
     test_meter_identity()
     test_registry_is_the_list()
     test_lane_name()
