@@ -27,7 +27,7 @@ switch layouts).
 
 **Status:** done 2026-10-04. The user picked D, D shipped in delegate#13, and the prototype branch is deleted.
 
-- [x] Orin picks a layout, or parts of several. The user picked D on 2026-10-04.
+- [x] The user picks a layout, or parts of several. The user picked D on 2026-10-04.
 - [x] `report.py statusline --popup` renders it from the cached Meters only, with tests in
       `test_report.py`, and it fits the popup (85% × 40%, about 118 × 20). Built as D: the
       Meter rows write Pace as `= Remaining ÷ share of week`, and each Tier shows its leader,
