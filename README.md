@@ -5,7 +5,7 @@ by task class, model capability and remaining subscription usage.
 
 ## How a job is routed
 
-Orin sets policy, the orchestrator model chooses a Class and writes a Brief, delegate's
+You set policy, the orchestrator model chooses a Class and writes a Brief, delegate's
 scripts rank the Lanes and pick one, and a worker model runs the Brief. Terms are
 defined in `CONTEXT.md`.
 
