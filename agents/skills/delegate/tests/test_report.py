@@ -645,5 +645,15 @@ found = report.handover(alone, meter, 0.2, 0.05)
 check("popup: a lone leader runs down to the Gate", found is not None and found[1] is None
       and abs(found[0] - 0.45) < 0.006, repr(found))
 
+# With plan dollars (ticket 39) the rows carry a weight, and the same replay
+# rescales the value with the Pace it tries: 10 x Pace must reach 20 x 1.2.
+dollars = {"tier": 2, "leader": "a@x", "rows": [dict(lane_row("a@x", "mx", 1.0, order=1), weight=20.0),
+                                                dict(lane_row("b@y", "my", 0.9, order=2), weight=10.0)]}
+check("popup: with plan dollars a rival needs the leader's value times (1 + Margin)",
+      report.pace_to_lead(dict(dollars, margin=0.2), "my", 3.0) == 2.4)
+found = report.handover(dollars, meter, 0.2, 0.05)
+check("popup: with plan dollars the leader hands over at 20 x Pace = 9 / 1.2",
+      found is not None and found[1] == "b@y" and abs(found[0] - 0.3125) < 0.006, repr(found))
+
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {', '.join(fails)}"))
 sys.exit(1 if fails else 0)

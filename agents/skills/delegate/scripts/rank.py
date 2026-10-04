@@ -36,6 +36,9 @@ The selection rule:
      `order` sorts ahead of pace, a steal can happen inside a tier: a lane
      lower in the user's order runs when its meter is well ahead of the pick's.
      That is the load balance (ticket 28).
+  With routing.quota_unit "plan_dollars" (ticket 39) steps 2 and 4 compare
+  Pace times the Meter's plan dollars per week (`score`), and a steal needs
+  value(L) >= value(pick) * (1 + routing.margin).
   5. Overflow (ticket 29, Class ranking only). If nothing is eligible and only
      subscription usage stands in the way — at least one carried lane in the
      Range is under the gate, and every veto there is gate or cli — admit the
@@ -92,33 +95,56 @@ def restrict_to_harness(cat, harness):
     return out
 
 
+def score(item):
+    """What ranking compares: the Pace, or with `quota_unit` plan_dollars
+    (ticket 39) the Pace times the row's `weight`, its plan dollars per week.
+    None when either is unknown. A caller that changes `pace` on a row (the
+    usage popup's trials) gets the value rescaled with it."""
+    pace = item.get("pace")
+    if pace is None or "weight" not in item:
+        return pace
+    weight = item["weight"]
+    return None if weight is None else pace * weight
+
+
 def eligible_order(item, metering):
     """The order eligible Lanes are tried in: Tier, then Order, then (with
-    Meters on) the higher Pace, a Lane with an unknown Pace last."""
+    Meters on) the higher value (`score`), a Lane with an unknown one last."""
     t = item["tier"] if item["tier"] is not None else 99
     unordered = 1 if item["order"] is None else 0
     o = item["order"] if item["order"] is not None else 0
     if not metering:
         return (t, unordered, o, item["lane"])
-    unknown = 1 if item["pace"] is None else 0
-    p = item["pace"] if item["pace"] is not None else 0.0
-    return (unknown, t, unordered, o, -p, item["lane"])
+    v = score(item)
+    unknown = 1 if v is None else 0
+    return (unknown, t, unordered, o, -(v if v is not None else 0.0), item["lane"])
+
+
+def steals(row, pick_row, margin):
+    """True when `row` takes the job from `pick_row` by the Margin: Pace ahead
+    by the Margin, or with plan dollars a value ahead by the Margin's fraction
+    of the Pick's (a fixed amount of dollars would mean nothing across plans)."""
+    v, p = score(row), score(pick_row)
+    if v is None or p is None:
+        return False
+    if "weight" in pick_row:
+        return v >= p * (1 + margin)
+    return v >= p + margin
 
 
 def choose(eligible_rows, margin, metering):
-    """(the Pick, the Pace it stole from or None) among rows already in
-    `eligible_order`: the first row, unless a later one's Pace reaches the
+    """(the Pick, the value it stole from or None) among rows already in
+    `eligible_order`: the first row, unless a later one's value reaches the
     current Pick's by the Margin. The usage popup replays this rule to say
     when a Tier hands over (ticket 40), so it lives in one place."""
     pick_row = eligible_rows[0]
-    beaten_pace = None
+    beaten = None
     if metering:
         for r in eligible_rows[1:]:
-            if r["pace"] is not None and pick_row["pace"] is not None:
-                if r["pace"] >= pick_row["pace"] + margin:
-                    beaten_pace = pick_row["pace"]
-                    pick_row = r
-    return pick_row, beaten_pace
+            if steals(r, pick_row, margin):
+                beaten = score(pick_row)
+                pick_row = r
+    return pick_row, beaten
 
 
 def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="tier"):
@@ -141,6 +167,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     margin = routing["margin"]
     gate = routing["gate"]
     metering = catalog.meters_enabled(routing)
+    dollars = catalog.quota_unit(routing) == "plan_dollars"
     reason_label = reason_label or "tier"
 
     meter_map = meter_observations(meters) or {}
@@ -222,6 +249,9 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
             "overflow": None,
             "reason": veto_reason or "",
         }
+        if dollars:
+            # plan dollars per week; Pace times this is what ranks (ticket 39)
+            row["weight"] = catalog.week_dollars((cat.get("meters") or {}).get(meter_name))
 
         if veto_reason is None:
             eligible_rows.append(row)
@@ -236,13 +266,16 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         for r in eligible_rows:
             if r is pick_row:
                 r["pick"] = True
-                if beaten_pace is not None:
+                if beaten_pace is not None and dollars:
+                    r["reason"] = (f"stolen by plan dollars: {score(r):.2f} >= "
+                                   f"{beaten_pace:.2f} x (1 + {margin})")
+                elif beaten_pace is not None:
                     r["reason"] = f"stolen by pace: {r['pace']} >= {beaten_pace} + {margin}"
                 else:
                     r["reason"] = "pick"
             else:
                 r["pick"] = False
-                if metering and r["pace"] is None:
+                if metering and score(r) is None:
                     r["reason"] = "unknown meter, sorted last"
                 else:
                     r["reason"] = "eligible"
