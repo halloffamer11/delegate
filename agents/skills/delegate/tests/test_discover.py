@@ -69,14 +69,27 @@ with open(agy_fixture_path, "r", encoding="utf-8") as f:
 agy_models = agy_module.parse_listing(agy_raw)
 agy_slugs = [m["slug"] for m in agy_models]
 agy_ok = (
-    len(agy_models) == 14
-    and "Fetching available models..." not in agy_slugs
+    len(agy_models) == 18
     and agy_models[0]["slug"] == "gemini-3.8-flash-high"
     and agy_models[0]["display_name"] == "Gemini 3.8 Flash (High)"
-    and "claude-sonnet-4-6" in agy_slugs
+    and "claude-opus-5-5-high" in agy_slugs
+    and "claude-sonnet-5-5-low" in agy_slugs
     and "gpt-oss-120b-medium" in agy_slugs
 )
-record("agy fixture parsing skips header and parses tabs", agy_ok, f"count={len(agy_models)}, slugs={agy_slugs[:3]}")
+record("agy fixture parsing parses tabs", agy_ok, f"count={len(agy_models)}, slugs={agy_slugs[:3]}")
+
+# agy no longer prints the header (Orin's listing, 2026-10-03), but an older
+# agy did, and the space-separated form is what Orin pasted.
+older = agy_module.parse_listing(
+    "Fetching available models...\n"
+    "claude-opus-5-5-low       Claude Opus 5.5 (Low)\n"
+    "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n")
+record(
+    "agy listing skips the old header and reads space-separated lines",
+    [m["slug"] for m in older] == ["claude-opus-5-5-low", "gemini-3.8-flash-high"]
+    and older[0]["display_name"] == "Claude Opus 5.5 (Low)",
+    repr(older),
+)
 
 
 # -------------------------------------------------------------
@@ -471,13 +484,16 @@ by_slug = {f["slug"]: f for f in families}
 record(
     "agy slugs group into one model per family with its efforts and member slugs",
     [f["slug"] for f in families] == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
-                                      "gemini-3.1-pro", "claude-sonnet-4-6",
-                                      "claude-opus-4-6-thinking", "gpt-oss-120b"]
+                                      "gemini-3.1-pro", "claude-opus-5-5",
+                                      "claude-sonnet-5-5", "gpt-oss-120b"]
     and by_slug["gemini-3.8-flash"]["efforts"] == ["low", "medium", "high"]
     and by_slug["gemini-3.8-flash"]["members"]["medium"] == "gemini-3.8-flash-medium"
     and by_slug["gemini-3.8-flash"]["display_name"] == "Gemini 3.8 Flash"
     and by_slug["gemini-3.1-pro"]["efforts"] == ["low", "high"]
-    and by_slug["claude-sonnet-4-6"]["efforts"] == [],
+    and by_slug["claude-opus-5-5"]["efforts"] == ["low", "medium", "high"]
+    and by_slug["claude-opus-5-5"]["members"]["high"] == "claude-opus-5-5-high"
+    and by_slug["claude-opus-5-5"]["display_name"] == "Claude Opus 5.5"
+    and discover.model_level("claude-opus-5-5-high", "agy") == ("claude-opus", (5, 5)),
     repr(families[:2]),
 )
 
@@ -683,14 +699,15 @@ record(
 
 # A model with no lane is worth naming only where the refresh would have given
 # it one. A superseded model, another vendor's model on agy and a hidden model
-# are not shown, so after a refresh the list is empty and the line goes.
+# are not shown. The 2026-09-22 listing's Opus 4.6 Thinking is agy's own since
+# any-harness ticket 31, and its slug names no effort, so no lane can be made
+# for it and the notice says so; nothing else is named.
 record(
-    "the models-with-no-lane notice names only what the refresh would propose",
-    remapped["unmapped"] == []
-    and not any(line.startswith("Models with no lane")
-                for line in setup_tui.discovery_notices(remapped, 10_000))
-    # the fixture machine has no Kiro CLI, which is the one thing worth saying
-    and setup_tui.discovery_notices(remapped, 10_000) == ["Harness kiro: missing"],
+    "the models-with-no-lane notice names only the harnesses' own models",
+    [u["slug"] for u in remapped["unmapped"]] == ["claude-opus-4-6-thinking"]
+    # the fixture machine has no Kiro CLI, which is the other thing worth saying
+    and setup_tui.discovery_notices(remapped, 10_000)
+    == ["Harness kiro: missing", "Models with no lane: agy claude-opus-4-6-thinking"],
     repr(setup_tui.discovery_notices(remapped, 10_000)),
 )
 
@@ -702,7 +719,7 @@ for name in [n for n, lane in no_lanes["lanes"].items() if lane["model"].startsw
 still_named = [u["slug"] for u in discover.map_lanes(refresh_discovery, no_lanes)["unmapped"]]
 record(
     "a current-generation model that truly has no lane is still named",
-    still_named == ["gpt-6-sol"],
+    still_named == ["gpt-6-sol", "claude-opus-4-6-thinking"],
     repr(still_named),
 )
 
@@ -840,6 +857,55 @@ record(
             for lane in xhigh_doc["lanes"].values())
     and valid_or_error(xhigh_doc) is True,
     f"{valid_or_error(xhigh_doc)}",
+)
+
+
+# any-harness ticket 31: agy serves Opus 5.5 on the pool it shares with Sonnet
+# and GPT-OSS, which `/usage` reports as its second group. The refresh offers
+# Opus and nothing else of another vendor's, and puts it on that pool's Meter.
+def agy_listing_2026_10_03(fixtures):
+    shutil.copy(agy_fixture_path, os.path.join(fixtures, "agy-models.txt"))
+
+
+opus_found, opus_doc, opus_plan = refresh_with(agy_listing_2026_10_03)
+opus_lanes = {name: lane for name, lane in opus_doc["lanes"].items()
+              if lane["harness"] == "agy" and lane["model"].startswith("claude-")}
+record(
+    "the refresh proposes an agy Lane on Opus only, on the agy-claude-gpt Meter",
+    sorted(opus_lanes) == ["opus55-high@agy", "opus55-low@agy", "opus55-medium@agy"]
+    and {lane["model"] for lane in opus_lanes.values()}
+    == {"claude-opus-5-5-low", "claude-opus-5-5-medium", "claude-opus-5-5-high"}
+    and all(lane["meter"] == "agy-claude-gpt" for lane in opus_lanes.values())
+    and not any(lane["model"].startswith(("claude-sonnet", "gpt-oss"))
+                for lane in opus_doc["lanes"].values() if lane["harness"] == "agy")
+    and valid_or_error(opus_doc) is True,
+    repr({name: lane["meter"] for name, lane in opus_lanes.items()}),
+)
+added_meter = opus_doc["meters"].get("agy-claude-gpt") or {}
+record(
+    "the refresh adds the agy-claude-gpt Meter on agy's plan when the catalog lacks it",
+    "agy-claude-gpt" not in frozen_lanes["meters"]
+    and added_meter.get("harness") == "agy"
+    and added_meter.get("plan") == frozen_lanes["meters"]["agy-gemini"]["plan"]
+    and "UNMEASURED" in added_meter.get("note", ""),
+    repr(added_meter),
+)
+record(
+    "a Gemini lane stays on agy-gemini beside an Opus lane at the same effort",
+    opus_doc["lanes"]["pro31-high@agy"]["meter"] == "agy-gemini"
+    and opus_doc["lanes"]["pro31-low@agy"]["meter"] == "agy-gemini",
+    repr(opus_doc["lanes"]["pro31-high@agy"]),
+)
+with tempfile.TemporaryDirectory() as d:
+    shutil.copytree(REFRESH_DIR, os.path.join(d, "f"))
+    agy_listing_2026_10_03(os.path.join(d, "f"))
+    opus_again_found = discover.discover(copy.deepcopy(opus_doc), fixture_dir=os.path.join(d, "f"))
+_again, opus_again_plan = discover.refresh_catalog(opus_doc, opus_again_found,
+                                                   published_models=published)
+record(
+    "a second refresh after the Opus lanes proposes nothing more on agy",
+    not any(name.endswith("@agy") for name in opus_again_plan["new"]),
+    repr(opus_again_plan["new"]),
 )
 
 sys.exit(1 if fails else 0)

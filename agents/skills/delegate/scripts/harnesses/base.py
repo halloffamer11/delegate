@@ -109,6 +109,12 @@ class Harness:
         Lanes for these only (`gpt-*` on codex, `gemini-*` on agy)."""
         return bool(self.vendor) and (slug or "").split("-")[0] == self.vendor
 
+    def lane_meter(self, slug):
+        """The Meter a Lane on this model goes on when the model decides it, or
+        None when a new Lane takes its donor's Meter. agy serves two quota pools,
+        so there the model's group decides (ticket 31 of any-harness)."""
+        return None
+
     def starter(self):
         """(meter name, meter record, lane record) the first Lane on this
         harness starts from when the catalog has no Lane on it to copy, or

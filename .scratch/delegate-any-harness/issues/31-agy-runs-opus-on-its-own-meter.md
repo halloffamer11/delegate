@@ -58,19 +58,42 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None.
 
-**Status:** ready-for-agent. Orin's 2026-10-03 listing and `/usage` output are quoted above.
+**Status:** ready-for-human. Built 2026-10-04; Orin's box is the last one.
 
-- [ ] Orin's 2026-10-03 `agy models` output becomes the fixture
-      (`tests/fixtures/discover/agy-models.txt`).
-- [ ] The refresh proposes an agy Lane on Opus and on no other non-Gemini model; Sonnet and
-      GPT-OSS stay hidden as ticket 33 rules. The exception lives in the adapter
-      (`Agy.owns` or its own rule), not as a special case in `discover.py`.
-- [ ] The Opus Lane goes on the `agy-claude-gpt` Meter, which the refresh creates when the
-      catalog lacks it. A test feeds `read_meters` the two-group output above and gets
-      `agy-gemini` and `agy-claude-gpt` with both Windows filled.
-- [ ] `assets/samples/lanes.json` and `references/catalog.md` show an agy Opus Lane on
-      `agy-claude-gpt`, and the catalog doc says that Meter is shared with Sonnet and
-      GPT-OSS.
-- [ ] The carry rule compares agy Opus only with agy Opus (item 4), with a test either way.
+- [x] Orin's 2026-10-03 `agy models` output becomes the fixture
+      (`tests/fixtures/discover/agy-models.txt`). His paste showed only the
+      non-Gemini lines, so the Gemini lines stay as they were; the
+      `Fetching available models...` header is gone, and a separate test keeps
+      the parser skipping it for an older agy.
+- [x] The refresh proposes an agy Lane on Opus and on no other non-Gemini model; Sonnet and
+      GPT-OSS stay hidden as ticket 33 rules. `Agy.owns` holds the exception
+      (`other_vendor_prefixes = ("claude-opus-",)`).
+- [x] The Opus Lane goes on the `agy-claude-gpt` Meter, which the refresh creates when the
+      catalog lacks it. The adapter names a model's Meter (`Harness.lane_meter`;
+      agy answers by group), the refresh prefers a donor on that Meter, and a
+      Meter it adds copies the plan and price of the donor's (`_add_meter`). A
+      test feeds `read_meters` the two-group output and gets `agy-gemini` and
+      `agy-claude-gpt` with both Windows filled.
+- [x] `references/catalog.md` shows an agy Opus Lane on `agy-claude-gpt` and says that
+      Meter is shared with Sonnet and GPT-OSS. **Deviation:** `assets/samples/lanes.json`
+      is unchanged. A Meter with no Lane shows as an empty row in every new
+      user's status line and in `limits`, and an Opus Lane in the sample changes
+      every wizard test built on it; the refresh adding the Meter with the first
+      Opus Lane is what item 3 of "What blocks the Lane" needed.
+- [x] The carry rule compares agy Opus only with agy Opus (item 4). It was a real
+      conflation, and worse than suspected: `resolve_published_model` sent every
+      published Opus row at low, medium or high to the agy member, so Claude
+      Code's Opus Lanes lost their rows at those efforts. Now
+      `published_names.resolve_published_models` resolves a row once per harness
+      and every harness that runs the model gets it (`resolve_effort_rows`,
+      `tier_proposal.lane_scores`), and `carry.families` keys on
+      `(harness, family)`. Tests: one row reaches both harnesses; Claude Code's
+      Opus at high is dominated by its xhigh while agy's high is not; agy's low
+      is still dominated by agy's medium. Both fail on the old code.
 - [ ] Orin's box: one `delegate global` run proposes the Lane, `delegate catalog check`
       passes, and `delegate status` shows `agy-claude-gpt` with real figures.
+
+Left as is: the benchmark page's evidence table (`bench.evidence_records`) and
+the AA board rows (`bench.py`) still resolve a printed name to one lane model,
+so a published Opus point is drawn under agy's Opus where both harnesses run it.
+That is display only; the carry and Tier verdicts read the per-harness rows.

@@ -58,12 +58,11 @@ def lane_scores(lanes_doc, effort_rows, settings, names=None):
         score = bench.as_number(row.get("score"))
         if score is None:
             continue
-        model = published_names.resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
-        if model is None:
-            continue
+        models = published_names.resolve_published_models(row.get("model"), lanes_doc,
+                                                          effort=row.get("effort"))
         for name in names:
             lane = lanes[name]
-            if lane.get("model") != model or name in out:
+            if lane.get("model") not in models or name in out:
                 continue
             if bench.effort_attributes(row.get("effort"), lane.get("effort")):
                 out[name] = {"score": score, "cost": bench.as_number(row.get("cost_usd")),

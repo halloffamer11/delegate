@@ -817,13 +817,13 @@ try:
     guard = carry.decisions(GUARD_LANES, guard_rows)
     record(
         "every harness but agy keys the carry rule on the model string",
-        families == {"gemini-3.8-flash-low": "gemini-3.8-flash",
-                     "gemini-3.8-flash-medium": "gemini-3.8-flash",
-                     "gemini-3.8-flash-high": "gemini-3.8-flash"}
-        and guard_families == {"gpt-6-edge-low": "gpt-6-edge-low",
-                               "gpt-6-edge-high": "gpt-6-edge-high",
-                               "grok-4.6": "grok-4.6",
-                               "claude-opus-5": "claude-opus-5"}
+        families == {"gemini-3.8-flash-low": ("agy", "gemini-3.8-flash"),
+                     "gemini-3.8-flash-medium": ("agy", "gemini-3.8-flash"),
+                     "gemini-3.8-flash-high": ("agy", "gemini-3.8-flash")}
+        and guard_families == {"gpt-6-edge-low": ("codex", "gpt-6-edge-low"),
+                               "gpt-6-edge-high": ("codex", "gpt-6-edge-high"),
+                               "grok-4.6": ("grok", "grok-4.6"),
+                               "claude-opus-5": ("claude", "claude-opus-5")}
         and guard["edge-high@codex"]["kind"] == "not_dominated"
         and guard["edge-low@codex"]["kind"] == "not_dominated"
         and guard["grok46-high@grok"]["kind"] == "no_rows"
@@ -832,6 +832,51 @@ try:
     )
 except Exception as e:
     record("every harness but agy keys the carry rule on the model string", False, repr(e))
+
+# any-harness ticket 31: Opus runs on agy (effort in the slug, low to high) and
+# on Claude Code (one model string, low to max). A published Opus row is
+# evidence for both, and each lane competes only with the efforts its own
+# harness runs: agy has no xhigh, so Claude Code's xhigh switches no agy lane off.
+OPUS_TWO_HARNESSES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        **{f"opus55-{e}@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": e,
+                                  "tier": 3, "meter": "claude-general"}
+           for e in ("low", "medium", "high", "xhigh")},
+        **{f"opus55-{e}@agy": {"harness": "agy", "model": f"claude-opus-5-5-{e}", "effort": e,
+                               "tier": 3, "meter": "agy-claude-gpt"}
+           for e in ("low", "medium", "high")},
+    },
+}
+
+try:
+    opus_rows = [agy_row(e, b, score, cost, model="Claude Opus 5.5")
+                 for e, score, cost in (("low", 0.40, 1.0), ("medium", 0.60, 0.9),
+                                        ("high", 0.70, 2.0), ("xhigh", 0.80, 1.5))
+                 for b in ("b1", "b2")]
+    resolved, _unmatched = published_names.resolve_effort_rows(OPUS_TWO_HARNESSES, opus_rows)
+    by_model = sorted({(r["model"], r["effort"]) for r in resolved})
+    opus = carry.decisions(OPUS_TWO_HARNESSES, opus_rows)
+    record(
+        "one published Opus row reaches the lanes of both harnesses that run it",
+        by_model == [("claude-opus-5-5", "high"), ("claude-opus-5-5", "low"),
+                     ("claude-opus-5-5", "medium"), ("claude-opus-5-5", "xhigh"),
+                     ("claude-opus-5-5-high", "high"), ("claude-opus-5-5-low", "low"),
+                     ("claude-opus-5-5-medium", "medium")],
+        repr(by_model),
+    )
+    record(
+        "the carry rule compares agy Opus only with agy Opus",
+        opus["opus55-high@claude"]["kind"] == "dominated"
+        and opus["opus55-high@claude"]["competitor"] == "xhigh"
+        and opus["opus55-high@agy"]["kind"] == "not_dominated"
+        and opus["opus55-low@agy"]["kind"] == "dominated"
+        and opus["opus55-low@agy"]["competitor"] == "medium"
+        and opus["opus55-xhigh@claude"]["kind"] == "not_dominated",
+        repr(opus),
+    )
+except Exception as e:
+    record("the carry rule compares agy Opus only with agy Opus", False, repr(e))
 
 try:
     resolved, _unmatched = published_names.resolve_effort_rows(AGY_CARRY_LANES, [

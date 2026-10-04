@@ -424,10 +424,11 @@ def own_vendor(model):
     `gemini-*` on agy, `grok-*` on grok, `claude-*` on claude.
 
     The refresh proposes lanes for these only, and nothing else names them
-    either: the other vendors' models agy serves (`claude-sonnet-4-6`,
+    either: the other vendors' models agy serves (`claude-sonnet-5-5-high`,
     `gpt-oss-120b-medium`) stay in the report, but a lane on somebody else's
     model through agy is not what this catalog is for (ticket 33). The adapter
-    decides (`Harness.owns`): Kiro owns every vendor's models.
+    decides (`Harness.owns`): Kiro owns every vendor's models, and agy owns
+    Opus as well as Gemini, on its own pool (any-harness ticket 31).
     """
     adapter = harnesses.get(model.get("harness"))
     return adapter is not None and bool(model.get("level")) and adapter.owns(model.get("slug"))
@@ -466,21 +467,44 @@ def _free_name(stem, effort, harness, *taken):
     return name
 
 
-def _donor(harness, effort, lanes, new_lanes, leaving):
+def _donor(harness, effort, lanes, new_lanes, leaving, meter=None):
     """The lane a new lane copies its meter, weight and timeout from: the same
     harness's lane at the same effort.
 
     A lane this refresh removes is no use as the note's reference, so a lane it
     adds stands in; failing both, the harness's first lane at any effort does,
-    because a figure from the same harness beats no figure at all.
+    because a figure from the same harness beats no figure at all. When the
+    model decides its Meter (`Harness.lane_meter`), a lane on that Meter is
+    tried first, since its weight was set against the same pool.
     """
     candidates = [(name, lane) for name, lane in lanes.items()
                   if lane.get("harness") == harness and name not in leaving]
     candidates += [(name, lane) for name, lane in new_lanes.items() if lane["harness"] == harness]
+    if meter is not None:
+        same = [(name, lane) for name, lane in candidates if lane.get("meter") == meter]
+        candidates = same + [item for item in candidates if item not in same]
     for name, lane in candidates:
         if lane.get("effort") == effort:
             return name, lane
     return candidates[0] if candidates else (None, None)
+
+
+def _add_meter(doc, harness, meter_name, like):
+    """Adds the Meter a model decides (`Harness.lane_meter`) when the catalog
+    lacks it, copying the plan and price of the Meter `like` names: on agy both
+    pools come with one Google plan, as both Claude Meters come with one Max
+    plan."""
+    meters = doc.setdefault("meters", {})
+    if meter_name in meters:
+        return
+    source = meters.get(like) or {}
+    meters[meter_name] = {
+        "harness": harness,
+        "plan": source.get("plan", "unknown"),
+        "price_month": source.get("price_month", 0),
+        "note": (f"UNMEASURED: plan and price_month copied from {like}; "
+                 f"the refresh added this Meter for a new lane"),
+    }
 
 
 def _starter(harness, doc):
@@ -585,6 +609,7 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
             model_text = lane_model(harness, item, effort)
             if (harness, model_text, effort) in by_key:
                 continue
+            meter = adapter.lane_meter(model_text)
             name = _free_name(stem, effort, harness, lanes, new_lanes)
             pred_name = None
             if predecessor is not None:
@@ -596,7 +621,7 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                 basis = (f"{item['slug']} supersedes {predecessor['slug']} on {harness}; "
                          f"takes the place of {pred_name}")
             else:
-                source_name, source = _donor(harness, effort, lanes, new_lanes, set(leaving))
+                source_name, source = _donor(harness, effort, lanes, new_lanes, set(leaving), meter)
                 basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
             if source is None:
                 starter = _starter(harness, doc)
@@ -605,11 +630,13 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
                     continue
                 source_name, source = starter
                 basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
+            if meter is not None and meter != source["meter"]:
+                _add_meter(doc, harness, meter, source["meter"])
             record = {
                 "harness": harness,
                 "model": model_text,
                 "effort": effort,
-                "meter": source["meter"],
+                "meter": meter or source["meter"],
                 "meter_weight": source["meter_weight"],
                 "timeout": source["timeout"],
                 "price": {"in": None, "cache_read": None, "cache_write": None, "out": None},

@@ -58,6 +58,12 @@ def families(lanes_doc):
     grouping discovery reports the harness's models under (ticket 30 of the
     redesign). The harness decides, never the spelling, so a slug on another
     harness that happens to end in an effort word is still one model of its own.
+
+    The key also names the harness. agy runs Opus (`claude-opus-5-5-high`) on
+    its own pool beside Claude Code's (`claude-opus-5-5`), and a lane is off
+    only when another effort its own harness runs beats it: agy offers no
+    xhigh, so Claude Code's Opus at xhigh is no reason to switch agy's Opus
+    off, nor the reverse (any-harness ticket 31).
     """
     out = {}
     for lane in (lanes_doc.get("lanes") or {}).values():
@@ -66,9 +72,9 @@ def families(lanes_doc):
         model = lane.get("model")
         if not isinstance(model, str) or not model.strip():
             continue
-        base = model_of(lane)
-        if base != model or model not in out:
-            out[model] = base
+        key = (lane.get("harness"), model_of(lane))
+        if key[1] != model or model not in out:
+            out[model] = key
     return out
 
 

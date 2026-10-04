@@ -37,6 +37,24 @@ class Agy(Harness):
     # Claude and GPT models it serves.
     meter_groups = ("gemini", "claude-gpt")
     fixture_file = "agy-models.txt"
+    # The one other vendor's model the refresh offers a Lane on. agy also
+    # serves Sonnet and GPT-OSS; those stay hidden (redesign ticket 33), and
+    # Opus is the exception Orin asked for (any-harness ticket 31).
+    other_vendor_prefixes = ("claude-opus-",)
+
+    def owns(self, slug):
+        """Gemini models, and Opus: the refresh proposes Lanes on these only."""
+        text = slug or ""
+        return super().owns(text) or text.startswith(self.other_vendor_prefixes)
+
+    def lane_meter(self, slug):
+        """`agy-gemini` for a Gemini model, `agy-claude-gpt` for any other. agy
+        bills the two groups `/usage` reports separately, and every model of
+        the second shares its 5h and weekly limits, so Opus on agy drains the
+        pool Sonnet and GPT-OSS do, not Claude Code's Meters."""
+        import usage
+        gemini = (slug or "").split("-")[0] == self.vendor
+        return usage.meter_name(self.name, self.meter_groups[0 if gemini else 1])
 
     def family(self, slug):
         """The agy slug family a model slug belongs to: (base, effort).
