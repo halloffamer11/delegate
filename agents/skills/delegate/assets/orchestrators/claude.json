@@ -20,9 +20,9 @@
     "spawn": "spawn {agent} with the Agent tool in the background (subagent_type {agent}), prompt `Read {prompt} and follow it.`; its final message is the return claim"
   },
   "launch": {
-    "note": "Headless, for eval 3. /delegate must be typed: the skill is user-invoked only, and in -p mode the leading slash command is the user's own invocation.",
+    "note": "Headless, for eval 3. /delegate must be typed: the skill is user-invoked only, and in -p mode the leading slash command is the user's own invocation. The job runs in the foreground: claude -p exits after its turn and SIGTERMs a background job (any-harness 13, live run 2026-10-04).",
     "argv": ["claude", "-p", "{prompt}", "--allowedTools", "Bash,Read"],
-    "prompt": "/delegate {cls} job, brief {brief}, working directory {cwd}. When it finishes, print the run directory."
+    "prompt": "/delegate {cls} job, brief {brief}, working directory {cwd}. Run delegate in the foreground and wait for it; when it finishes, print the run directory."
   },
   "agents": [
     {

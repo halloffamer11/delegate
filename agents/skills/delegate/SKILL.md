@@ -56,6 +56,9 @@ Run exactly this, in the background so the session keeps working:
 
     delegate run <class> --brief </abs/brief.md> --cwd </abs/project>
 
+In a headless session that ends with its turn (`claude -p`, `codex exec`), run
+it in the foreground and wait: the session's exit kills a background worker.
+
 Add only what the job needs:
 
 - `--write </abs/worktree>`: the only way a worker gets a shell and edits. The
