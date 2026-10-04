@@ -1,11 +1,11 @@
 # Browser routes for delegate workers — findings, 2026-09-10
 
-Grilling session with Orin, 2026-09-10. Each fact below was checked against a file, a CLI's `--help`, or an official doc by the lead session. Worker research runs were treated as claims; one was wrong (it said Claude in Chrome does not support Linux; the Claude Code docs say it does).
+Grilling session with the user, 2026-09-10. Each fact below was checked against a file, a CLI's `--help`, or an official doc by the lead session. Worker research runs were treated as claims; one was wrong (it said Claude in Chrome does not support Linux; the Claude Code docs say it does).
 
 ## Goal and decisions
 
 - The delegate dispatch path must not block a browser that a harness already has. If the harness is set up, a worker can use it; if not, nothing changes.
-- No new config file, no per-run flag, no detection, no ranking change. Machine setup (MCP servers in each harness's own config, extensions, sign-ins) is done by Orin in conversation and is not a repo deliverable. Its test is a probe row turning PASS.
+- No new config file, no per-run flag, no detection, no ranking change. Machine setup (MCP servers in each harness's own config, extensions, sign-ins) is done by the user in conversation and is not a repo deliverable. Its test is a probe row turning PASS.
 - Two browser kinds (terms in the delegate `SKILL.md`): the **disposable browser** (read and write allowed) and the **agent profile** (Helium profile "GenAI", reached through the Playwright extension; on every run for all four harnesses; used only for the sites and actions a brief names). Workers never reach the personal profile: the extension is installed only in the agent profile.
 - Relay changes go in our ADS fork, pinned, and are offered upstream.
 - Parity means the same probe table on the Mac and on omarchy. Sessions on omarchy run through herdr in the Hyprland desktop, so a visible browser is available.
@@ -14,7 +14,7 @@ Grilling session with Orin, 2026-09-10. Each fact below was checked against a fi
 
 - The disposable server (`playwright`, `@playwright/mcp`) runs with `--isolated`, so parallel workers do not share one profile (the README: a persistent profile "can only be used by one browser instance at a time"), and with its output directory outside the project, so its session files do not trip the relays' read-only change check in a repo that does not ignore `.playwright-mcp/`.
 - The agent-profile server (`agent-browser`) runs with `--extension` and `--profile-dir-name` for the agent profile, never `--isolated`. Its `PLAYWRIGHT_MCP_EXTENSION_TOKEN` stays on the machine and never enters this public repo.
-- Added 2026-09-12, from the work on tickets 02-04. **codex** does not read Orin's config at all: delegate points `CODEX_HOME` at `~/.local/share/delegate/codex-home`, which `make delegate-codex-home` builds from a repo template. That home needs `approvals_reviewer = "auto_review"`, because `codex exec` runs at `approval_policy = "never"` and would otherwise auto-reject the approval an MCP tool call raises. Any non-interactive codex run needs `< /dev/null`, or it waits forever on stdin. **grok** needs a custom sandbox profile that extends `read-only` and grants write to the npm cache and the Playwright directories; the built-in `read-only` profile kills every stdio MCP server on macOS, not only Playwright. **claude** lanes are native, so the setup is this session's own MCP config, and the session must restart before a native worker sees a new server.
+- Added 2026-09-12, from the work on tickets 02-04. **codex** does not read the user's config at all: delegate points `CODEX_HOME` at `~/.local/share/delegate/codex-home`, which `make delegate-codex-home` builds from a repo template. That home needs `approvals_reviewer = "auto_review"`, because `codex exec` runs at `approval_policy = "never"` and would otherwise auto-reject the approval an MCP tool call raises. Any non-interactive codex run needs `< /dev/null`, or it waits forever on stdin. **grok** needs a custom sandbox profile that extends `read-only` and grants write to the npm cache and the Playwright directories; the built-in `read-only` profile kills every stdio MCP server on macOS, not only Playwright. **claude** lanes are native, so the setup is this session's own MCP config, and the session must restart before a native worker sees a new server.
 
 ## What blocks each harness today
 
@@ -27,7 +27,7 @@ Grilling session with Orin, 2026-09-10. Each fact below was checked against a fi
 
 ## The v1 result (tag `delegate-v1-last`, `evals/browser/`)
 
-2026-09-01, raw CLIs, not through the current relays: codex passed both kinds (live through the ChatGPT extension, disposable through Playwright); claude passed live through Claude in Chrome and failed disposable; agy passed disposable only; grok failed both. The grok Playwright failure was a probe problem: grok imported Orin's `CLAUDE.md`, ran `echo $HERDR_ENV`, and plan mode cancelled the turn. The redesign then removed every browser path.
+2026-09-01, raw CLIs, not through the current relays: codex passed both kinds (live through the ChatGPT extension, disposable through Playwright); claude passed live through Claude in Chrome and failed disposable; agy passed disposable only; grok failed both. The grok Playwright failure was a probe problem: grok imported the user's `CLAUDE.md`, ran `echo $HERDR_ENV`, and plan mode cancelled the turn. The redesign then removed every browser path.
 
 ## Routes not used, and why
 

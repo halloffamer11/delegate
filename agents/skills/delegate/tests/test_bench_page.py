@@ -29,7 +29,7 @@ FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 REAL_DATA = os.path.join(REPO, ".scratch", "delegate-redesign", "_data")
 # A real catalog, frozen: the live one is machine-local and never in the repo
-# (Orin, 2026-09-29).
+# (the user, 2026-09-29).
 REAL_LANES = os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json")
 sys.path.insert(0, DELEGATE_DIR)
 
@@ -1229,7 +1229,7 @@ try:
         record("35 the page places a lane the catalog does not carry, under node", True,
                "(node not on PATH; skipped)")
     else:
-        # opus55-medium is the lane Orin picked tier 3 for: it has rows and the
+        # opus55-medium is the lane the user picked tier 3 for: it has rows and the
         # catalog does not carry it. quiet@x has neither rows nor carry, and
         # deep@x is ultra: neither may be placed.
         lanes = [

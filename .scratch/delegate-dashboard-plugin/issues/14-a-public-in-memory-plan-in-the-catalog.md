@@ -21,7 +21,7 @@ test. Found by the independent review of ticket 13, 2026-09-20.
 
 ## Acceptance
 
-**Status:** landed 2026-09-20 (`acb64c5`), merged to `main` by Orin as `0ffffea`; all boxes ticked.
+**Status:** landed 2026-09-20 (`acb64c5`), merged to `main` by the user as `0ffffea`; all boxes ticked.
 
 - [x] `grep -n 'catalog\._' tools/delegate-dashboard/*.py` prints nothing.
 - [x] A `test_catalog.py` case pins the public function's fields and that it writes

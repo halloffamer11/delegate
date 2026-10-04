@@ -74,7 +74,7 @@ Where the build differs from the text above:
   `variant`, the name the page printed. `composite: true` marks the index row.
 - **The carry rule is a majority, not "any benchmark".** Eight components from the
   same runs made the old rule propose 12 lanes off, 9 of them on one component.
-  Orin chose (2026-09-11): a lane is dominated when another effort of the same
+  The user chose (2026-09-11): a lane is dominated when another effort of the same
   model, for no more money, beats it on more than half of the benchmarks that one
   source scored both on. A one-benchmark source reads as before. The bench page
   follows the rule through `dominating_row`, so a dominated effort is marked on
@@ -92,7 +92,7 @@ Where the build differs from the text above:
 
 The wizard box is proven in the `Wizard` state machine (test 30b, fixture rows)
 and by `propose_enabled` on the live rows with the stowed catalog. No human has
-driven the TUI with these rows; that is Orin's next run.
+driven the TUI with these rows; that is the user's next run.
 
 Tests: 12 new assertions — 7 in `tests/test_effort.py` through `aa_extract`,
 `check_rows` and the CLI; 4 in `tests/test_setup_tui.py` (majority rule, composite,

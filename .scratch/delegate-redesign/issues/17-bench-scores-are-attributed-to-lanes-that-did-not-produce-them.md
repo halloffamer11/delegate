@@ -5,7 +5,7 @@ reports one row per *model*. The wizard's tier screens then look a score up by
 `lane["model"]`, so every lane of a model shows the same numbers — including
 lanes at efforts nobody measured.
 
-Found by Orin 2026-09-10, running the wizard for the first time with the six
+Found by the user 2026-09-10, running the wizard for the first time with the six
 astra lanes in place. His words: "why do all the astra effort levels have a
 score and identical? only the effort level scored should be reported here."
 
@@ -154,7 +154,7 @@ Still open, and design rather than data: at 80 columns the fit drops the score
 columns before `model` and `lane`, so the screen the scores are for still
 shows only the mean rank. Column priority belongs with the tier screen's other
 open question (mark versus on/off, and greying a lane already taken at a higher
-tier), which is Orin's to settle first.
+tier), which is the user's to settle first.
 
 Tests: 12 new assertions — 10 in `tests/test_bench.py` driving `collect()` from
 a CSV fixture over two lanes on one model at different efforts, 2 in

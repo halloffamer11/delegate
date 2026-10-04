@@ -2,7 +2,7 @@
 """tier_proposal.py — the Tier the wizard proposes for each carried Lane
 (any-harness ticket 17).
 
-Orin sets each Lane's Tier; this only proposes one, and the wizard writes
+The user sets each Lane's Tier; this only proposes one, and the wizard writes
 nothing until he confirms. The rule is data, `routing.json`'s `tier_proposal`
 (the sample catalog's when a catalog has none, `catalog.tier_proposal_settings`):
 

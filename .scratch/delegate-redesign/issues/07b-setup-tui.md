@@ -1,13 +1,13 @@
 # 07b — Setup wizard as a selectable TUI
 
-**What to build:** Orin's rework of ticket 07 (2026-09-09): the wizard becomes a curses TUI; tiers are assigned from tier 4 down; the benchmark numbers sit beside every row; lanes already placed in a higher tier are shown de-emphasized on the lower screens; the plain prompt flow stays for pipes and `--plain`.
+**What to build:** The user's rework of ticket 07 (2026-09-09): the wizard becomes a curses TUI; tiers are assigned from tier 4 down; the benchmark numbers sit beside every row; lanes already placed in a higher tier are shown de-emphasized on the lower screens; the plain prompt flow stays for pipes and `--plain`.
 
 **Blocked by:** 07 (landed).
 
-**Status:** landed 2026-09-09. The first dispatch was killed by SIGTERM after 6m50s having finished section 1 only; the resume dispatch (run `20260909T181534Z-sol-high@codex-3f047c42`, 876s, status `done`) completed cases 1-10. Review found one defect — the five Epoch benchmark names were hardcoded twice in `setup_tui.py`, duplicating `bench.EPOCH_BENCHMARKS` — fixed in the worktree before landing. All nine test files pass in place: 180 PASS, 0 FAIL. Open: Orin runs the wizard once.
+**Status:** landed 2026-09-09. The first dispatch was killed by SIGTERM after 6m50s having finished section 1 only; the resume dispatch (run `20260909T181534Z-sol-high@codex-3f047c42`, 876s, status `done`) completed cases 1-10. Review found one defect — the five Epoch benchmark names were hardcoded twice in `setup_tui.py`, duplicating `bench.EPOCH_BENCHMARKS` — fixed in the worktree before landing. All nine test files pass in place: 180 PASS, 0 FAIL. Open: the user runs the wizard once.
 
 - [x] Worker result reviewed and landed
-- [x] Orin runs the TUI wizard once and confirms the catalog (closes ticket 07) (2026-09-13; ticket 28)
+- [x] The user runs the TUI wizard once and confirms the catalog (closes ticket 07) (2026-09-13; ticket 28)
 
 ## Brief as dispatched
 

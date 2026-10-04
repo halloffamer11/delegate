@@ -2,7 +2,7 @@
 
 **What to build:** A small script that lists what each harness offers and says which of those models have no lane. Nothing more. It reports; the human decides.
 
-`gpt-6-astra` has been priority 1 in Orin's Codex CLI for some time and had no lane until 2026-09-09, so the wizard could not show it and ranking could never pick it. Nothing in the tool noticed. The 2026-09-08 assessment recorded the same gap and it went unfixed because no one was looking.
+`gpt-6-astra` has been priority 1 in the user's Codex CLI for some time and had no lane until 2026-09-09, so the wizard could not show it and ranking could never pick it. Nothing in the tool noticed. The 2026-09-08 assessment recorded the same gap and it went unfixed because no one was looking.
 
 `scripts/discover.py`:
 

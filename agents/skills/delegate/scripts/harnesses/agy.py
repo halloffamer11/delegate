@@ -39,7 +39,7 @@ class Agy(Harness):
     fixture_file = "agy-models.txt"
     # The one other vendor's model the refresh offers a Lane on. agy also
     # serves Sonnet and GPT-OSS; those stay hidden (redesign ticket 33), and
-    # Opus is the exception Orin asked for (any-harness ticket 31).
+    # Opus is the exception the user asked for (any-harness ticket 31).
     other_vendor_prefixes = ("claude-opus-",)
 
     def owns(self, slug):

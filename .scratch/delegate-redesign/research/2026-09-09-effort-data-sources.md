@@ -128,7 +128,7 @@ Two consequences:
   on every component row, and it is not the cost of that component.
 - Eight components that come from the same runs broke the carry rule's "any one
   benchmark" reading: it proposed 12 lanes off, and 9 of them lost on one
-  component only. Orin chose a majority rule: a lane is dominated when another
+  component only. The user chose a majority rule: a lane is dominated when another
   effort, for no more money, beats it on more than half of the benchmarks that
   one source scored both on. The live result is `astra-xhigh@codex` off, beaten
   by high on 4 of 7. A rule that needs every component switches no lane off.

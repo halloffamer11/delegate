@@ -1,8 +1,8 @@
 # 02 — Claude workers can use a disposable browser
 
-**What to build:** A claude worker can use the Playwright server in Orin's own Claude config.
+**What to build:** A claude worker can use the Playwright server in the user's own Claude config.
 
-This ticket was written before ticket 22 and its premise no longer holds. It targets the claude relay in our ADS fork, which blocks MCP in four ways. Since ticket 22 a claude lane dispatched from a Claude session is **native**: `delegate.py` prints a spawn line and starts no relay at all, so a native worker never meets those four blocks. It inherits this session's tools instead. Lifting the relay's MCP block would change nothing on the path Orin actually uses.
+This ticket was written before ticket 22 and its premise no longer holds. It targets the claude relay in our ADS fork, which blocks MCP in four ways. Since ticket 22 a claude lane dispatched from a Claude session is **native**: `delegate.py` prints a spawn line and starts no relay at all, so a native worker never meets those four blocks. It inherits this session's tools instead. Lifting the relay's MCP block would change nothing on the path the user actually uses.
 
 The ticket is therefore rescoped to the native path. The relay work is kept only as a note, for the day a claude lane is dispatched from a non-Claude orchestrator.
 
@@ -10,9 +10,9 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 01 — Browser probes, proven on agy with a disposable browser.
 
-**Status:** ready-for-human; rescoped 2026-09-12 after ticket 22. Raised by Orin 2026-09-10. Proven on the Mac 2026-10-04. Orin chose an allowlist the same day: built, waits on the wizard run that rewrites the Mac's lane files and a probe rerun.
+**Status:** ready-for-human; rescoped 2026-09-12 after ticket 22. Raised by the user 2026-09-10. Proven on the Mac 2026-10-04. The user chose an allowlist the same day: built, waits on the wizard run that rewrites the Mac's lane files and a probe rerun.
 
-- [x] Setup on both machines: a `playwright` server in Claude's user config that follows the setup rules. Orin added it 2026-09-12 with `claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --headless --output-dir ~/.cache/playwright-mcp`; `claude mcp list` shows it Connected on the Mac and on omarchy.
+- [x] Setup on both machines: a `playwright` server in Claude's user config that follows the setup rules. The user added it 2026-09-12 with `claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --headless --output-dir ~/.cache/playwright-mcp`; `claude mcp list` shows it Connected on the Mac and on omarchy.
 - [x] A session must restart before its native workers see a new MCP server. Restart, then confirm the session itself has the Playwright tools. Done 2026-10-04: a fresh Remote Control session on the Mac had `mcp__playwright__*`.
 - [ ] Every other MCP server the session exposes to a native worker is listed here. On the Mac today that is `context7` plus the claude.ai connectors Gmail, Google Drive and Google Calendar. A native worker inherits them. The worker preamble forbids messages, but that is an instruction, not a block — decide whether that is acceptable, or whether native lanes need a narrower tool set.
       Listed 2026-10-04 from a native worker's own tool list, in a desktop-app Remote
@@ -23,7 +23,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
       set and others), about 30 in all. A worker can send mail, write Todoist, drive
       the signed-in Chrome and message other sessions; only the brief stops it. A plain
       terminal `claude` would lack the desktop-app set (not tested).
-      Orin's call, 2026-10-04: an allowlist. Claude's native template now writes
+      The user's call, 2026-10-04: an allowlist. Claude's native template now writes
       `tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright`,
       and the wizard's save rewrites any placed lane file that differs from the template.
       Open: on the Mac, run the wizard and save, check a `lane-*.md` carries the line, and

@@ -1,7 +1,7 @@
 # delegate's own CODEX_HOME. `make delegate-codex-home` writes this file to
 # ~/.local/share/delegate/codex-home/config.toml with @HOME@ expanded, and
 # symlinks ~/.codex/auth.json beside it. Codex reads auth from CODEX_HOME, so
-# the worker signs in as Orin and drains the same ChatGPT meter.
+# the worker signs in as the user and drains the same ChatGPT meter.
 #
 # A codex worker reads this file instead of ~/.codex/config.toml. It therefore
 # reaches the disposable browser and nothing else: no plugins (Gmail, GitHub,

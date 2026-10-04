@@ -17,7 +17,7 @@ The selection rule:
   2. Sort eligible lanes by:
        tier ascending,
        order ascending (the lane's `order`, its place inside its tier that
-         Orin sets in the setup wizard; a lane without `order` sorts after
+         The user sets in the setup wizard; a lane without `order` sorts after
          every lane with one),
        pace descending,
        lane name ascending,
@@ -34,7 +34,7 @@ The selection rule:
            if pace(L) >= pace(pick) + routing.margin: pick = L
      Lanes with unknown pace never steal and are never stolen from. Because
      `order` sorts ahead of pace, a steal can happen inside a tier: a lane
-     lower in Orin's order runs when its meter is well ahead of the pick's.
+     lower in the user's order runs when its meter is well ahead of the pick's.
      That is the load balance (ticket 28).
   5. Overflow (ticket 29, Class ranking only). If nothing is eligible and only
      subscription usage stands in the way — at least one carried lane in the
@@ -322,7 +322,7 @@ def rank(cls, cat, meters, present, tier=None):
         ceiling=ceiling,
         reason_label=cls,
     )
-    # What the Pick is, and what it is not (Orin, 2026-09-22; ticket 36). A Lane
+    # What the Pick is, and what it is not (the user, 2026-09-22; ticket 36). A Lane
     # is one model at one effort, so the effort is fixed by the Lane the catalog
     # holds: this returns a Lane, never an effort, and nothing here chooses one.
     # If an orchestrator is ever trusted to choose an effort, one path already

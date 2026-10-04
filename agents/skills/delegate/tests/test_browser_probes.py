@@ -54,13 +54,13 @@ def main():
 
     doc_agent_pass = {
         "status": "done",
-        "deliverable": "Account found on marketplace.\nBROWSER-PROBE PASS account=Orin Hall\n",
+        "deliverable": "Account found on marketplace.\nBROWSER-PROBE PASS account=Test User\n",
         "evidence": [],
         "open_questions": [],
         "changed_files": [],
     }
     verdict, reason = browser_probes.grade(doc_agent_pass, "agent-profile")
-    record("1b. grade agent-profile pass", verdict == "PASS" and "Orin Hall" in reason, f"verdict={verdict} reason={reason}")
+    record("1b. grade agent-profile pass", verdict == "PASS" and "Test User" in reason, f"verdict={verdict} reason={reason}")
 
     # -------------------------------------------------------------
     # 2. Grade: wrong nonce

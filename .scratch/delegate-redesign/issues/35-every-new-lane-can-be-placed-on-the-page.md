@@ -1,12 +1,12 @@
 # 35 — Every current-generation Lane can be screened and placed on the page
 
-**What to build:** in Orin's first `delegate global` run, 2026-09-22, he picked Tier 3
+**What to build:** in the user's first `delegate global` run, 2026-09-22, he picked Tier 3
 for `opus55-medium@claude` on the benchmark page, and the choice went nowhere: "For
 some reason, Opus 5.5 isn't working." Three causes, all checked:
 
 1. Ticket 33 made a successor Lane inherit its predecessor's `enabled`. `opus-*@claude`
    was carried only at `high`, so `opus55-low`, `-medium`, `-xhigh` and `-max` started
-   off. The same is true for most `sol6-*` and `luna6-*` efforts. Orin's rule was "The
+   off. The same is true for most `sol6-*` and `luna6-*` efforts. The user's rule was "The
    expectation is for all models to be shown initially for screening."
 2. The page places only Lanes that the catalog carries. `makeTierPanel` and "Copy as
    lines" (`assets/bench_page.js`, `data.lanes.filter((l) => l.carried)`, near line
@@ -22,7 +22,7 @@ a `<lane> <1-4>` line names, so the fix is on the page and in the refresh.
 
 ## Rule
 
-The points below are session decisions; Orin may overrule them.
+The points below are session decisions; the user may overrule them.
 
 - **New Lanes start carried.** A new Lane the refresh adds starts carried, except
   `ultra` (settled, ticket 15). It still inherits `tier`, `order`, meter,
@@ -57,7 +57,7 @@ Paths are relative to `agents/skills/delegate/`:
 
 ## Acceptance
 
-**Status:** landed 2026-09-22 (`0c2f800`, `bda124b`, `7c02a7e`, `61a6c07`); merged and pushed by Orin (`71c6661`). All boxes ticked. Orin may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`0c2f800`, `bda124b`, `7c02a7e`, `61a6c07`); merged and pushed by the user (`71c6661`). All boxes ticked. The user may overrule the session decisions under Landed.
 
 - [x] On the 2026-09-22 fixtures, every new non-`ultra` Lane starts carried, with its
   predecessor's Tier and Order. Every `ultra` Lane starts off.
@@ -97,7 +97,7 @@ One commit per cause.
   `enabled` is read, so it reads "ultra, never carried". Tested over every new Lane on
   the fixtures.
 
-Session decisions, Orin's to overrule:
+Session decisions, the user's to overrule:
 
 - A Lane with neither rows nor carry is not listed on the page. A Tier is picked on a
   dot, so a Lane with no dot has no way to be placed there, and listing it would put

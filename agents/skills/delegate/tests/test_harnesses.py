@@ -357,7 +357,7 @@ def test_agy_opus_pool():
            agy.lane_meter("claude-opus-5-5-low") == "agy-claude-gpt"
            and agy.lane_meter("gemini-3.8-flash-high") == "agy-gemini"
            and harnesses.get("codex").lane_meter("gpt-6-sol") is None)
-    # The shape of Orin's `agy --print /usage --output-format json`, 2026-10-03:
+    # The shape of the user's `agy --print /usage --output-format json`, 2026-10-03:
     # two groups, each with a 5h and a weekly bucket.
     listing = {"command": {"data": {"groups": [
         {"name": "Gemini Models", "buckets": [

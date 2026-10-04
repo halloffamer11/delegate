@@ -7,7 +7,7 @@ are from kiro.dev, read 2026-10-02/03:
 
 - headless is `kiro-cli chat --no-interactive` (docs/cli/headless). The docs
   name `KIRO_API_KEY` (Pro tier and up), but a machine signed in to kiro-cli
-  runs headless without it (Orin's Mac, 2026-10-04);
+  runs headless without it (the user's Mac, 2026-10-04);
 - `kiro-cli chat --list-models --format json` lists the models
   (docs/reference/cli-commands). kiro-cli 2.27.1 (2026-10-04) gives
   `{"models": [{"model_id", "model_name", ...}], "default_model"}` with no

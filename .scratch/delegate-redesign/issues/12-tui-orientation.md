@@ -1,6 +1,6 @@
 # 12 — Orientation and legends in the setup TUI
 
-**What to build:** Orin ran the TUI wizard for the first time on 2026-09-09 and it worked — six lanes reassigned, `classTier.review` raised, both files valid. What it lacks is anything that explains the decision it is asking for. Every screen shows values and expects the human to already hold the definitions in their head. Four additions, all explanatory, none changing what the wizard writes.
+**What to build:** The user ran the TUI wizard for the first time on 2026-09-09 and it worked — six lanes reassigned, `classTier.review` raised, both files valid. What it lacks is anything that explains the decision it is asking for. Every screen shows values and expects the human to already hold the definitions in their head. Four additions, all explanatory, none changing what the wizard writes.
 
 **A start screen.** The wizard currently opens on harness discovery, which answers a question nobody asked. Before it, a screen that says in a few lines what this tool does: you are assigning each lane a tier, from the best tier down, with benchmark numbers beside each row to inform the tier; nothing is written until the confirm screen; `q` leaves without writing. Name the two files it will touch. Any key continues.
 
@@ -12,7 +12,7 @@
 
 ## Decisions 2026-09-10
 
-**A side-by-side benchmark data view.** Orin ran the wizard on 2026-09-10 and
+**A side-by-side benchmark data view.** The user ran the wizard on 2026-09-10 and
 the benchmark evidence was not in front of him while he assigned tiers. The
 curses table cannot carry per-effort score-and-cost for ~30 lanes legibly, so
 the wizard renders the collected data as a **local HTML page, read side by side
@@ -24,13 +24,13 @@ never been written down.
 
 **The legend gap is on the confirm screen, not only the routing screen.** The
 four additions above put the margin and gate legend on the *routing* screen.
-Orin hit the missing context on the **final/confirm screen**, which repeats
+The user hit the missing context on the **final/confirm screen**, which repeats
 `classTier`, `margin` and `gate` as bare values before writing. Carry the same
 one-line explanations onto the confirm screen. Acceptance below is extended.
 
 **Blocked by:** nothing. 07b landed.
 
-**Status:** landed 2026-09-10 (`54de330`, `1d6b7f8`, `b530b89`). All boxes ticked. The wizard has been through two design passes since — one per screen on 2026-09-10, and then Orin's "one decision per line, one marker on every page" rule (`23f7061`), which is recorded in the project CLAUDE.md as settled.
+**Status:** landed 2026-09-10 (`54de330`, `1d6b7f8`, `b530b89`). All boxes ticked. The wizard has been through two design passes since — one per screen on 2026-09-10, and then the user's "one decision per line, one marker on every page" rule (`23f7061`), which is recorded in the project CLAUDE.md as settled.
 
 - [x] A start screen states the task, names both files, and says nothing is written before confirm
 - [x] Tier is defined on the start screen and recalled in the tier screens' footer

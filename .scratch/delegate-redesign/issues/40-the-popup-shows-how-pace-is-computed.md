@@ -4,10 +4,10 @@
 Pace as its calculation (week quota left ÷ share of the week left), and for each Tier
 where its Lanes stand against the steal line (leader + margin). It says how far each
 Tier leader is from handing over, in quota points at the current reading. Raised by
-Orin 2026-09-27.
+The user 2026-09-27.
 
 Everything reads the Meters at the moment of display. No usage history and no burn
-rate: Orin, 2026-09-27, "We can only make a decision based on the usage at the time of
+rate: the user, 2026-09-27, "We can only make a decision based on the usage at the time of
 sending a delegation" (`docs/adr/0001-settled-delegate-decisions.md`).
 
 **Prototype:** branch `worktree/delegate-redesign-popup`, file
@@ -15,7 +15,7 @@ sending a delegation" (`docs/adr/0001-settled-delegate-decisions.md`).
 `python3 .scratch/delegate-redesign/prototype/popup_variants.py` (left and right arrows
 switch layouts).
 
-- Round one (`556f439`): A worksheet, B dot plot per Tier, C quota-vs-time bars. Orin
+- Round one (`556f439`): A worksheet, B dot plot per Tier, C quota-vs-time bars. The user
   picked B, and found C too busy, with "quota" and "week" undefined.
 - Round two (`36d0aaa`): Meters at the top, then each Tier's lanes grouped by harness,
   visual first, in the glossary's terms. D puts the Meters and the Tiers on one Pace
@@ -25,9 +25,9 @@ switch layouts).
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human. Layout D built 2026-10-04 as the recommended pick, pending Orin's choice; the prototype branch is pushed (`968e534`).
+**Status:** ready-for-human. Layout D built 2026-10-04 as the recommended pick, pending the user's choice; the prototype branch is pushed (`968e534`).
 
-- [ ] Orin picks a layout, or parts of several.
+- [ ] The user picks a layout, or parts of several.
 - [x] `report.py statusline --popup` renders it from the cached Meters only, with tests in
       `test_report.py`, and it fits the popup (85% × 40%, about 118 × 20). Built as D: the
       Meter rows write Pace as `= Remaining ÷ share of week`, and each Tier shows its leader,

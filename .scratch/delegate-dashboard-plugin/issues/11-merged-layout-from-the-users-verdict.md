@@ -1,14 +1,14 @@
-# 11 — Merged layout from Orin's layout verdict
+# 11 — Merged layout from the user's layout verdict
 
 **What to build:** one new throwaway layout variant, `deck`, that joins the parts of
-`panel` and `strip` Orin kept, plus his six general changes. It sits beside the three
+`panel` and `strip` the user kept, plus his six general changes. It sits beside the three
 existing variants on `worktree/delegate-monitor-herdr-layouts` and `v` reaches it.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** closed 2026-09-20. Orin accepted `deck` on 2026-09-19 ("this is excellent") and made it the production view on 2026-09-20; tickets 12-14 carry it from there. The boxes below stay unticked here: his acceptance covers the layout ones, and `--layout` and `v` were removed by ticket 12. The branch `worktree/delegate-monitor-herdr-layouts` is deleted; its history is in `main`.
+**Status:** closed 2026-09-20. The user accepted `deck` on 2026-09-19 ("this is excellent") and made it the production view on 2026-09-20; tickets 12-14 carry it from there. The boxes below stay unticked here: his acceptance covers the layout ones, and `--layout` and `v` were removed by ticket 12. The branch `worktree/delegate-monitor-herdr-layouts` is deleted; its history is in `main`.
 
-## Verdict, Orin, 2026-09-18
+## Verdict, the user, 2026-09-18
 
 The question was "what should the dashboard look like?" (prototype skill, UI branch).
 Three variants were compared live: `current`, `panel`, `strip` (`1550823`).
@@ -32,14 +32,14 @@ Three variants were compared live: `current`, `panel`, `strip` (`1550823`).
    - (f) `make delegate-dashboard` is acceptable for the prototype. The product needs
      a Herdr shortcut.
 
-## Session decisions Orin may overrule
+## Session decisions the user may overrule
 
 - The work is a fourth variant, not an edit of `panel` or `strip`, so the three stay
   comparable.
 - Effort letters: `L`, `M`, `H`, `XH`, `Max`, `U` (ultra).
 - The model display name comes from the Lane's `published_as` when present, else from
   the model slug by one rule in the variant. The catalog is not edited.
-- (f) is a written proposal in this ticket's Landed note, not a change to Orin's Herdr
+- (f) is a written proposal in this ticket's Landed note, not a change to the user's Herdr
   configuration.
 
 ## Acceptance
@@ -55,7 +55,7 @@ Three variants were compared live: `current`, `panel`, `strip` (`1550823`).
       `J`/`K` behave the same in both, and `J`/`K` still move a Lane only inside its Tier.
 - [ ] 4e: with a Tier folded, one `j` or `k` leaves it.
 - [ ] 4f: the Landed note says how a Herdr shortcut can open the plugin pane, from the
-      installed `herdr` help output, with the exact lines Orin would add.
+      installed `herdr` help output, with the exact lines the user would add.
 - [ ] `python3 tools/delegate-dashboard/test_dashboard.py` passes; `proto_dump.py`
       frames for `deck` are saved under the effort's `_work/`.
 
@@ -63,7 +63,7 @@ Three variants were compared live: `current`, `panel`, `strip` (`1550823`).
 
 `c04a75d`, by `opus-high@claude` (named dispatch: TUI work goes to an Opus agent under
 `/frontend-design:frontend-design`), run `20260919T014109Z-opus-high@claude-6f587bc0`,
-1030 s, verdict clean. The boxes stay open until Orin drives `deck` in a pane: no one
+1030 s, verdict clean. The boxes stay open until the user drives `deck` in a pane: no one
 pressed a key in a TTY.
 
 Checked by the session: `test_dashboard.py` passes (42); `--layout deck --json` exits 0;
@@ -83,11 +83,11 @@ on; 100, 132, 170 cells) are 34 lines each and none is over width by a cell-widt
       command = "herdr plugin pane open --plugin delegate.project-dashboard --entrypoint dashboard --placement split --focus"
 
   The session confirmed the `herdr plugin pane open` flags from its help and that
-  `prefix+d` is not used in Orin's config. `type = "shell"` is the worker's claim and is
+  `prefix+d` is not used in the user's config. `type = "shell"` is the worker's claim and is
   not confirmed; `herdr config check` validates it. The plugin is linked to the layouts
   worktree, so the key opens the branch copy.
 
-## Round 2, Orin, 2026-09-18 (after driving `deck` at `c04a75d`)
+## Round 2, the user, 2026-09-18 (after driving `deck` at `c04a75d`)
 
 1. The Harness view becomes a table: one row per Harness, one column per Tier, the
    Lanes of that Harness and Tier in the cell. An empty cell is obvious. Clean, neat,
@@ -95,7 +95,7 @@ on; 100, 132, 170 cells) are 34 lines each and none is over width by a cell-widt
 2. The descriptions move to the bottom and favour readable text.
 3. The reason codes (`STEAL`, `ELIG`, `GATE`, `NOMTR` and the rest) need definitions
    in the same place.
-4. A visual aid shows how Gate and Margin act. Orin wrote "at the harness level". The
+4. A visual aid shows how Gate and Margin act. The user wrote "at the harness level". The
    rule acts per Meter: Gate compares a Meter's Remaining, and Margin compares the Pace
    of two Lanes' Meters; one Harness can own two Meters (`claude-general`,
    `claude-fable`). Session decision: draw the aid per Meter, grouped under its Harness.
@@ -111,15 +111,15 @@ are 40 lines each and fit their width; the steal rule the aid draws matches
 `rank.py:181` (`r["pace"] >= pick_row["pace"] + margin`, the Pick reassigned in the loop).
 New key `a` opens the Gate and Margin aid; `h` opens the Harness table, where `j`/`k` walk
 down each Tier column; `d` writes the five terms and the nine codes at the bottom. The
-boxes stay open until Orin drives it.
+boxes stay open until the user drives it.
 
-## Round 3, Orin, 2026-09-18
+## Round 3, the user, 2026-09-18
 
 1. In the Harness table `h` `j` `k` `l` move the selection and `H` `J` `K` `L` move the
    model; the view key leaves `h`.
 2. "fix the agy meter, gate, and usage monitor": a backend change, ticket 31 of
    `.scratch/delegate-redesign/`.
-3. `H`/`L` change a Tier. Orin: "allow projects to have a lanes customization", so the save
+3. `H`/`L` change a Tier. The user: "allow projects to have a lanes customization", so the save
    is project scope: ticket 32 of `.scratch/delegate-redesign/`.
 
 **Round 3 landed** as `3cb85fb` and `30e1785`, same worker (about 1440 s, verdict

@@ -1,12 +1,12 @@
 # 26 — The benchmark page is where tiers are drawn
 
-**Status:** implemented 2026-09-12, pending Orin's review (the last box is his)
+**Status:** implemented 2026-09-12, pending the user's review (the last box is his)
 
-**What to build:** From Orin's second wizard run (2026-09-12). While he assigned
+**What to build:** From the user's second wizard run (2026-09-12). While he assigned
 tiers he kept the page's AA plot open: he read the frontier, dragged to a cost per
 task, and compared a model's efforts inside each harness. The page becomes the
 tool he draws tiers on; the wizard's tier and review pages stay the place tiers are
-written. Nothing carries the page's tiers into the wizard yet: Orin reads them off
+written. Nothing carries the page's tiers into the wizard yet: the user reads them off
 the page and sets them on the review page, and merging the two is later work. Work
 in `bench_page.py`, `assets/bench_page.js`, `setup_tui.py` and their tests.
 
@@ -24,13 +24,13 @@ in `bench_page.py`, `assets/bench_page.js`, `setup_tui.py` and their tests.
 
 2. **Pan.** When a plot is zoomed, a drag with the left button pans it, and so
    does a drag with the middle button. A press that does not move stays a click.
-3. **Tier lines.** Orin adds the thresholds between tiers 1|2, 2|3 and 3|4 as
+3. **Tier lines.** The user adds the thresholds between tiers 1|2, 2|3 and 3|4 as
    vertical lines on the cost-per-task axis and drags each one. A line is a guide,
    not a rule: it proposes a tier for the dots in its band, and nothing stops a
    lane from taking another tier.
 4. **Tiers are set per lane, on the page.** Selecting a dot (a model at an effort)
    sets its tier with 1-4 or a picker. A lane below the tier 3 line can be tier 3,
-   because Orin knows things the estimate does not.
+   because the user knows things the estimate does not.
 5. **Colour is the harness**, so load balance shows at a glance.
 6. **Side by side.** Beside the plot, a panel lists tiers 4 to 1 with each
    harness's lanes in that tier, grouped as in item 1, and a count per tier per
@@ -50,19 +50,19 @@ in `bench_page.py`, `assets/bench_page.js`, `setup_tui.py` and their tests.
 - One decision per line in the wizard; the carry rule is the only thing that
   proposes a lane off; the frontier is a display aid (tickets 18, 24).
 - Board descriptions stay as quoted in `assets/boards.json` (ticket 25).
-- Tests check the rule on fixtures, never Orin's tiers.
-- Haiku gets no AA row mapping: Orin judges it decidedly worse than luna for now
+- Tests check the rule on fixtures, never the user's tiers.
+- Haiku gets no AA row mapping: the user judges it decidedly worse than luna for now
   (2026-09-12), so `haiku-high@claude` stays a lane with no rows.
 
 ## Round 2
 
-From Orin's look at round 1 (2026-09-12). Item 3 above was his mistake, in his
+From the user's look at round 1 (2026-09-12). Item 3 above was his mistake, in his
 words: the tier lines should be horizontal, "showing where things cut off".
 
 10. **Tier lines are horizontal**, on the score axis, and replace the vertical
     cost lines. Sliding a line tiers at once: every carried lane whose dot is
     above that line and below the next line up takes that band's tier in the
-    side panel. Orin then adjusts from there. A tier set by hand, on a dot or in
+    side panel. The user then adjusts from there. A tier set by hand, on a dot or in
     the panel, stays set until he clears it; a line drag does not overwrite it.
 11. **The panel and the plot highlight each other, for every lane.** Hovering or
     selecting a lane in the side panel (for example `opus-xhigh@claude`)
@@ -87,7 +87,7 @@ words: the tier lines should be horizontal, "showing where things cut off".
 - [x] 11 panel and plot highlight each other for every lane
 - [x] 12 plot fills its column
 - [x] 13 group order without Epoch uses AA mean rank
-- [ ] Orin draws his tiers on the page and sets them in the wizard
+- [ ] The user draws his tiers on the page and sets them in the wizard
 
 ## Landed, 2026-09-12
 
@@ -204,7 +204,7 @@ Verification:
 - The wizard's T4 and review pages were rendered at 200x50 through
   `layout_lines` and `overlay` on the real catalog and rows, with the Epoch
   columns from the test fixture CSV (no network); the grouping reads as item 1.
-- Not verified: Orin with a real mouse, and his own tiers (his box).
+- Not verified: the user with a real mouse, and his own tiers (his box).
 
 
 ## Landed round 2, 2026-09-12
@@ -250,4 +250,4 @@ Evidence under `.scratch/t26r2/`: `suite.txt`, `browser-checks.json`, `gen-page.
 scratchpad was not read or written because this session restricts all paths to
 this worktree. The generator was recreated here using bench.collect/write.
 
-Still open: Orin's own tier drawing and wizard run (his existing last checkbox).
+Still open: the user's own tier drawing and wizard run (his existing last checkbox).

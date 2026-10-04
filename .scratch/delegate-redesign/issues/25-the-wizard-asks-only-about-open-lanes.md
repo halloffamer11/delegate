@@ -1,16 +1,16 @@
 # 25 — The wizard asks only about open lanes, and its pages explain themselves
 
-**What to build:** One pass over what Orin sees in the wizard and on the page its
+**What to build:** One pass over what the user sees in the wizard and on the page its
 `o` key opens, from his first full run (2026-09-12) and the start-page half of
 ticket 20. Work in `setup_tui.py`, `setup.py`, `bench_page.py` and
 `assets/bench_page.js`.
 
 ## Wizard
 
-1. **Tier marks start empty** (Orin chose this, 2026-09-12). `Wizard.__init__`
+1. **Tier marks start empty** (the user chose this, 2026-09-12). `Wizard.__init__`
    fills each tier page's marks from the tier already in `lanes.json`
    (`self._marks`). The generated codex lanes carry placeholder tiers, so tier 4
-   opened with `sol-*` and `astra-high` marked, and enter assigned them. Orin read
+   opened with `sol-*` and `astra-high` marked, and enter assigned them. The user read
    that as his carry decisions "carrying through".
 2. **A tier page lists only open lanes.** Lanes switched off on the carry page and
    lanes a higher tier page took are hidden, not dimmed. Today `_tier_names` lists
@@ -24,7 +24,7 @@ ticket 20. Work in `setup_tui.py`, `setup.py`, `bench_page.py` and
    bottom of a page that fills a quarter of a wide terminal. The same pass makes
    every page use the width it has.
 5. **The start page states only facts** (was ticket 20's second half): the two
-   files it will write, the benchmark page path and the discovery notices. Orin,
+   files it will write, the benchmark page path and the discovery notices. The user,
    2026-09-11: "People know what class, tier, lane, model, harness, and so forth
    are." The definitions live in `CONTEXT.md`, which ticket 22 added.
 
@@ -45,13 +45,13 @@ beside it in `assets/sources.json` or a file next to it. No worker writes one fr
 memory; that is the trust rule `effort.py check` applies to numbers.
 
 TUI and page work goes to a Claude Opus agent under
-`/frontend-design:frontend-design`. Tests check the flow on fixtures, never Orin's
+`/frontend-design:frontend-design`. Tests check the flow on fixtures, never the user's
 tiers (both settled).
 
 **Blocked by:** None — can start immediately. Ticket 19 changes which columns the
 tier pages show; whichever lands second rebases on the other.
 
-**Status:** implemented 2026-09-12, pending Orin's review (the last box is his)
+**Status:** implemented 2026-09-12, pending the user's review (the last box is his)
 
 Wizard:
 - [x] Tier 4 opens with no lane marked, whatever `lanes.json` holds
@@ -70,11 +70,11 @@ Benchmark page:
 
 Both:
 - [x] `test_setup_tui.py` covers wizard items 1-5 on fixtures, and the whole suite passes
-- [ ] Orin runs the wizard once more, zooms a plot with a real mouse, and confirms
+- [ ] The user runs the wizard once more, zooms a plot with a real mouse, and confirms
 
 ## Consolidated, 2026-09-12
 
-Orin asked for fewer, larger tickets. The draft ticket 26 (never committed) (benchmark page
+The user asked for fewer, larger tickets. The draft ticket 26 (never committed) (benchmark page
 descriptions and zoom) and ticket 20's start-page half folded in here: all of it is
 what the wizard and its page show, and it goes to the same agent.
 
@@ -158,4 +158,4 @@ Verification:
   scroll. Reset restored the ticks, choosing another board redrew its description,
   the comparison table held 11 boards with no missing description, and nothing
   overflowed the window.
-- Not verified: a person scrolling and dragging with a real mouse (Orin's box).
+- Not verified: a person scrolling and dragging with a real mouse (the user's box).

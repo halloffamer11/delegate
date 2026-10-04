@@ -15,7 +15,7 @@ findings 1, 2 and 4 confirmed by reading the code.
 ## Decisions
 
 - `r` is refused once any carry or Tier choice exists. The message says to quit
-  and start again to rescan. A rescan never discards a choice (Orin, 2026-09-24,
+  and start again to rescan. A rescan never discards a choice (the user, 2026-09-24,
   option a). A choice is a change against the state the last load built, so
   going back and forth with no change keeps `r`.
 

@@ -1,6 +1,6 @@
 # 36 — Page: reset every tier, and a relative price per model; an off Lane never stops a project
 
-**What to build:** four items. Orin gave the first three after his first refreshed
+**What to build:** four items. The user gave the first three after his first refreshed
 `delegate global` run, 2026-09-22. The session found the fourth the same day.
 
 1. "In the tool I'd like to have a reset everything option in the tiers on the HTML."
@@ -12,7 +12,7 @@
    level. I think we should just hard code it in like we are. But if there becomes a
    way to do this, it would be good to know if there's an example of how this could be
    done … just a comment."
-4. Orin's run turned `terra-high@codex` off. This checkout's `.delegate/routing.json`
+4. The user's run turned `terra-high@codex` off. This checkout's `.delegate/routing.json`
    named it in `project_order`, and `rank.py` then stopped: "project_order lane
    'terra-high@codex': lane is globally off; project_order cannot restore it". Ticket
    33 made a *removed* Lane warn. A Lane turned *off* still stops routing. The session
@@ -22,7 +22,7 @@
 
 ## Rule
 
-The points below are session decisions; Orin may overrule them.
+The points below are session decisions; the user may overrule them.
 
 **1. Reset.** The page's Tier panel gets one "Reset every tier" button.
 - It clears everything the page holds for this catalog:
@@ -85,7 +85,7 @@ Paths are relative to `agents/skills/delegate/`:
 
 ## Acceptance
 
-**Status:** landed 2026-09-22 (`47439fb`, `c3acf00`, `53261d4`, `bc18235`, `7b9c0b4`, label polish `d51816b`, and `a20fb0b`, which repairs five tests that read the stowed catalog by the names Orin's `776df1a` retired); merged and pushed by Orin (`71c6661`). All boxes ticked. Orin may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`47439fb`, `c3acf00`, `53261d4`, `bc18235`, `7b9c0b4`, label polish `d51816b`, and `a20fb0b`, which repairs five tests that read the stowed catalog by the names the user's `776df1a` retired); merged and pushed by the user (`71c6661`). All boxes ticked. The user may overrule the session decisions under Landed.
 
 - [x] "Reset every tier" asks once. After yes, the page holds no Tier, off, manual
   mark or moved line for this catalog key, and it shows the catalog's own state.
@@ -124,7 +124,7 @@ One commit per item.
    ranks. `.delegate/lanes.json` naming an off Lane was never an error and is
    tested so it stays that way.
 
-Session decisions, Orin's to overrule:
+Session decisions, the user's to overrule:
 
 - The price chart draws input as an open dot and output as a filled one, rather
   than a second hue for the same money. Colour stays the meter, and the row's own
@@ -139,14 +139,14 @@ Session decisions, Orin's to overrule:
   above the dot rather than over its own link line.
 - A model name longer than the name gutter is cut with an ellipsis and stays
   whole in the row's tooltip, rather than drawn off the edge.
-- `dataviz` asks for selective labels; Orin asked for a value on every dot, and
+- `dataviz` asks for selective labels; the user asked for a value on every dot, and
   with one row per model there are few enough that both can be served. The labels
   wear text tokens, never the mark's colour, and flip sides rather than collide.
 - The dashboard's `_validate_project_proposal` is the one caller that passes
   `proposal=True`. Its own test moves with it: a lane turned off behind the
   dashboard's back now reads as a conflict to reload and repeat, and the save is
   still refused.
-- Orin's first refreshed catalog renamed `opus-*@claude` and moved its model, and
+- The user's first refreshed catalog renamed `opus-*@claude` and moved its model, and
   five tests that read the stowed catalog and the checkout's agent files by name
   broke on it. They now read the level, not the lane name, so the next refresh
   does not break them again. One thing that came out of it is open: the

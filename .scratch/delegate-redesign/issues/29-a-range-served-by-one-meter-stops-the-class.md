@@ -1,8 +1,8 @@
 # 29 — A Range served by one Meter stops the Class
 
 **What to decide, then build:** what `/delegate` does when every Lane inside a Class
-Range is vetoed by the Gate, and how the catalog tells Orin that a Tier depends on one
-Meter. Raised by Orin 2026-09-18.
+Range is vetoed by the Gate, and how the catalog tells the user that a Tier depends on one
+Meter. Raised by the user 2026-09-18.
 
 **Blocked by:** None — can start immediately.
 
@@ -16,7 +16,7 @@ Tier 1–2 Lane is off. Carried Lanes on four other Meters were healthy, all in 
 `vetoed:ceiling`. `mechanical` has the same Range and the same exposure; `impl` and
 `review` (Range 2–3) lose their floor Tier but still run.
 
-Orin chose a named dispatch to `flash-high@agy` (Tier 3) and said it is acceptable for
+The user chose a named dispatch to `flash-high@agy` (Tier 3) and said it is acceptable for
 that job. His framing: either (a) each Tier carries one Lane per Harness or Meter, or
 (b) an exception mechanism admits a Lane when no in-Range Lane is inside its usage
 limits. He also said agy is a workhorse that the Gate, Meter and ranking rules do not
@@ -34,7 +34,7 @@ use fully.
 
 ## Options
 
-**A. Coverage in the catalog, and a warning.** No new routing rule. Orin carries Lanes
+**A. Coverage in the catalog, and a warning.** No new routing rule. The user carries Lanes
 on a second Meter in Tiers 1 and 2. agy fits without a rule change, because each agy
 effort is its own model and so its own Lane: `flash-low`, `flash-medium` and `flash-high`
 can sit in three Tiers. `catalog.py check` and the wizard's review page warn when the
@@ -55,20 +55,20 @@ that agy does not have.
 
 ## Recommendation
 
-A and B together; not C. A is the actual fix and needs only Orin's Tier choices. B makes
+A and B together; not C. A is the actual fix and needs only the user's Tier choices. B makes
 a Gate-only outage degrade to a higher Tier and not stop the session. C duplicates A for
 agy and widens spend everywhere else.
 
 The agy Pace question is separate and stays with modular ticket 13: a weekly-only Pace
-for agy would let it take Margin steals. Reopen it only with Orin's word.
+for agy would let it take Margin steals. Reopen it only with the user's word.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`b750d60`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is Orin's, and he may overrule two session decisions below.
+**Status:** implemented 2026-09-18 (`b750d60`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's, and he may overrule two session decisions below.
 
-- [x] Orin chooses A, B, or both, and whether `overflow` defaults on. (Both, 2026-09-18.)
+- [x] The user chooses A, B, or both, and whether `overflow` defaults on. (Both, 2026-09-18.)
 - [x] `catalog.py check` and the review page warn when one Meter serves every carried
-      Lane of a Tier; fixtures cover it; the check never judges Orin's Tiers.
+      Lane of a Tier; fixtures cover it; the check never judges the user's Tiers.
 - [x] With overflow on, a Range whose vetoes are all Gate vetoes ranks the next Tier and
       says so in the header; any other veto mix still stops; Tier 4 is never admitted.
 - [x] `SKILL.md` and `CONTEXT.md` carry the new term and rule.
@@ -76,10 +76,10 @@ for agy would let it take Margin steals. Reopen it only with Orin's word.
 
 ## Decision, 2026-09-18
 
-Orin: "both". A, the one-Meter warning, and B, overflow past the ceiling, are both built.
+The user: "both". A, the one-Meter warning, and B, overflow past the ceiling, are both built.
 `overflow` defaults on: the purpose of B is that a Gate-only outage does not stop a
 session, and a default of off would keep today's stop. That default is the session's
-choice, not Orin's word; he may overrule it. The Tier coverage itself (which Lanes he
+choice, not the user's word; he may overrule it. The Tier coverage itself (which Lanes he
 carries in Tiers 1 and 2) stays his, on the wizard's Tier pages. C is not built.
 
 ## Landed, 2026-09-18
@@ -90,7 +90,7 @@ try on `flash-high@agy` returned no text after 110 s (logged failed); `grok46-hi
 run `20260918T214251Z-grok46-high@grok-30b2580b`, 549 s, found two defects and missing
 tests. All were fixed by the implementer.
 
-Two decisions are the session's, not Orin's: `overflow` defaults on (see Decision above),
+Two decisions are the session's, not the user's: `overflow` defaults on (see Decision above),
 and a carried Lane whose Harness CLI is absent does not block overflow. The second reverses
 the first Brief, after review: the catalog serves every machine, so a Lane this machine
 cannot run must not keep a Gate-only stop in place. The rule: at least one carried in-Range

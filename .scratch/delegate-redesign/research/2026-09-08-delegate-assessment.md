@@ -1,7 +1,7 @@
 # Delegate skill: assessment and the two paths on the block
 
-Date: 2026-09-08. Author: toolsmith session (Fable) with Orin. Status: **superseded 2026-09-08 by `2026-09-08-delegate-redesign.md`; neither option was taken.**
-Next step: a grilling session (`mattpocock-skills:grilling`; Orin called it "grill-with-docs") on simplicity and execution, then a design spec for the chosen path.
+Date: 2026-09-08. Author: toolsmith session (Fable) with the user. Status: **superseded 2026-09-08 by `2026-09-08-delegate-redesign.md`; neither option was taken.**
+Next step: a grilling session (`mattpocock-skills:grilling`; the user called it "grill-with-docs") on simplicity and execution, then a design spec for the chosen path.
 
 Published assessment page: https://claude.ai/code/artifact/3bf1bc04-733e-436d-ba06-751edbb9f1c3
 Provenance (scout briefs and results, fetched reference docs, report HTML): `~/.cache/delegate/assessment-2026-09-08/`
@@ -69,7 +69,7 @@ Deliberately absent: quota or usage awareness, ranking among lanes, sub-agent in
 
 **What a dispatch does after:** same five steps as today; step 3 backgrounds; step 4 writes a run directory and always ends in a named status.
 
-**Gain:** you keep every unique piece (pace routing, courier, hooks, TUI, output schema), stay on sh/python, and own the tests. **Lose:** you keep maintaining harness quirks yourself as CLIs change. **Effort:** two to three evenings of Orin's own edits plus smoke runs. Estimates are Astra's from the upstream source, not measured.
+**Gain:** you keep every unique piece (pace routing, courier, hooks, TUI, output schema), stay on sh/python, and own the tests. **Lose:** you keep maintaining harness quirks yourself as CLIs change. **Effort:** two to three evenings of the user's own edits plus smoke runs. Estimates are Astra's from the upstream source, not measured.
 
 ## 5. Option 2: keep routing, use their relays as the dispatch backend
 

@@ -2,11 +2,11 @@
 
 **What to build:** The last of the old routing is removed and the guardrails become advice. The gate hook keeps adding context (meter table and a pointer to `/delegate`) and loses every deny and ask rule, every environment-variable switch, and every threshold read. The global CLAUDE.md Delegation section becomes one line naming `/delegate`. The static lane table, the shell dispatcher, and the old routing reference are deleted or rewritten to the new design. The courier agent is rewritten as an optional background-and-poll wrapper for Workflow callers, with its turn limit raised, and is referenced by nothing on the main path. The skill's context file describes the finished layout.
 
-Orin runs the spec acceptance list as the final assessment before this ticket closes.
+The user runs the spec acceptance list as the final assessment before this ticket closes.
 
 **Blocked by:** 04 The `/delegate` skill; 05 Typed-only harness wrappers.
 
-**Status:** landed 2026-09-09 (commits 7c76843, 9545e6f; tag delegate-v1-last); unticked items wait on Orin, both outside this repo and both still there on 2026-09-23: `~/.claude/hooks/delegate-gate.py:56` names `{SKILL_DIR}/delegate.py`, which moved to `scripts/delegate.py` (§9.6), and `export DELEGATE_BALANCE=1` is line 1 of `~/.zshrc.local` (§9.7); then the rest of the §9 walk (§9.2 is signed). The one-line Delegation section in ~/.claude/CLAUDE.md is dropped: that section is gone (2026-09-11)
+**Status:** landed 2026-09-09 (commits 7c76843, 9545e6f; tag delegate-v1-last); unticked items wait on the user, both outside this repo and both still there on 2026-09-23: `~/.claude/hooks/delegate-gate.py:56` names `{SKILL_DIR}/delegate.py`, which moved to `scripts/delegate.py` (§9.6), and `export DELEGATE_BALANCE=1` is line 1 of `~/.zshrc.local` (§9.7); then the rest of the §9 walk (§9.2 is signed). The one-line Delegation section in ~/.claude/CLAUDE.md is dropped: that section is gone (2026-09-11)
 
 - [x] Spawning a Claude worker without a reason is no longer denied; the hook only adds context
 - [ ] No environment-variable switch remains anywhere in the skill, hooks, or docs; `mode` and `balance` do not exist as settings
@@ -14,7 +14,7 @@ Orin runs the spec acceptance list as the final assessment before this ticket cl
 - [x] The old lane table and shell dispatcher are gone and nothing references them
 - [ ] The global CLAUDE.md Delegation section is one line
 - [x] Existing tests and the TUI build pass after the deletions
-- [ ] Orin walks the eight acceptance items in spec section 9 and signs each off
+- [ ] The user walks the eight acceptance items in spec section 9 and signs each off
 
 ## §9 walk, 2026-09-09
 
@@ -58,12 +58,12 @@ fixed.** Verified by listing the files:
 - `~/.claude/hooks/delegate-gate.py:56` tells every session to run
   `{SKILL_DIR}/delegate.py`. That path does not exist — ticket 10 moved it to
   `scripts/delegate.py`, confirmed by `ls`. **Still open, and outside this repo**:
-  the hook is a standalone file in Orin's harness, not stowed from here, so it is
+  the hook is a standalone file in the user's harness, not stowed from here, so it is
   his to change. One word: `delegate.py` → `scripts/delegate.py`.
 
 **§9.7 — "No env var switch remains." Needs a human, unchanged.** No repo code
 reads `DELEGATE_BALANCE`; the dead `export DELEGATE_BALANCE=1` is still line 1 of
-`~/.zshrc.local`, which only Orin should edit.
+`~/.zshrc.local`, which only the user should edit.
 
 Also confirmed while walking: `commandcode-delegate` passes
 `--permission-mode plan` but is unreachable — `commandcode` is not in

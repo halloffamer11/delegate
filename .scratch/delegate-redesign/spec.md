@@ -1,6 +1,6 @@
 # Delegate redesign: lanes, tiers, and ADS relays
 
-Date: 2026-09-08. Author: toolsmith session (Fable) with Orin. Status: **design agreed, grilling complete; implementation not started.**
+Date: 2026-09-08. Author: toolsmith session (Fable) with the user. Status: **design agreed, grilling complete; implementation not started.**
 Amended 2026-09-10 (q1a): **`trust` is removed from the design entirely** — not collected, not stored, not used. Every mention below is amended in place; sections 1, 2.4, 2.5, 3, 5 and 6 changed.
 
 Supersedes the Option 1 / Option 2 framing in `2026-09-08-delegate-assessment.md`. Neither option was taken.
@@ -61,7 +61,7 @@ Provenance: research in `.scratch/delegate-redesign/research/2026-09-08-lane-cos
     "luna-low@codex": { "harness": "codex", "model": "gpt-5.6-luna", "effort": "low",
       "meter": "codex", "meter_weight": 1, "timeout": "10m",
       "price": { "in": 0.2, "cache_read": 0.02, "cache_write": null, "out": 1.2 },
-      "tier": 1, "basis": "benchmarks overstate it (Orin)" },
+      "tier": 1, "basis": "benchmarks overstate it (the user)" },
     "flash-high@agy": { "harness": "agy", "model": "gemini-3.8-flash-high", "effort": "high",
       "meter": "agy-gemini", "meter_weight": 1, "timeout": "25m",
       "price": { "in": 0.75, "cache_read": 0.075, "cache_write": null, "out": 3.75 },

@@ -252,7 +252,7 @@ No learned difficulty model — fixed rules in the orchestrator's own prompt.
 
 ## 5. What "JEV" most likely is
 
-High confidence: Orin means **Jev**, a "System One Model" from TypeSafe AI,
+High confidence: the user means **Jev**, a "System One Model" from TypeSafe AI,
 announced 2026-09-15 alongside a $40M round led by DCVC; the company's founder,
 Diogo Almeida, co-invented RLHF/InstructGPT at OpenAI.
 [TypeSafe, via Zapier](https://zapier.com/blog/jev/),
@@ -278,7 +278,7 @@ Diogo Almeida, co-invented RLHF/InstructGPT at OpenAI.
   routing beats simple controls."
 - Confidence in the ID: high. "Jev" is a very close phonetic match to "JEV," it is
   a genuinely new (September 2026) model, and TypeSafe's own marketing language
-  ("could help with model routing") nearly echoes Orin's phrasing. I could not
+  ("could help with model routing") nearly echoes the user's phrasing. I could not
   find any other 2025-2026 model or system with a closer name match used for
   routing, so I am not hedging further on the identification itself — only on
   whether Jev-based routing actually works well for coding tasks, where the one
@@ -292,7 +292,7 @@ direct claim from any source. Each point below names what it leans on.
 - **(a) Deterministic pick vs. an eligible band.** The bandit-routing and
   cost-threshold literature (section 3) treats "which model" as a knob swept
   across a cost/quality curve, not a single hard-sorted answer — that supports
-  Orin's instinct that a Tier's eligible lanes are a band, not one correct pick.
+  The user's instinct that a Tier's eligible lanes are a band, not one correct pick.
   But section 2's evidence is that a general orchestrator is a *weak* difficulty
   judge, especially out-of-domain, and a purpose-trained classifier beats an LLM
   asked to route. So: returning a band and letting the orchestrator freely pick

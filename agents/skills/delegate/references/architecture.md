@@ -196,7 +196,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   forcing the rows fetch past the 24 h cache), after which `Wizard._load` derives every later page
   again and the `--tiers-from` lines are applied again; it is offered on that page only, before any
   decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
-  which is never in the repo: each machine keeps its own (Orin, 2026-09-29). `make delegate-wizard`
+  which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
   opens, which reads its attribution and its lane order (`bench.lane_order`, `group_lanes`) from
@@ -381,7 +381,7 @@ worker reads one MCP server and nothing else in `~/.codex`; without that home a 
 isolation and has no browser (`codex_home()`, ticket 03). **grok**: works on a write run only. Its
 built-in `read-only` sandbox kills every stdio MCP server on macOS, `context7` as well as
 Playwright, and only a custom sandbox profile fixes it, which needs a relay change (ticket 04).
-**claude**: lanes are native since ticket 22, so the relay's MCP block is not on the path Orin uses;
+**claude**: lanes are native since ticket 22, so the relay's MCP block is not on the path the user uses;
 a native worker inherits this session's servers, and the session must restart before it sees a new
 one (ticket 02). The rest is open work in `.scratch/delegate-browser/issues/`.
 

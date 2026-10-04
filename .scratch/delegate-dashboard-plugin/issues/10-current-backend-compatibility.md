@@ -5,9 +5,9 @@ show sourced metering state and the effect of metering off; route project edits
 through the canonical catalog boundary while retaining the dashboard's project
 write restrictions and stale-editor protection. Keep the existing prototype scope.
 
-**Blocked by:** None — prototype accepted and Orin approved this pass on 2026-09-17.
+**Blocked by:** None — prototype accepted and the user approved this pass on 2026-09-17.
 
-**Status:** implemented 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes) on `worktree/delegate-monitor-herdr` — all boxes ticked; Orin's review of the updated prototype is open. Open, Orin's: the one decision below (project saves keep the canonical `catalog.edit_catalog` document shape).
+**Status:** implemented 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes) on `worktree/delegate-monitor-herdr` — all boxes ticked; the user's review of the updated prototype is open. Open, the user's: the one decision below (project saves keep the canonical `catalog.edit_catalog` document shape).
 
 - [x] Current main is merged into the isolated prototype branch; main and the Rust monitor are preserved.
 - [x] Metering on/off and its source are visible; off explains inactive Gate/Margin/Pace and cached observations.
@@ -18,7 +18,7 @@ write restrictions and stale-editor protection. Keep the existing prototype scop
 
 ## Scope approved, 2026-09-17
 
-Orin selected “Compatibility pass first” after the restart check. Evidence:
+The user selected “Compatibility pass first” after the restart check. Evidence:
 `../research/2026-09-16-restart.md`. Main at `2680477` is merged as `70cf9bb`.
 The root context conflict was resolved using current main facts and this branch's
 active compatibility scope. Initial dashboard, catalog and rank checks passed.
@@ -53,7 +53,7 @@ module docstring still says it never imports/executes usage.py; correct that sta
 statement to the no-probe contract, since rank now imports usage.
 
 Authorizations persist: agy and Grok are approved. Claude Opus startup returned
-HTTP 403 `oauth_not_allowed_for_organization`; Orin then explicitly approved a
+HTTP 403 `oauth_not_allowed_for_organization`; the user then explicitly approved a
 delegate-selected fallback for this display task. Do not ask that routing question
 again. Use delegate ranking excluding Claude for this job; both implementation
 workers selected Grok. Use a different Model family for review.
@@ -73,7 +73,7 @@ before reuse. The no-probe helper passed against the pre-WIP baseline; run it ag
 after completing the patch. The owning ticket and source are durable; recreate
 fixtures if /private/tmp is cleared. The prior restart record is historical evidence.
 
-Orin approved cleanup on 2026-09-17. Deleted exactly five obsolete files: restart
+The user approved cleanup on 2026-09-17. Deleted exactly five obsolete files: restart
 `check_compatibility.py`, `main-state.json`, `prototype-state.json`, and compatibility
 `impl-ranking.json`, `tui-ranking.json`. Verified all five absent. Worker Briefs, run
 records, test logs, and reusable live fixtures remain.
@@ -106,7 +106,7 @@ second writer that disagrees with `catalog.py order --scope project` for the sam
 action. The spec's purpose holds and is now tested directly: a move never changes
 the effective Order of another Tier. The two failing tests were rewritten to prove
 more, not less (canonical-plan equality, other-Tier rows, unrelated keys, rank reads
-the new Order). Orin may overrule this at review.
+the new Order). The user may overrule this at review.
 
 Dispatch, by `/delegate` ranking (Codex under the Gate at 1%, agy Meter unknown):
 - model adapter and tests: `grok46-high@grok`, 815 s, run `20260918T133056Z-…-56586336`, verdict clean.

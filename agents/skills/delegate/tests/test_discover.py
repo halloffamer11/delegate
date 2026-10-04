@@ -78,8 +78,8 @@ agy_ok = (
 )
 record("agy fixture parsing parses tabs", agy_ok, f"count={len(agy_models)}, slugs={agy_slugs[:3]}")
 
-# agy no longer prints the header (Orin's listing, 2026-10-03), but an older
-# agy did, and the space-separated form is what Orin pasted.
+# agy no longer prints the header (the user's listing, 2026-10-03), but an older
+# agy did, and the space-separated form is what the user pasted.
 older = agy_module.parse_listing(
     "Fetching available models...\n"
     "claude-opus-5-5-low       Claude Opus 5.5 (Low)\n"

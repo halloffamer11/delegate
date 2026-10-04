@@ -1,6 +1,6 @@
 # Delegate modular work
 
-Complete. What landed, what Orin accepted, and what stays deferred:
+Complete. What landed, what the user accepted, and what stays deferred:
 [record.md](record.md). Tickets 01–13 in `issues/` carry their Landed notes.
 
 - Before relying on research claims, read
