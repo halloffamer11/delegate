@@ -92,6 +92,35 @@ def restrict_to_harness(cat, harness):
     return out
 
 
+def eligible_order(item, metering):
+    """The order eligible Lanes are tried in: Tier, then Order, then (with
+    Meters on) the higher Pace, a Lane with an unknown Pace last."""
+    t = item["tier"] if item["tier"] is not None else 99
+    unordered = 1 if item["order"] is None else 0
+    o = item["order"] if item["order"] is not None else 0
+    if not metering:
+        return (t, unordered, o, item["lane"])
+    unknown = 1 if item["pace"] is None else 0
+    p = item["pace"] if item["pace"] is not None else 0.0
+    return (unknown, t, unordered, o, -p, item["lane"])
+
+
+def choose(eligible_rows, margin, metering):
+    """(the Pick, the Pace it stole from or None) among rows already in
+    `eligible_order`: the first row, unless a later one's Pace reaches the
+    current Pick's by the Margin. The usage popup replays this rule to say
+    when a Tier hands over (ticket 40), so it lives in one place."""
+    pick_row = eligible_rows[0]
+    beaten_pace = None
+    if metering:
+        for r in eligible_rows[1:]:
+            if r["pace"] is not None and pick_row["pace"] is not None:
+                if r["pace"] >= pick_row["pace"] + margin:
+                    beaten_pace = pick_row["pace"]
+                    pick_row = r
+    return pick_row, beaten_pace
+
+
 def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="tier"):
     """Apply the canonical selection rule to an inclusive Tier range.
 
@@ -199,27 +228,10 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         else:
             vetoed_rows.append(row)
 
-    def sort_key(item):
-        t = item["tier"] if item["tier"] is not None else 99
-        unordered = 1 if item["order"] is None else 0
-        o = item["order"] if item["order"] is not None else 0
-        if not metering:
-            return (t, unordered, o, item["lane"])
-        unknown = 1 if item["pace"] is None else 0
-        p = item["pace"] if item["pace"] is not None else 0.0
-        return (unknown, t, unordered, o, -p, item["lane"])
-
-    eligible_rows.sort(key=sort_key)
+    eligible_rows.sort(key=lambda item: eligible_order(item, metering))
 
     if eligible_rows:
-        pick_row = eligible_rows[0]
-        beaten_pace = None
-        if metering:
-            for r in eligible_rows[1:]:
-                if r["pace"] is not None and pick_row["pace"] is not None:
-                    if r["pace"] >= pick_row["pace"] + margin:
-                        beaten_pace = pick_row["pace"]
-                        pick_row = r
+        pick_row, beaten_pace = choose(eligible_rows, margin, metering)
 
         for r in eligible_rows:
             if r is pick_row:

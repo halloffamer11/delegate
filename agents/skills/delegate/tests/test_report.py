@@ -437,19 +437,49 @@ with tempfile.TemporaryDirectory() as tmp:
     check("statusline off creates the flag file", rc == 0 and os.path.exists(sw_env["DELEGATE_STATUSLINE_SWITCH"]), out_off)
     rc, out_sw, _ = run(["statusline", "--no-color"] + cfg, sw_env)
     check("statusline prints nothing while the switch is off", rc == 0 and out_sw == "", out_sw)
-    rc, out_pp, err_pp = run(["statusline", "--no-color", "--popup"] + cfg, sw_env)
+    # The popup (ticket 40): a cache whose Meters carry a Pace, as a probe writes it.
+    pp_cache = os.path.join(tmp, "pp_usage.json")
+
+    def pp_row(meter, five, weekly, reset_5h, reset_wk, **extra):
+        left = min(1.0, max(0.02, (reset_wk - sl_now) / (7 * 86400)))
+        row = {"lane": meter, "remaining_5h": five, "remaining_weekly": weekly, "reset_5h": reset_5h,
+               "reset_weekly": reset_wk, "status": "ok", "cycle_left": left,
+               "pace": round(weekly / left, 3), "r": min(v for v in (five, weekly) if v is not None)}
+        row.update(extra)
+        return row
+    with open(pp_cache, "w") as f:
+        json.dump({"probed_at": sl_now - 240, "lanes": [
+            pp_row("agy-gemini", 0.44, 0.68, sl_now + 3 * 3600, sl_now + 5 * 86400),
+            pp_row("grok", None, 0.20, None, sl_now + 4 * 86400),
+            pp_row("codex", 1.0, 0.30, sl_now + 4 * 3600, sl_now + 3 * 86400),
+            pp_row("claude-general", 0.58, 0.46, sl_now + 2 * 3600, sl_now + 4 * 86400),
+            pp_row("claude-fable", 0.58, 0.46, sl_now + 2 * 3600, sl_now + 4 * 86400,
+                   remaining_weekly_model=0.59),
+        ]}, f)
+    pp_env = dict(sw_env, DELEGATE_CACHE=pp_cache)
+    rc, out_pp, err_pp = run(["statusline", "--no-color", "--popup", "--width", "118"] + cfg, pp_env)
     pp = out_pp.splitlines()
     check("statusline --popup ignores the off switch", rc == 0 and len(pp) > 6, out_pp + err_pp)
-    check("statusline --popup keeps the meter rows first", pp[:5] == sl_lines, out_pp)
-    check("statusline --popup adds one lane line per Tier",
-          [l[0] for l in pp[7:] if l[:1] in "①②③④"] == list("①②③④"), out_pp)
+    check("statusline --popup fits 118 columns and the popup's height",
+          all(len(l) <= 118 for l in pp) and len(pp) <= 24, f"{len(pp)} lines, widest {max(map(len, pp))}")
+    check("statusline --popup defines Pace before using it",
+          pp[1].startswith("Pace = weekly Remaining ÷ share of the week left"), out_pp)
+    agy_row = next((l for l in pp if l.startswith("①  agy")), "")
+    check("statusline --popup writes each Meter's Pace as its calculation",
+          "= 68% ÷ 71%" in agy_row and "0.95" in agy_row, agy_row)
+    check("statusline --popup heads each Tier once, in order",
+          [l[0] for l in pp if l[:1] in "①②③④" and " Tier " in l[:8]] == list("①②③④"), out_pp)
+    tier1 = next((l for l in pp if l.startswith("① Tier 1")), "")
+    check("statusline --popup says how far the leader's Meter falls before the Tier hands over",
+          "leader flash-high@agy" in tier1 and "→ luna-low@codex leads after agy drops 18.5 pts" in tier1, tier1)
+    check("statusline --popup gives a rival the Pace it needs",
+          any("luna-low" in l and "needs 0.96 (+0.26)" in l for l in pp), out_pp)
+    check("statusline --popup names every Class once",
+          all(" ".join(pp).split().count(k) == 1 for k in ("scout", "mechanical", "impl")), out_pp)
     rc, out_np, _ = run(["statusline", "--no-color", "--popup"] + cfg,
                         dict(sw_env, PATH=os.path.join(tmp, "no-bin")))
     check("statusline --popup names a missing PATH, not four empty Tiers",
           rc == 0 and "no harness CLI on PATH" in out_np and "no eligible lane" not in out_np, out_np)
-    check("statusline --popup names every Class once",
-          sorted(" ".join(pp[7:]).split()) and all(" ".join(pp[7:]).split().count(k) == 1
-                                                   for k in ("scout", "mechanical", "impl")), out_pp)
     rc, out_st, _ = run(["statusline", "status"] + cfg, sw_env)
     check("statusline status reports off", out_st.strip() == "off", out_st)
     rc, out_tg, _ = run(["statusline", "toggle"] + cfg, sw_env)
@@ -590,6 +620,30 @@ with tempfile.TemporaryDirectory() as tmp:
     check("limits --eligible with meters off keeps a below-Gate meter",
           rc == 0 and "| codex" in out_off_el.split("**Plan consumption this cycle:**")[0],
           out_off_el)
+
+# The popup replays rank's choice: across Order a rival needs the leader's Pace
+# plus the Margin, and the handover point follows from it (ticket 40).
+sys.path.insert(0, os.path.join(SKILL, "scripts"))
+import report  # noqa: E402
+
+
+def lane_row(lane, meter, pace, order=None):
+    return {"lane": lane, "meter": meter, "pace": pace, "tier": 2, "order": order,
+            "eligible": True, "veto": None}
+
+
+ordered = {"tier": 2, "leader": "a@x", "rows": [lane_row("a@x", "mx", 1.0, order=1),
+                                                lane_row("b@y", "my", 0.9, order=2)]}
+check("popup: across Order a rival needs the leader's Pace plus the Margin",
+      report.pace_to_lead(dict(ordered, margin=0.2), "my", 3.0) == 1.2)
+meter = {"key": "mx", "label": "x", "weekly": 0.5, "left": 0.5, "f5": None}
+found = report.handover(ordered, meter, 0.2, 0.05)
+check("popup: the leader hands over once its Pace falls a Margin under the rival's",
+      found is not None and found[1] == "b@y" and abs(found[0] - 0.15) < 0.006, repr(found))
+alone = {"tier": 2, "leader": "a@x", "rows": [lane_row("a@x", "mx", 1.0)]}
+found = report.handover(alone, meter, 0.2, 0.05)
+check("popup: a lone leader runs down to the Gate", found is not None and found[1] is None
+      and abs(found[0] - 0.45) < 0.006, repr(found))
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {', '.join(fails)}"))
 sys.exit(1 if fails else 0)
