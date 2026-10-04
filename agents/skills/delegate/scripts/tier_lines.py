@@ -45,7 +45,7 @@ def parse_tier_lines(text, lanes_doc):
 
 def unnamed_carried(parsed, carried):
     """The carried lanes a set of lines does not name. They go off: "if it's not
-    in the tier list, it's not used" (Orin, 2026-09-12; ticket 28).
+    in the tier list, it's not used" (the user, 2026-09-12; ticket 28).
 
     Lines that name no lane in the catalog decide nothing, so they switch nothing
     off: a clipboard holding the wrong text must not empty the catalog."""

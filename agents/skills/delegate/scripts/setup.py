@@ -35,7 +35,7 @@ AA_FIXTURE = "aa-accepted.json"
 # where their agent files live and what they hold is profile data
 # (orchestrators.py); setup writes files only for a profile that declares them.
 # The catalog is machine-local, so its agent files are too: they go straight
-# into the profile's agents directory, and never into the repo (Orin,
+# into the profile's agents directory, and never into the repo (the user,
 # 2026-09-29).
 
 

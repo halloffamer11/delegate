@@ -2,13 +2,13 @@
 
 **What to build:** Two entry problems, one surface.
 
-**The wrappers ask Orin to type flags he will never type.** `/delegate-codex` today heads its body with `(--lane <name> | --model <slug>) </abs/brief.md> [--write </abs/worktree>] [--effort low|medium|high|xhigh]`. The intent was never that Orin resolves a lane by hand. Typing the skill name means *use this harness*; which lane inside that harness, at what effort, is the orchestrating agent's judgement, constrained by whatever Orin says in plain words alongside it. For example:
+**The wrappers ask the user to type flags he will never type.** `/delegate-codex` today heads its body with `(--lane <name> | --model <slug>) </abs/brief.md> [--write </abs/worktree>] [--effort low|medium|high|xhigh]`. The intent was never that the user resolves a lane by hand. Typing the skill name means *use this harness*; which lane inside that harness, at what effort, is the orchestrating agent's judgement, constrained by whatever the user says in plain words alongside it. For example:
 
     /delegate-codex dont use astra, but any other lower model is ok. maximum effort medium
 
-The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the lane with the machinery that already exists — `rank.py <class> --harnesses codex --json` returns the ranked codex lanes as parseable data — then applies the stated exclusions and the effort cap to that list and dispatches the survivor through `delegate.py dispatch`. It states the pick and the reason in one line before it runs. When the constraints eliminate every lane it stops and names the constraint that did it; falling back silently to a lane Orin excluded is worse than not dispatching.
+The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the lane with the machinery that already exists — `rank.py <class> --harnesses codex --json` returns the ranked codex lanes as parseable data — then applies the stated exclusions and the effort cap to that list and dispatches the survivor through `delegate.py dispatch`. It states the pick and the reason in one line before it runs. When the constraints eliminate every lane it stops and names the constraint that did it; falling back silently to a lane the user excluded is worse than not dispatching.
 
-`disable-model-invocation: true` **stays** on all four wrappers. They are Orin's manual path. The model never fires them.
+`disable-model-invocation: true` **stays** on all four wrappers. They are the user's manual path. The model never fires them.
 
 **The agent needs the same routing without the wrapper.** `/delegate` is model-invocable and gains the same prose constraint reading: a harness to prefer or avoid, models to exclude, a ceiling on effort, taken from the user's own words in the surrounding request. Ranking is otherwise unchanged — the tier ceiling, pace order, and pace margin still decide. Both paths reach `delegate.py`; neither is a special case of the other.
 
@@ -18,7 +18,7 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 
 **Blocked by:** 10 (the script paths move; writing them twice is waste). 07b for `setup_tui.py` to exist behind the setup entry.
 
-**Status:** implemented 2026-09-10 (`a0893ee`) on `main`; the merge is done. The one unticked box is Orin's: type each of the four `/delegate-*` wrappers once with a plain-language constraint.
+**Status:** implemented 2026-09-10 (`a0893ee`) on `main`; the merge is done. The one unticked box is the user's: type each of the four `/delegate-*` wrappers once with a plain-language constraint.
 
 - [x] The four wrappers keep `disable-model-invocation: true` and gain an `argument-hint` naming plain-language constraints
 - [x] No wrapper body documents a flag grammar; each reads `$ARGUMENTS` as prose
@@ -30,7 +30,7 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 - [x] `preamble.md` is assembled per class: the 40-tool-call sentence appears for `scout` and `mechanical` and is absent for `impl` and `hard-impl`
 - [x] A dispatched `hard-impl` prompt contains no tool-call sentence, verified by reading `<run>/prompt.md`
 - [x] A per-dispatch override drops the leash for one job of any class, and is recorded in `dispatch.json`
-- [ ] Orin types each of the four wrappers once with a plain-language constraint and gets the lane he expected
+- [ ] The user types each of the four wrappers once with a plain-language constraint and gets the lane he expected
 
 ## Landed 2026-09-10
 
@@ -53,4 +53,4 @@ none would have been leashed by accident.
 declares which CLIs are present, so filtering with it makes the ranker print
 `cli absent` for a CLI that is installed.
 
-The last box needs Orin: type each of the four wrappers once with a constraint.
+The last box needs the user: type each of the four wrappers once with a constraint.

@@ -6,7 +6,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** 01 Scripts run on the Python every entry point calls; 07 One way to ask whether a harness CLI is installed.
 
-**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-any-harness-next-v75vlw`). All boxes done, with one boundary: the four places that name `claude` as the orchestrator (`ORCHESTRATOR` in `delegate.py`, the native agent files in `setup.py`, `report.ignored` and the eval's orchestrator commands) are ticket 13's, which removes them. Raised by Orin 2026-10-02.
+**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-any-harness-next-v75vlw`). All boxes done, with one boundary: the four places that name `claude` as the orchestrator (`ORCHESTRATOR` in `delegate.py`, the native agent files in `setup.py`, `report.ignored` and the eval's orchestrator commands) are ticket 13's, which removes them. Raised by the user 2026-10-02.
 
 What landed: `scripts/harnesses/` with `base.Harness` and one module per harness (`claude`, `codex`, `agy`, `grok`), holding each harness's binary, efforts, effort-in-slug, vendor, list command and parser, Meter probe, relay flags and prompt note. `catalog`, `discover`, `usage`, `delegate`, `bench`, `bench_page`, `browser_probes` and `setup_tui` iterate the registry; `ads.sh` reads the relay list from `python3 scripts/harnesses relays`. No behaviour changed. Fixture data is untouched; test code changed only where a function moved (the parsers, the probes, `agy_family`, `claude_reset`, the count legend). New: `tests/test_harnesses.py`, which also proves a CLI is found by its adapter's binary, not the harness name. Verified with `make test` on Python 3.9 and 3.13 and `make eval-ping EVAL_ARGS=--offline`.
 

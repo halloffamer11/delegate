@@ -1,8 +1,8 @@
 # 13 — Staged edits and one save
 
-**What to build:** Orin asked for "a way to save the configuration" and chose staged
+**What to build:** The user asked for "a way to save the configuration" and chose staged
 edits, 2026-09-20. Today each `J`/`K`, `H`/`L`, Gate and Margin action writes the project
-file at once. A control surface where Orin tries different Orders must not write a file on
+file at once. A control surface where the user tries different Orders must not write a file on
 each key press.
 
 **Blocked by:** 12 `deck` is the production dashboard
@@ -24,14 +24,14 @@ each key press.
   keys, the project symlink refusal and the no-op rule stay.
 - Conflict: staging records the project bytes and the global signatures when the first
   change is staged. If either changed on disk before the save, the save is refused, the
-  screen says which file changed, and the staged changes stay so Orin can reload (`r`
+  screen says which file changed, and the staged changes stay so the user can reload (`r`
   asks before it drops staged changes) or save again after a look.
 - A save that would write several documents either writes all or none that it can
   detect: preview every document first, apply only when every preview passes.
 
 ## Acceptance
 
-**Status:** landed 2026-09-20 (`b2d0c0d`), merged to `main` by Orin as `0ffffea`. The last box is Orin's: drive staging, undo and save once in a Herdr pane and say so. The worker decisions under Landed are open to Orin as well.
+**Status:** landed 2026-09-20 (`b2d0c0d`), merged to `main` by the user as `0ffffea`. The last box is the user's: drive staging, undo and save once in a Herdr pane and say so. The worker decisions under Landed are open to the user as well.
 
 - [x] With staged changes and no save, the bytes of every file under `.delegate/` and of
       the global catalog are unchanged (test at the public model boundary).
@@ -46,7 +46,7 @@ each key press.
       URL call.
 - [x] `python3 tools/delegate-dashboard/test_dashboard.py` passes; the context file and the
       `?` help list the new keys.
-- [ ] Orin drives staging, undo and save once in a Herdr pane.
+- [ ] The user drives staging, undo and save once in a Herdr pane.
 
 ## Landed, 2026-09-20
 
@@ -66,7 +66,7 @@ implementer: the quit prompt is tested through the real key step, now `dashboard
 socket and URL calls across stage, undo and save; the staged-ranking test asserts the Pick
 reason. The fourth finding, private `catalog._` helpers read by tuple position, is ticket 14.
 
-Decisions the ticket did not settle, all the worker's, all open to Orin: the old immediate
+Decisions the ticket did not settle, all the worker's, all open to the user: the old immediate
 writers stay in the model with no key bound, as the byte-for-byte reference; on a conflict
 the first `w` reports and reloads and keeps the staging, and a second `w` saves onto the
 new state; two edits of one field are two changes, so `u` steps back one edit; `r` asks

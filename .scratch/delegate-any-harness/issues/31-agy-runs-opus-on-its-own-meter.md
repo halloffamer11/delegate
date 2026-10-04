@@ -1,15 +1,15 @@
 # 31 — agy runs Opus on its own Meter
 
-**What to build:** Antigravity now serves Opus 5.5, and Orin wants it as a Lane: discovery
-finds it, and its Remaining is read from agy's own limit, not from Claude Code's (Orin,
+**What to build:** Antigravity now serves Opus 5.5, and the user wants it as a Lane: discovery
+finds it, and its Remaining is read from agy's own limit, not from Claude Code's (the user,
 2026-10-03: "we should make sure that we're scanning for the Opus lane there, and that's
 a separate usage limit and everything").
 
 This reverses part of an earlier ruling. Redesign ticket 33 hides other vendors' models on
-agy; Orin, 2026-09-22, on the `agy-claude-gpt` pool: "ignore the Gemini Claude pool". The
+agy; the user, 2026-09-22, on the `agy-claude-gpt` pool: "ignore the Gemini Claude pool". The
 reversal covers Opus only. Sonnet and GPT-OSS on agy stay hidden.
 
-**What agy reports (Orin's Mac, 2026-10-03).** `agy models` now lists Opus and Sonnet 5.5
+**What agy reports (the user's Mac, 2026-10-03).** `agy models` now lists Opus and Sonnet 5.5
 with the effort in the slug, like Gemini, and no `Fetching available models...` line:
 
 ```text
@@ -58,9 +58,9 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None.
 
-**Status:** ready-for-human. Built 2026-10-04; Orin's box is the last one.
+**Status:** ready-for-human. Built 2026-10-04; the user's box is the last one.
 
-- [x] Orin's 2026-10-03 `agy models` output becomes the fixture
+- [x] The user's 2026-10-03 `agy models` output becomes the fixture
       (`tests/fixtures/discover/agy-models.txt`). His paste showed only the
       non-Gemini lines, so the Gemini lines stay as they were; the
       `Fetching available models...` header is gone, and a separate test keeps
@@ -90,7 +90,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
       `(harness, family)`. Tests: one row reaches both harnesses; Claude Code's
       Opus at high is dominated by its xhigh while agy's high is not; agy's low
       is still dominated by agy's medium. Both fail on the old code.
-- [ ] Orin's box: one `delegate global` run proposes the Lane, `delegate catalog check`
+- [ ] The user's box: one `delegate global` run proposes the Lane, `delegate catalog check`
       passes, and `delegate status` shows `agy-claude-gpt` with real figures.
 
 Left as is: the benchmark page's evidence table (`bench.evidence_records`) and

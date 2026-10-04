@@ -44,10 +44,10 @@ already fixed on disk, because this ticket and the skill's context file both sti
 broken. A half-fixed defect that documentation still reports as fully broken is worse than either
 state alone.
 
-**Status:** closed 2026-09-10 (see "Landed" at the end). Raised by Orin 2026-09-09: "debug why they failed. this is a defect in the delegate skill itself."
+**Status:** closed 2026-09-10 (see "Landed" at the end). Raised by the user 2026-09-09: "debug why they failed. this is a defect in the delegate skill itself."
 
 - [x] A cancelled-at-the-gate run returns `blocked` with a reason naming the permission gate, not `partial` — reason `permission gate cancelled the run at <tool>`, commit `59fccab`
-- [x] A read-only dispatch to a lane with no working read-only mode is refused before the relay starts, with the reason — **closed without code, Orin 2026-09-10**: the pin fixed grok and agy, so no lane is known to lack a working read-only mode, and a refusal list would have no entries. The `blocked` gate reading (box 1) is what makes the next failure of this shape legible. claude's relay still passes `--permission-mode plan` headless (last section), with its tools cut to `Read,Glob,Grep` by `--tools`: `Read` ran with no permission denial in both real read-only claude runs (2026-09-09), `Glob` and `Grep` have not been exercised, and it has no shell or web tool by design
+- [x] A read-only dispatch to a lane with no working read-only mode is refused before the relay starts, with the reason — **closed without code, the user 2026-09-10**: the pin fixed grok and agy, so no lane is known to lack a working read-only mode, and a refusal list would have no entries. The `blocked` gate reading (box 1) is what makes the next failure of this shape legible. claude's relay still passes `--permission-mode plan` headless (last section), with its tools cut to `Read,Glob,Grep` by `--tools`: `Read` ran with no permission denial in both real read-only claude runs (2026-09-09), `Glob` and `Grep` have not been exercised, and it has no shell or web tool by design
 - [x] The relay's meaning of `--read-only` per harness is written down in the skill's own context file, since it differs and the difference is load-bearing (commit 31154e5), and corrected for the fork pin on branch `effort-data-tooling`
 - [x] grok read-only executes tools: fork pin `f14dc1e`, sandbox-enforced rather than plan mode (commit 81011aa)
 - [x] agy read-only executes tools, or `--read-only` on agy is refused before dispatch — executes tools: fork pin `1ff8bd6` maps it to `--sandbox --dangerously-skip-permissions` (see "Pinned 2026-09-10"; re-checked 2026-09-10: `ADS_COMMIT` and the installed clone's HEAD are both `1ff8bd6`, and the installed agy relay has no `--mode plan`)
@@ -165,7 +165,7 @@ Commit `59fccab`, and the docs commit after it, on `bench-aa-effort-slugs`.
   grok runs that ended `end_turn`. Codex (24 runs) and claude (2) write no `end` event, and agy
   (51) writes no `events.jsonl`, so in practice this is grok's shape. The code does not filter by
   harness, on purpose: a gate cancel in this shape means the same on any harness.
-- **Box 2** closed without code, Orin's call; the box says why.
+- **Box 2** closed without code, the user's call; the box says why.
 - **Field proof of the grok pin.** Both reviews of this change ran read-only on
   `grok46-high@grok` and returned `done` (231 s and 290 s).
 - **Tripwire gotcha.** Both reviews came back with "read-only tripwire fired". The cause was this

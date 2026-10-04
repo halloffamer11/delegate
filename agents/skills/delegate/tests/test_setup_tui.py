@@ -1752,7 +1752,7 @@ try:
            and "sol-ultra@codex" not in t4
            and all(eff == sorted(eff, key=setup_tui.effort_rank) for _g, eff in t4_groups),
            repr((carry_rows, t4)))
-    # the review page is by tier and in Orin's order, so the model grouping
+    # the review page is by tier and in the user's order, so the model grouping
     # does not apply there (ticket 28): with no lines and no catalog order a
     # tier starts in benchmark order
     move_to(w, "fable-low@claude")

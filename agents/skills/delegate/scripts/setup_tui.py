@@ -281,7 +281,7 @@ def start_facts(lanes_path, routing_path, page_path, discovery, width=80,
     """What the start page says, and what `--plain` prints first: the two files
     it will write, the benchmark page, where the benchmark rows came from, what
     the refresh proposes, and the discovery notices. Facts only — the terms are
-    defined in CONTEXT.md, and the people who run this know them (Orin,
+    defined in CONTEXT.md, and the people who run this know them (the user,
     2026-09-11; tickets 25 and 33)."""
     return [
         fit_line(f"Will write {lanes_path}", width),
@@ -365,7 +365,7 @@ class Wizard:
         self.cursor = 0
         self.message = ""
         self._review_order = []
-        # Orin's order inside each tier, as the review page shows it (ticket 28),
+        # The user's order inside each tier, as the review page shows it (ticket 28),
         # and each lane's place in the last lines applied, which starts it
         self._tier_order = {tier: [] for tier in range(1, 5)}
         self._line_order = {}
@@ -429,7 +429,7 @@ class Wizard:
         proposed — and every later page starts over from what it found, with
         the `--tiers-from` lines applied again. A rescan never discards a
         choice: once one exists, `r` says to quit and start again, and does
-        nothing else (Orin, 2026-09-24). A scrub or a rebuild that fails is a
+        nothing else (the user, 2026-09-24). A scrub or a rebuild that fails is a
         message and leaves the wizard as it was; nothing here writes a file."""
         if not self.rescan_ready():
             return
@@ -532,7 +532,7 @@ class Wizard:
         """The lanes as this session holds them, for the one-Meter warning.
 
         Carry and Tier come from the wizard, not from the catalog on disk, so
-        the review page warns about the Tiers Orin is about to write rather
+        the review page warns about the Tiers the user is about to write rather
         than the ones he started from (ticket 29).
         """
         return {
@@ -603,7 +603,7 @@ class Wizard:
         """Where a lane first sits in its tier: the order of the lines applied,
         then an `order` the catalog already gives it at this tier, then
         benchmark order. The model grouping of ticket 26 does not apply here:
-        the order is Orin's (ticket 28)."""
+        the order is the user's (ticket 28)."""
         line = self._line_order.get(name)
         original = self._original_lanes["lanes"][name]
         kept = original.get("order") if original.get("tier") == self._assigned.get(name) else None
@@ -1365,7 +1365,7 @@ class Wizard:
             # What the scrub found, per harness: whether it answered, how many
             # models it listed, and the Lanes the current generation adds and
             # supersedes. It ran at launch, before this page, and `r` runs it
-            # again; nothing on this page said so, and Orin asked when it ran.
+            # again; nothing on this page said so, and the user asked when it ran.
             live = isinstance(self.discovery, dict)
             # a saved snapshot of harness facts alone lists no model, which is
             # not the same as a harness that listed none
@@ -1497,7 +1497,7 @@ class Wizard:
                 columns.extend([*aa_names, "AA mean rank"])
             here = self._review_cursor_name()
             rows = []
-            # One section per tier, 4 to 1, each numbered in Orin's order
+            # One section per tier, 4 to 1, each numbered in the user's order
             # (ticket 28). The section line states the tier, so a line needs no
             # tier box; the number is the place ranking tries it in. An empty
             # tier keeps its section, as the place 1-4 can move a lane to.
@@ -1530,7 +1530,7 @@ class Wizard:
                 defs=REVIEW_MOVE_DEFS,
                 legend=legend,
                 # Coverage, not a verdict on the Tier: which lanes a Tier
-                # carries stays Orin's decision (ticket 29). A warning, so it
+                # carries stays the user's decision (ticket 29). A warning, so it
                 # is drawn as one and never sits in the dim legend.
                 warnings=meter_dependency_lines(self._meter_coverage()),
             )

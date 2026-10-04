@@ -72,7 +72,7 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "enabled": false
     },
     "fable-medium@claude": {
@@ -93,7 +93,7 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "enabled": false
     },
     "fable-high@claude": {
@@ -114,7 +114,7 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "order": 4
     },
     "fable-max@claude": {
@@ -135,7 +135,7 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "order": 1
     },
     "haiku-high@claude": {
@@ -153,7 +153,7 @@
       },
       "tier": 1,
       "basis": "Claude general pool; native lane (ticket 22)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are not measurements. Haiku 4.5 does not accept effort (code.claude.com/docs/en/model-config lists the models that take effort and says \"Models not listed here do not support effort\"; Haiku is not listed); high is a label only, so no other effort of it is a lane. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are not measurements. Haiku 4.5 does not accept effort (code.claude.com/docs/en/model-config lists the models that take effort and says \"Models not listed here do not support effort\"; Haiku is not listed); high is a label only, so no other effort of it is a lane. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Claude 4.5 Haiku"
       ],
@@ -174,7 +174,7 @@
       },
       "tier": 2,
       "basis": "Claude general pool; native lane (ticket 22)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are not measurements. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are not measurements. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Sonnet 5"
       ],
@@ -195,7 +195,7 @@
       },
       "tier": 1,
       "basis": "same model as sonnet-high@claude; effort 'low' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Sonnet 5"
       ],
@@ -216,7 +216,7 @@
       },
       "tier": 1,
       "basis": "same model as sonnet-high@claude; effort 'medium' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Sonnet 5"
       ],
@@ -237,7 +237,7 @@
       },
       "tier": 2,
       "basis": "same model as sonnet-high@claude; effort 'xhigh' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Sonnet 5"
       ],
@@ -258,7 +258,7 @@
       },
       "tier": 2,
       "basis": "same model as sonnet-high@claude; effort 'max' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sonnet-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Sonnet 5"
       ],
@@ -279,7 +279,7 @@
       },
       "tier": 3,
       "basis": "Claude general pool; native lane (ticket 22)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are not measurements. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are not measurements. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Opus 5"
       ],
@@ -300,7 +300,7 @@
       },
       "tier": 1,
       "basis": "same model as opus-high@claude; effort 'low' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Opus 5"
       ],
@@ -321,7 +321,7 @@
       },
       "tier": 1,
       "basis": "same model as opus-high@claude; effort 'medium' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Opus 5"
       ],
@@ -342,7 +342,7 @@
       },
       "tier": 3,
       "basis": "same model as opus-high@claude; effort 'xhigh' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Opus 5"
       ],
@@ -363,7 +363,7 @@
       },
       "tier": 3,
       "basis": "same model as opus-high@claude; effort 'max' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from opus-high@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
       "published_as": [
         "Opus 5"
       ],
@@ -384,7 +384,7 @@
       },
       "tier": 4,
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight 40 is a placeholder set by the session. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight 40 is a placeholder set by the session. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
       "order": 5
     },
     "astra-low@codex": {
@@ -402,7 +402,7 @@
       },
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
       "order": 7
     },
     "astra-medium@codex": {
@@ -420,7 +420,7 @@
       },
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
       "order": 6
     },
     "astra-xhigh@codex": {
@@ -438,7 +438,7 @@
       },
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
       "enabled": false
     },
     "astra-max@codex": {
@@ -456,7 +456,7 @@
       },
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
       "order": 2
     },
     "astra-ultra@codex": {
@@ -474,7 +474,7 @@
       },
       "tier": 4,
       "basis": "unscoreable: no published source reports ultra on any benchmark for any model; ultra is maximum reasoning with automatic task delegation, which contradicts the worker preamble",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
       "enabled": false
     },
     "sol-high@codex": {
@@ -510,7 +510,7 @@
       },
       "tier": 1,
       "basis": "same model as sol-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "sol-medium@codex": {
@@ -528,7 +528,7 @@
       },
       "tier": 3,
       "basis": "same model as sol-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "order": 6
     },
     "sol-xhigh@codex": {
@@ -546,7 +546,7 @@
       },
       "tier": 4,
       "basis": "same model as sol-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "sol-max@codex": {
@@ -564,7 +564,7 @@
       },
       "tier": 4,
       "basis": "same model as sol-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "sol-ultra@codex": {
@@ -582,7 +582,7 @@
       },
       "tier": 4,
       "basis": "unscoreable: no published source reports ultra on any benchmark for any model; ultra is maximum reasoning with automatic task delegation, which contradicts the worker preamble",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from sol-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "terra-high@codex": {
@@ -618,7 +618,7 @@
       },
       "tier": 1,
       "basis": "same model as terra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "terra-medium@codex": {
@@ -636,7 +636,7 @@
       },
       "tier": 1,
       "basis": "same model as terra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "terra-xhigh@codex": {
@@ -654,7 +654,7 @@
       },
       "tier": 3,
       "basis": "same model as terra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "terra-max@codex": {
@@ -672,7 +672,7 @@
       },
       "tier": 3,
       "basis": "same model as terra-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "terra-ultra@codex": {
@@ -690,7 +690,7 @@
       },
       "tier": 3,
       "basis": "unscoreable: no published source reports ultra on any benchmark for any model; ultra is maximum reasoning with automatic task delegation, which contradicts the worker preamble",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from terra-high@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "grok46-high@grok": {
@@ -724,7 +724,7 @@
         "out": 1.2
       },
       "tier": 1,
-      "basis": "benchmarks overstate it (Orin)",
+      "basis": "benchmarks overstate it (the user)",
       "enabled": false,
       "note": "cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18."
     },
@@ -743,7 +743,7 @@
       },
       "tier": 1,
       "basis": "same model as luna-low@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "enabled": false
     },
     "luna-high@codex": {
@@ -761,7 +761,7 @@
       },
       "tier": 1,
       "basis": "same model as luna-low@codex; effort 'high' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "order": 1
     },
     "luna-xhigh@codex": {
@@ -779,7 +779,7 @@
       },
       "tier": 2,
       "basis": "same model as luna-low@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "order": 2
     },
     "luna-max@codex": {
@@ -797,7 +797,7 @@
       },
       "tier": 2,
       "basis": "same model as luna-low@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from luna-low@codex; a different effort spends a different share of the meter and needs a different time. cache_write: developers.openai.com/api/docs/pricing, short-context row, read 2026-09-18.",
       "order": 1
     },
     "flash-high@agy": {
@@ -832,7 +832,7 @@
       },
       "tier": 1,
       "basis": "same model as flash-high@agy; effort 'low' offered by agy models (slug suffix) and agy --help, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from flash-high@agy; a different effort spends a different share of the meter and needs a different time.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from flash-high@agy; a different effort spends a different share of the meter and needs a different time.",
       "enabled": false
     },
     "flash-medium@agy": {
@@ -850,7 +850,7 @@
       },
       "tier": 3,
       "basis": "same model as flash-high@agy; effort 'medium' offered by agy models (slug suffix) and agy --help, 2026-09-12 (ticket 19)",
-      "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from flash-high@agy; a different effort spends a different share of the meter and needs a different time.",
+      "note": "The tier is the user's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from flash-high@agy; a different effort spends a different share of the meter and needs a different time.",
       "order": 5
     }
   }

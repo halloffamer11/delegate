@@ -645,7 +645,7 @@ def _plots_section(effort_rows, lanes_doc, proposals, bench=None):
 
 def _price_section(lanes_doc):
     """"Price per model": what every model in the catalog lists, input and
-    output, on one log scale (Orin, 2026-09-22; ticket 36).
+    output, on one log scale (the user, 2026-09-22; ticket 36).
 
     The plot is drawn from the JSON below it; the table under it carries the
     same figures for a reader without it.

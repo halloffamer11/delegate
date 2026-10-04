@@ -7,7 +7,7 @@ its predecessor's global `order`) landed at the bottom of every project that had
 that Tier. A Lane with no global Order still goes last, by name. Named Lanes keep the
 project's sequence.
 
-From ticket 18: Orin picked "Queue + follow" on 2026-10-03.
+From ticket 18: the user picked "Queue + follow" on 2026-10-03.
 
 Spec: `.scratch/delegate-any-harness/spec.md`
 

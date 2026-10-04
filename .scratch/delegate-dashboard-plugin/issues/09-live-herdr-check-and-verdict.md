@@ -14,12 +14,12 @@ Part of [01 Prototype the project delegation dashboard](01-prototype-project-del
 
 **Blocked by:** 07 Edit Gate and Margin; 08 Herdr plugin launcher and make target
 
-**Status:** done — technical checks passed 2026-09-14; Orin's verdict recorded 2026-09-15
+**Status:** done — technical checks passed 2026-09-14; the user's verdict recorded 2026-09-15
 
 - [x] The dashboard opens as a targeted split and in one other placement, pinned to the invoking project.
 - [x] Order, Gate and Margin edits in a disposable project change the file and the Tier leader together.
 - [x] No worker dispatched and no repeated vendor probe during the check.
-- [x] Orin can predict the marked Tier leader after each kind of edit.
+- [x] The user can predict the marked Tier leader after each kind of edit.
 - [x] Ticket 01 records the tested question, the verdict and the throwaway branch pointer.
 
 ## Landed, 2026-09-14
@@ -56,7 +56,7 @@ usage-cache hash stayed `34cd3eabc12e983fda4eb65d2c1029c6860cf97c`. The disposab
 global lanes, routing, and Meter hashes also stayed unchanged. No worker launch
 or vendor probe was performed during this window.
 
-Technical verdict and branch pointer are in ticket 01. Orin's predictability
+Technical verdict and branch pointer are in ticket 01. The user's predictability
 verdict is still pending. Independent review
 is recorded in [the review record](../research/2026-09-14-review.md). Popup routing was
 checked against Herdr's installed schema, but popup was not opened live.
@@ -66,7 +66,7 @@ fixture. It showed `p` for Project order and `g` for global fallback after a par
 Project order edit. The legend identifies fallback as derived. The pane was closed
 with `q`; no live policy was changed.
 
-User test, 2026-09-14: Orin opened the dashboard in `w1Y:p9` and saved project
+User test, 2026-09-14: the user opened the dashboard in `w1Y:p9` and saved project
 Gate 0% and Margin 50%. Herdr's visible pane and the installed skill's
 `rank.py impl --tier 3 --meters ~/.cache/delegate/usage.json` both selected
 `grok46-high@grok`. Normal `impl` (Tiers 2-3) selected `flash-high@agy` through
@@ -92,16 +92,16 @@ commit on this branch, checked with `git cherry`). The review evidence stays in
 
 ## Verdict, 2026-09-15
 
-Orin answered both questions yes: a Herdr plugin is the right host for a persistent
+The user answered both questions yes: a Herdr plugin is the right host for a persistent
 delegation control surface, and project Order, Gate and Margin controls give useful
 manual steering. The prediction box is ticked on that answer and on the 2026-09-14
 user test above, where the visible leader matched `rank.py impl --tier 3`.
 
-Orin also directed backend integration into `main`. Branch `dashboard-backend`
+The user also directed backend integration into `main`. Branch `dashboard-backend`
 carries tickets 02-04 as cherry-picks of `06a2f27`, `71eb342`, `bea657d`, `aceaf2f`,
 the shared Meter validity commits `3058e23` and `37dfa3c`, the ticket filing commit
 `ea60b33`, and one docs commit, on top of `main` at `7225507`. All 13 delegate test
-scripts pass there. Orin fast-forwarded `main` to `2a8e323` the same day; the
+scripts pass there. The user fast-forwarded `main` to `2a8e323` the same day; the
 installed skill then said `ok` for this project's `.delegate/routing.json` and
 picked `grok46-high@grok` for exact Tier 3 with the cached Meters. The prototype
 UI, tickets 05-09 and this record stay on this branch.

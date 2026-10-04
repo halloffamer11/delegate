@@ -4,7 +4,7 @@
 were the same work as 1% of codex's or grok's. It is not, and a plan change moves it:
 going from Codex Pro to Codex Plus shrinks what 100% of the codex Meter buys. The Meters
 are different currencies and need a conversion factor, so that Pace, and the steal that
-compares it, compare like with like. Raised by Orin 2026-09-27: "Let's not add that in
+compares it, compare like with like. Raised by the user 2026-09-27: "Let's not add that in
 now, but put that in the backlog."
 
 What exists today:
@@ -16,7 +16,7 @@ What exists today:
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human, triaged 2026-10-04. Orin deferred the build on
+**Status:** ready-for-human, triaged 2026-10-04. The user deferred the build on
 2026-09-27; what is left for him is the choice below.
 
 **Triage.** Pace is Remaining over the share of the Window left, so it is already a ratio
@@ -33,6 +33,6 @@ data: each Meter already carries `price_month`, a plan change already updates it
 share`). The alternative build is a steal that compares weekly dollars left instead of
 Pace, with Margin in dollars.
 
-- [ ] Orin decides the common unit, and how each Meter's factor is set and updated when
+- [ ] The user decides the common unit, and how each Meter's factor is set and updated when
       a plan changes.
 - [ ] Ranking compares converted quota, and a plan change needs only its factor changed.

@@ -797,7 +797,7 @@ def single_meter_tiers(lanes):
 
     Coverage, not judgment (ticket 29): when every carried Lane of a Tier drains
     one Meter, that Meter falling under the Gate takes the whole Tier with it.
-    Which Lanes a Tier carries is Orin's decision and this never questions it.
+    Which Lanes a Tier carries is the user's decision and this never questions it.
     A Tier with no carried Lane is not named.
     """
     out = []

@@ -26,7 +26,7 @@ so this ticket is numbered 22.
   lane it generates also needs a `lane-<model-effort>.md` agent file (decision 7).
   Haiku 4.5 does not accept effort, so a Haiku lane at any effort is a label only.
 
-## Decisions (Orin, 2026-09-11, grill session)
+## Decisions (the user, 2026-09-11, grill session)
 
 1. **Each class has a floor and a ceiling.** In `routing.json`,
    `"classes": {"<class>": {"floor": f, "ceiling": c}}` replaces `classTier`, with
@@ -49,7 +49,7 @@ so this ticket is numbered 22.
    - `vetoed:gate, <lane>: <meter> meter N% left < gate G%`
    - `vetoed:cli, <lane>: <harness> not on PATH`
 
-   The layout of the rank output (grouped by meter, then tier) is for Orin to
+   The layout of the rank output (grouped by meter, then tier) is for the user to
    redraft. It is not part of this ticket.
 6. **Native Claude lanes.** The orchestrator harness is fixed as `claude` for now
    (`ORCHESTRATOR = "claude"` in `delegate.py`). A lane on the orchestrator's harness
@@ -80,7 +80,7 @@ so this ticket is numbered 22.
 10. **The Delegation section of `~/.claude/CLAUDE.md` goes entirely.** That includes
     "Fable never runs as a worker", `why-claude`, and the Workflow sizing line. The
     skill is the abstraction. This settles ticket 09's open decision. The file is
-    Orin's, so he makes the edit.
+    The user's, so he makes the edit.
 11. **`/delegate-claude` spawns natively.**
 
 ## Slices
@@ -111,7 +111,7 @@ definitions, the three lanes in the stowed and sample `lanes.json`, the
       `catalog.py check`. They are in the stowed catalog only; the sample stays the
       spec's starting catalog because five suites use it as a fixture.
 - [x] No test added or changed here reads `~/.config/delegate`, and none checks
-      Orin's tiers. `test_bench_page.py:438`, not changed by this ticket, does read it.
+      The user's tiers. `test_bench_page.py:438`, not changed by this ticket, does read it.
 
 **Verified 2026-09-11** in worktree `delegate-class-range`: all 12 test files pass.
 Both slices were implemented by `flash-high@agy` and checked by the lead. The lead
@@ -133,13 +133,13 @@ breakage in five suites. **Landed on `main` as `71e285c`.**
 - **Fan-out-aware ranking.** A fan-out ranks each job against the same meter
   reading, so N concurrent jobs can empty a 5-hour window that the gate saw as
   healthy. See ticket 15's chunk-dispatch section. Burn rate is not a ranking input.
-- **Redrafting the rank output layout:** Orin.
+- **Redrafting the rank output layout:** The user.
 - **A setup page for the class ranges,** after the carry and tier pages. TUI work
   goes to a Claude Opus agent under `/frontend-design:frontend-design`.
 - **Codex as the orchestrator:** native Codex lanes, and Claude lanes over the relay.
 - **Claude model discovery,** if the `claude` CLI gains a command that lists models.
 
-## Orin's steps after merge
+## The user's steps after merge
 
 - [x] Migrate `~/.config/delegate/routing.json` and
       `~/Documents/daedalus/sienna_purch/.delegate/routing.json` to `classes`.
@@ -159,5 +159,5 @@ breakage in five suites. **Landed on `main` as `71e285c`.**
       Do not pass `--adopt`: it would move the 10-lane live file over the repo's.
       Do not copy `aa-key` into `stow/`: stow would link it, and the repo is public.
 
-**Status:** landed 2026-09-11 (`71e285c`); one step left for Orin: the wizard run
+**Status:** landed 2026-09-11 (`71e285c`); one step left for the user: the wizard run
 and the stow link.

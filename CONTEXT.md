@@ -59,13 +59,13 @@ _Avoid_: ADS as a name for the concept; say relay
 ## Delegate: capability
 
 **Tier**:
-A capability level from 1 (lowest) to 4 (frontier) that Orin gives each lane in setup. It belongs to the lane, not the model. A project may set its own Tier for a lane, and everything that reads a Tier — the Class range, the Gate, Overflow, the Tier leaders — reads the effective one.
+A capability level from 1 (lowest) to 4 (frontier) that the user gives each lane in setup. It belongs to the lane, not the model. A project may set its own Tier for a lane, and everything that reads a Tier — the Class range, the Gate, Overflow, the Tier leaders — reads the effective one.
 
 **Project tier**:
 The Tier a project sets for a lane in `.delegate/lanes.json`, for jobs in that project only. It is the one lane field a project may set; every other field, `enabled` and Order included, stays global. A lane the project moves has no place in its new tier until Project order gives it one.
 
 **Order**:
-A lane's place inside its tier, from 1, that Orin sets on the setup wizard's review page. Ranking sorts by tier, then order, then pace, then lane name; a lane without an order comes after every lane with one.
+A lane's place inside its tier, from 1, that the user sets on the setup wizard's review page. Ranking sorts by tier, then order, then pace, then lane name; a lane without an order comes after every lane with one.
 _Avoid_: priority, rank (when you mean the order)
 
 **Project order**:

@@ -6,7 +6,7 @@ The riskiest assumption in the design is a nested Claude run from inside Claude 
 
 **Blocked by:** 01 Lane catalog and validators.
 
-**Status:** landed 2026-09-09 (`7c76843`) on `main`. The one unticked box is Orin's: a real read-only run reviewed from its run directory (spec acceptance 8).
+**Status:** landed 2026-09-09 (`7c76843`) on `main`. The one unticked box is the user's: a real read-only run reviewed from its run directory (spec acceptance 8).
 
 - [x] The ADS commit is recorded in the skill's context file and the install is reproducible from that record
 - [x] Every run leaves a directory under the delegate cache that outlives the session, and two runs never share one
@@ -17,4 +17,4 @@ The riskiest assumption in the design is a nested Claude run from inside Claude 
 - [x] No run is bounded by a tool-call limit; the lane timeout is the only bound
 - [x] Ledger events keep the existing schema and the TUI still renders them
 - [x] Real smoke: one read-only run on the agy flash lane completes with a run directory
-- [ ] Real smoke: one read-only run on a Claude lane completes from inside Claude Code (spec acceptance 8); Orin reviews the run directory and confirms the result before this ticket closes
+- [ ] Real smoke: one read-only run on a Claude lane completes from inside Claude Code (spec acceptance 8); the user reviews the run directory and confirms the result before this ticket closes

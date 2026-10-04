@@ -32,7 +32,7 @@ history. The repo is public.
   `.scratch/delegate-any-harness/spec.md`, tickets
   `.scratch/delegate-any-harness/issues/`.
 - Modular (complete): `.scratch/delegate-modular/CLAUDE.md`.
-- A ticket's `**Status:**` line names each open box that waits on Orin.
+- A ticket's `**Status:**` line names each open box that waits on the user.
 - Settled decisions: `docs/adr/`. Do not reopen one.
 - Specs and tickets written before the split name dotfiles paths
   (`stow/delegate/`, `~/dotfiles`). Read them as history.

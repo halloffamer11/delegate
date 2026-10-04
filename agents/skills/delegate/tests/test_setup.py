@@ -856,7 +856,7 @@ def case_native_agent_files_follow_the_claude_lanes():
         "---\n"
         "name: lane-opus55-high\n"
         'description: "Delegate native lane opus55-high@claude. Use only when /delegate '
-        'prints a native line that names this agent, or when Orin names this lane."\n'
+        'prints a native line that names this agent, or when the user names this lane."\n'
         "model: claude-opus-5-5\n"
         "effort: high\n"
         "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright\n"
@@ -896,7 +896,7 @@ def case_a_catalog_elsewhere_gets_no_agent_file():
 
 def case_the_live_catalog_gets_the_agent_files():
     """The wizard's default config dir is the live catalog, ~/.config/delegate,
-    and its agent files go to ~/.claude/agents, never the repo (Orin,
+    and its agent files go to ~/.claude/agents, never the repo (the user,
     2026-09-29). Nothing is written: this only asks where."""
     import setup
     found = setup.native_agents_dir(catalog.CONFIG_DIR, CLAUDE_PROFILE)

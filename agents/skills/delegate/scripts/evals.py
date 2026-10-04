@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """evals.py — end-to-end evals for delegate (any-harness ticket 10).
 
-Three evals, as Orin set them out in review on 2026-10-02. They are the
+Three evals, as the user set them out in review on 2026-10-02. They are the
 baseline every later change to the skill keeps passing.
 
   1. ping         For each harness whose CLI is installed, send a trivial job
@@ -65,7 +65,7 @@ The deliverable is exactly `pong`.
 # How each orchestrator is started headless is its profile's `launch`
 # (assets/orchestrators/, or a machine's own profile): an argv with "{prompt}"
 # where the prompt goes, and the prompt. The offline eval stands a stub in for
-# each CLI, so Orin's live run is what proves them. An orchestrator with no
+# each CLI, so the user's live run is what proves them. An orchestrator with no
 # launch is reported as skipped by `orchestrate`.
 
 # The files every relayed run directory holds when it finishes. Others (final.txt,

@@ -104,7 +104,7 @@ def codex_home():
     """The delegate-owned CODEX_HOME, or None when this machine has none.
 
     A codex worker must reach the disposable browser and nothing else that is in
-    Orin's own config: no plugins, no Gmail, no codex-cli, no node_repl, no
+    The user's own config: no plugins, no Gmail, no codex-cli, no node_repl, no
     hooks, no notify, and not ~/.codex/AGENTS.md, which symlinks his global
     CLAUDE.md. A home of delegate's own holds one MCP server and gives exactly
     that, so a run that finds one drops --ignore-user-config and points codex at
