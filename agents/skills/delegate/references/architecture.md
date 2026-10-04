@@ -102,7 +102,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   failed here, and only here are `dispatch.json` and `return.json` written; it spells and parses
   the finish and native lines. Run directories under `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
-  of amElnagdy) at commit `e3541ece582b64b5c4b9b094a78384ad8a6a181e` (branch
+  of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
   reproducible from that constant. The fork carries the grok and agy read-only fixes (redesign
   ticket 14; upstream PRs #119 and #120) and the `kiro-delegate` relay (any-harness ticket 14, not

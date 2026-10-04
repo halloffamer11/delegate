@@ -11,11 +11,12 @@ set -eu
 # and #120 (agy). When they land, point ADS_REPO back at amElnagdy, pin the merge
 # commit, and delete the integration branch.
 #
-# The pin is one commit past that branch: e3541ec on the fork's
-# claude/delegate-any-harness-next-v75vlw adds skills/kiro-delegate (the Kiro
-# relay) on top of both fixes. It is not offered upstream yet.
+# The pin is past that branch, on the fork's claude/delegate-any-harness-next-v75vlw:
+# e3541ec adds skills/kiro-delegate (the Kiro relay) on top of both fixes, and
+# b6ec937 (fork PR #1) makes it read the report from Kiro's runFinished event.
+# Neither is offered upstream yet.
 ADS_REPO=https://github.com/halloffamer11/delegate-skills.git
-ADS_COMMIT=e3541ece582b64b5c4b9b094a78384ad8a6a181e
+ADS_COMMIT=b6ec937700174947234f4f46e4d793d78270545b
 ADS_DIR=${ADS_DIR:-$HOME/.local/share/delegate/ads}
 
 # The relays come from the harness registry, the one list of harnesses.
