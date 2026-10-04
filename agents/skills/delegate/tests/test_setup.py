@@ -859,6 +859,7 @@ def case_native_agent_files_follow_the_claude_lanes():
         'prints a native line that names this agent, or when Orin names this lane."\n'
         "model: claude-opus-5-5\n"
         "effort: high\n"
+        "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright\n"
         "---\n"
         "\n"
         + CLAUDE_PROFILE["native"]["template"][-2] + "\n"
@@ -943,6 +944,32 @@ def case_the_real_layout_saves_the_agent_files():
               and repo_text == "the repo's copy\n"
               and len(lines) == 10)
         return ok, f"found={found} written={written} repo={repo_text!r}"
+
+
+def case_a_template_change_reaches_the_placed_lanes():
+    """An agent file of a Lane already in the catalog that no longer matches
+    the template is rewritten (browser ticket 02's `tools` line), one that
+    matches is left alone, and the run runs with no refresh at all."""
+    import setup
+    _frozen, refreshed, _plan = refresh_fixture()
+    claude = sorted(n for n, l in refreshed["lanes"].items() if l.get("harness") == "claude")
+    old, same = claude[0], claude[1]
+    with tempfile.TemporaryDirectory() as td:
+        old_path = orchestrators.agent_path(CLAUDE_PROFILE, old, td)
+        same_path = orchestrators.agent_path(CLAUDE_PROFILE, same, td)
+        with open(old_path, "w") as f:
+            f.write("---\nname: the old form, no tools line\n---\n")
+        with open(same_path, "w") as f:
+            f.write(setup.native_agent_text(same, refreshed["lanes"][same], CLAUDE_PROFILE))
+        before = os.stat(same_path).st_mtime_ns
+        lines = setup.save_native_agents(None, refreshed, td, CLAUDE_PROFILE)
+        with open(old_path) as f:
+            text = f.read()
+        ok = (lines == [f"updated {old_path}"]
+              and "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright" in text
+              and os.stat(same_path).st_mtime_ns == before
+              and sorted(os.listdir(td)) == sorted([os.path.basename(old_path), os.path.basename(same_path)]))
+        return ok, f"lines={lines} text={text!r}"
 
 
 def case_the_refreshed_rows_reach_the_new_lanes():
@@ -1040,6 +1067,7 @@ for name, case in (
     ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),
     ("the live catalog gets the agent files", case_the_live_catalog_gets_the_agent_files),
     ("the real layout saves the agent files", case_the_real_layout_saves_the_agent_files),
+    ("a template change reaches the placed lanes", case_a_template_change_reaches_the_placed_lanes),
     ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
     ("no-discover fetches no rows", case_no_discover_fetches_no_rows),
     ("plain prints the refresh change lines", case_plain_prints_the_refresh_change_lines),
