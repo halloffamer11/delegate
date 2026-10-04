@@ -13,6 +13,13 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Status:** ready-for-human, raised by Orin 2026-10-02; banding, cost and diversity rules set by Orin in review the same day. Built 2026-10-03: `scripts/tier_proposal.py`, the `tier_proposal` rule in `routing.json` (sample default: AA Intelligence Index, Tier 2 ≥ 30, 3 ≥ 40, 4 ≥ 50, diversity on), the tier pages' `proposed` column and `p`, `tests/test_tier_proposal.py`. How cost informs the proposal: a Tier keeps its band's score-and-cost frontier plus each harness's best Lane; a Lane another beats on both falls a Tier. Waits on Orin: the run on the current generation, which sets the thresholds.
 
+Dry run on Orin's real catalog, 2026-10-04 (AA Intelligence Index, thresholds 30/40/50, 756 accepted rows from 2026-10-03). Read it with one caveat: the run passed every Lane, enabled or not, while the wizard proposes only for carried Lanes (`setup_tui.tier_proposals`), so a disabled Lane there beat enabled ones it will not beat in the wizard.
+
+- 40 Lanes scored; 31 of the proposals differ from today's Tier.
+- Opus 5.5 rises: `opus55-high` to Tier 4 on both Claude Code and agy, `opus55-medium` to 3. `sol61-xhigh` goes to 4, `sol61-medium` to 3.
+- Fable falls: `fable-high` 4 → 1, `fable-xhigh` and `fable-max` 4 → 3. Opus 5.5 scores higher at lower cost per task (e.g. `opus55-xhigh` 56.0 at $3.46 against `fable-xhigh` 53.2 at $5.98), so on this benchmark Fable sits off the frontier in every band. That is the benchmark's verdict, not a bug, and it is the first thing Orin's box has to accept or override.
+- 43 Lanes have no score, among them all 35 Kiro Lanes. Not yet traced; the likely cause is that the accepted AA rows predate the Kiro Lanes (`effort.py aa` fetches a page per Lane model) or that AA prints those models under names formatting cannot bridge (`published_as` fixes that). A fresh `effort.py aa` run in the wizard shows which.
+
 - [x] The benchmark, the Tier thresholds and the diversity rule are catalog data with a validator, not constants in code.
 - [x] Each Lane with a score shows its proposed Tier, the score and benchmark behind it, and its cost per task; a Lane without a score shows no proposal.
 - [x] A test proves the diversity rule: a harness whose best Lane clears a threshold but sits off the cost frontier still gets a proposal in that Tier.
