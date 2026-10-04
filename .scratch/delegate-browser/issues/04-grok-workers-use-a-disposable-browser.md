@@ -26,9 +26,17 @@ With the handshake fixed, `browser_navigate` still fails, with `~/.npm` alone an
 three grants. grok's own log shows Chrome dying under Seatbelt: "bootstrap_check_in
 org.chromium.crashpad.child_port_handshake: Permission denied (1100)", Chrome failing to open
 its `Crashpad/settings.dat`, then SIGSEGV. The crash reporter's check-in is a Mach lookup, not
-a path, and `sandbox.toml` has no field for Mach or IPC, so no grant can fix it. Next, one grok
-run each: Playwright MCP launching Chromium with the crash reporter off (a `--config` with
-launch args), then the bundled Chromium instead of Google Chrome. If neither works, a grok
+a path, and `sandbox.toml` has no field for Mach or IPC, so no grant can fix it. Both follow-up runs failed on 2026-10-04 (grok 1.0.46; `~/.grok/config.toml` restored after):
+
+- Crash reporter off (`--config` with `--disable-crash-reporter`, `--disable-crashpad-for-testing`,
+  `--disable-breakpad`): the flags reached Chrome, which still crashed. A second cause shows in
+  the log: "sandbox_extension_issue_file_to_process failed for /Applications/Google Chrome.app:
+  Operation not permitted", Chrome's own sandbox failing inside grok's Seatbelt profile.
+- Playwright's bundled browser (`--browser chromium`): Playwright maps it to chrome-for-testing,
+  which is not installed (only chromium-1134 to 1234 are), so no browser started.
+
+Two untested ways remain: Chrome with `--no-sandbox` (drops Chrome's own isolation; grok's
+Seatbelt still wraps it), or installing chrome-for-testing (a download). Otherwise a grok
 read-only run cannot browse on macOS, and a browser job on grok goes as a write run, which
 works today.
 
