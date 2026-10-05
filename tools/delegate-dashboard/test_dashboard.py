@@ -30,6 +30,7 @@ import deck
 
 import catalog
 import catalog_edit
+import harnesses
 import rank
 
 
@@ -139,6 +140,12 @@ class ProjectFixture(unittest.TestCase):
 
 
 class DashboardModelTest(ProjectFixture):
+    def test_state_names_the_harnesses_in_registry_order(self):
+        # the order gives each harness its colour, so it is the registry's
+        # and not the order the rows happen to name them in
+        state = self.make_model().state
+        self.assertEqual(state["harnesses"], list(harnesses.NAMES))
+
     def test_project_is_resolved_once_and_remains_pinned(self):
         dashboard = self.make_model()
         other = Path(self.temp.name) / "other"

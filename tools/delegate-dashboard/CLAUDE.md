@@ -86,8 +86,10 @@ Refreshes read the effective catalog and call delegate's canonical `tier_leaders
 they use cached observations and never acquire Meter data or run a vendor probe.
 
 The public state contains `project`, sourced `policy`, read-only `usage`, four `tiers`,
-`project_tiers`, `staged`, `revision` and `error`. Rows remain in effective Order even though the
-canonical ranking result puts its Pick first. Each row's `order_source` comes from the
+`harnesses` (the harness registry's order, which gives each harness its colour: the
+line beside each Lane's Tier rail and the labels of the Harness table),
+`project_tiers`, `staged`, `revision` and `error`. Rows remain in effective Order even
+though the canonical ranking result puts its Pick first. Each row's `order_source` comes from the
 effective catalog: `p` marks project Order and `g` marks global Order or fallback. A
 fallback position can be derived, not literally stored. `project_tiers` is
 `catalog.project_tier_changes()`, `{lane: {from, to}}`, and each row's `tier_source` is
