@@ -30,7 +30,7 @@ brief.
 ## Relays and models
 
 - `sh scripts/ads.sh check` confirms the pinned relays;
-  `sh scripts/ads.sh install` restores them.
+  `sh scripts/ads.sh install` restores them (`make install` runs it too).
 - A model slug that stops resolving is edited in `lanes.json`. These list the
   current ones: `agy models`, `codex debug models`, `grok models`,
   `kiro-cli chat --list-models --format json`.

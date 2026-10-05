@@ -1,7 +1,8 @@
 # delegate/Makefile — install delegate on this machine and run its tools.
 #
 # Usage:
-#   make install             # link the skills, each orchestrator's agents (Claude's courier) and the `delegate` command; write the codex home
+#   make install             # link the skills, each orchestrator's agents (Claude's courier) and the `delegate` command; write the codex home;
+#                            # fetch the relays at the pin (ads.sh install)
 #   make test                # every script test and the dashboard test (stdlib only, no network);
 #                            # PYTHON=python3.X picks the interpreter, 3.9 or newer
 #   make eval-ping           # eval 1: a pong job on every installed harness (spends a little quota);
@@ -54,6 +55,8 @@ install: delegate-codex-home
 	$(PYTHON) $(CURDIR)/agents/skills/delegate/scripts/orchestrators.py agents | while IFS='	' read -r src link; do \
 		mkdir -p "$$(dirname "$$link")" && ln -sfn "$$src" "$$link" && echo "link $$link"; done
 	ln -sfn $(CURDIR)/bin/delegate $(HOME)/.local/bin/delegate
+	@# The relays at the pinned commit. Offline, install still finishes; ads.sh check says what is missing.
+	@sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh install || echo "WARNING: could not fetch the relays; run 'sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh install' once online"
 
 test:
 	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else "make test: delegate needs Python 3.9 or newer; $(PYTHON) is " + sys.version.split()[0])'

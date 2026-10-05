@@ -32,13 +32,15 @@ Needs Python 3.9 or newer as `python3` (macOS ships 3.9 at `/usr/bin/python3`) a
 
 ```sh
 git clone https://github.com/halloffamer11/delegate ~/projects/delegate
-make -C ~/projects/delegate install          # skills, Claude's courier agent, `delegate` command, codex home
+make -C ~/projects/delegate install          # skills, Claude's courier agent, `delegate` command, codex home, relays
 make -C ~/projects/delegate delegate-wizard  # write this machine's catalog
 ```
 
 `install` links each skill as a directory symlink into `~/.claude/skills`,
 `~/.agents/skills` and `~/.kiro/skills`. Set `HARNESS_SKILL_DIRS` in `local.mk` to
-change that list.
+change that list. It also fetches the relays at their pinned commit (`ads.sh install`);
+offline, it warns and finishes, and `sh agents/skills/delegate/scripts/ads.sh check`
+says what is missing.
 
 ## Test
 
