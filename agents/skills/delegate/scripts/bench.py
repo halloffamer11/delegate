@@ -486,16 +486,16 @@ def aa_component_rows(effort_rows, lanes_doc):
         if not isinstance(benchmark, str) or not benchmark.strip() or score is None:
             continue
         effort = row.get("effort")
-        model = published_names.resolve_published_model(row.get("model"), lanes_doc, effort=effort)
-        if model is None:
-            continue
-        out.append({
-            "model": model,
-            "effort": effort_cell_key(effort),
-            "benchmark": benchmark,
-            "score": score,
-            "cost_usd": as_number(row.get("cost_usd")),
-        })
+        # every harness that runs the model gets the row (any-harness ticket 31)
+        for model in published_names.resolve_published_models(row.get("model"), lanes_doc,
+                                                               effort=effort):
+            out.append({
+                "model": model,
+                "effort": effort_cell_key(effort),
+                "benchmark": benchmark,
+                "score": score,
+                "cost_usd": as_number(row.get("cost_usd")),
+            })
     return out
 
 
@@ -1084,19 +1084,36 @@ def cost_basis(source, benchmark=None, sources=None, boards=None):
     return "cost as published; not comparable across sources"
 
 
+def _canonical_model(published, models):
+    """The one lane model a row is drawn and grouped under when several
+    harnesses run the model it names: the model whose slug the name matches
+    whole (`claude-opus-5-5`, one model at every effort) before a member that
+    carries the effort in its slug (`claude-opus-5-5-high` on agy)."""
+    key = published_names.normalize_name(published)
+    whole = [m for m in models if published_names.normalize_name(m) == key]
+    return (whole or list(models))[0]
+
+
 def identity_of(published, lanes_doc, effort=None):
     """Lane model a printed name denotes, or an unresolved reason.
 
     Uses the catalog mapping and never guesses. Conflicting family members and
     a name nobody runs stay unresolved, with the candidates that collided.
+
+    A model two harnesses run resolves on each (`resolve_published_models`):
+    `lane_models` names every one, so every harness's lanes get the row, and
+    `lane_model` is the one the row is grouped under (`_canonical_model`).
+    Resolving against the catalog as one pool gave a row only to the agy
+    member at its effort, so Claude Code's Opus lanes had no rows at all.
     """
-    resolved = resolve_published_model(published, lanes_doc, effort=effort)
-    if resolved is not None:
+    resolved = published_names.resolve_published_models(published, lanes_doc, effort=effort)
+    if resolved:
         return {
-            "lane_model": resolved,
+            "lane_model": _canonical_model(published, resolved),
+            "lane_models": list(resolved),
             "identity": "resolved",
             "identity_reason": None,
-            "candidates": [resolved],
+            "candidates": list(resolved),
         }
     key = published_names.normalize_name(published)
     if not key:
@@ -1160,18 +1177,29 @@ def inspect_targets(query, lanes_doc):
     if family:
         return family, ident
     if ident["lane_model"]:
-        return [ident["lane_model"]], ident
+        return _ident_models(ident), ident
     if ident["candidates"]:
         return list(ident["candidates"]), ident
     return [], ident
 
 
-def _lanes_at(lanes_doc, model, effort):
+def _ident_models(ident):
+    """Every lane model a resolved identity names, the grouping one first."""
+    if not ident.get("lane_model"):
+        return []
+    models = [ident["lane_model"]]
+    return models + [m for m in ident.get("lane_models") or () if m not in models]
+
+
+def _lanes_at(lanes_doc, models, effort):
+    """The lane names running any of `models` (one slug, or several) at `effort`."""
+    if isinstance(models, str):
+        models = [models]
     names = []
     for name, lane in (lanes_doc.get("lanes") or {}).items():
         if not isinstance(lane, dict):
             continue
-        if lane.get("model") == model and effort_attributes(effort, lane.get("effort")):
+        if lane.get("model") in models and effort_attributes(effort, lane.get("effort")):
             names.append(name)
     return sorted(names)
 
@@ -1181,7 +1209,7 @@ def _attributed(ident, effort, lanes_doc):
         return False
     if not effort or effort_cell_key(effort) == UNKNOWN_EFFORT:
         return False
-    return bool(_lanes_at(lanes_doc, ident["lane_model"], effort))
+    return bool(_lanes_at(lanes_doc, _ident_models(ident), effort))
 
 
 def _record_from_effort_row(row, lanes_doc, sources=None, boards=None):
@@ -1201,7 +1229,8 @@ def _record_from_effort_row(row, lanes_doc, sources=None, boards=None):
         "identity": ident["identity"],
         "identity_reason": ident["identity_reason"],
         "candidates": list(ident["candidates"]),
-        "lanes": _lanes_at(lanes_doc, ident["lane_model"], measured) if ident["lane_model"] else [],
+        "lane_models": _ident_models(ident),
+        "lanes": _lanes_at(lanes_doc, _ident_models(ident), measured),
         "score": as_number(row.get("score")),
         "score_unit": row.get("score_unit"),
         "cost_usd": as_number(row.get("cost_usd")),
@@ -1261,7 +1290,8 @@ def _record_from_epoch_row(row, lanes_doc, sources=None, boards=None):
         "identity": ident["identity"],
         "identity_reason": ident["identity_reason"],
         "candidates": list(ident["candidates"]),
-        "lanes": _lanes_at(lanes_doc, ident["lane_model"], measured) if ident["lane_model"] else [],
+        "lane_models": _ident_models(ident),
+        "lanes": _lanes_at(lanes_doc, _ident_models(ident), measured),
         "score": as_number(row.get("performance")),
         "score_unit": None,
         "cost_usd": None,
@@ -1365,7 +1395,7 @@ def _public_record(rec):
 
 
 def _record_matches_query(rec, query, targets):
-    if rec.get("lane_model") and rec["lane_model"] in targets:
+    if set(rec.get("lane_models") or ()).intersection(targets):
         return True
     if set(rec.get("candidates") or ()).intersection(targets):
         return True
@@ -1436,7 +1466,7 @@ def inspect_model(query, lanes_doc, effort_rows=None, epoch_csv=None):
         attributed = [
             _public_record(r) for r in family_recs
             if r.get("attributed")
-            and r.get("lane_model") == lane.get("model")
+            and lane.get("model") in (r.get("lane_models") or ())
             and effort_attributes(r.get("effort"), lane_effort)
         ]
         lane_view.append({

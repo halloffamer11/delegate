@@ -879,6 +879,31 @@ except Exception as e:
     record("the carry rule compares agy Opus only with agy Opus", False, repr(e))
 
 try:
+    # The benchmark page reads evidence records, not the carry rule's rows: a
+    # record resolved against the catalog as one pool gave the agy member every
+    # Opus row, and Claude Code's Opus lanes were drawn with none.
+    recs = bench.evidence_records(opus_rows, OPUS_TWO_HARNESSES)
+    by_effort = {r["effort"]: r for r in recs if r["benchmark"] == "b1"}
+    record(
+        "an evidence record names the lanes of every harness that runs the model",
+        all(r["identity"] == "resolved" and r["lane_model"] == "claude-opus-5-5" for r in recs)
+        and by_effort["high"]["lanes"] == ["opus55-high@agy", "opus55-high@claude"]
+        and by_effort["high"]["lane_models"] == ["claude-opus-5-5", "claude-opus-5-5-high"]
+        and by_effort["xhigh"]["lanes"] == ["opus55-xhigh@claude"]
+        and all(r["attributed"] for r in recs),
+        repr([(r["effort"], r["lane_model"], r["lanes"]) for r in recs]),
+    )
+    components = bench.aa_component_rows(opus_rows, OPUS_TWO_HARNESSES)
+    record(
+        "an Artificial Analysis component row reaches both harnesses' Opus",
+        sorted({(r["model"], r["effort"]) for r in components}) == by_model,
+        repr(components),
+    )
+except Exception as e:
+    record("an evidence record names the lanes of every harness that runs the model",
+           False, repr(e))
+
+try:
     resolved, _unmatched = published_names.resolve_effort_rows(AGY_CARRY_LANES, [
         agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
         agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
