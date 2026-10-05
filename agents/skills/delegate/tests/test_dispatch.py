@@ -1514,6 +1514,32 @@ def main():
         record("35. run --dry-run prints the overflow header and a Tier 3 pick", ok35,
                f"rc={res35.returncode} stdout={res35.stdout} stderr={res35.stderr}")
 
+    # 36. Ticket 43: a blocked run whose harness says its usage limit is
+    # reached holds the Lane's Meter; a finished run on it releases it.
+    with tempfile.TemporaryDirectory() as td36:
+        prev_cache = os.environ.get("DELEGATE_CACHE")
+        os.environ["DELEGATE_CACHE"] = os.path.join(td36, "usage.json")
+        try:
+            limited = {"status": "blocked", "reason": "relay status failed",
+                       "deliverable": "blocked: You've reached your free Grok Build usage limit for now"}
+            delegate.note_usage_limit("grok", "grok", limited)
+            held = "grok" in usage.read_limits()
+            delegate.note_usage_limit("grok", "grok", {"status": "blocked", "reason": "timeout after 10m",
+                                                       "deliverable": "blocked: timeout"})
+            still = "grok" in usage.read_limits()
+            delegate.note_usage_limit("grok", "grok", {"status": "done"})
+            released = usage.read_limits() == {}
+            delegate.note_usage_limit("codex", "codex", limited)
+            other = usage.read_limits() == {}
+        finally:
+            if prev_cache is None:
+                os.environ.pop("DELEGATE_CACHE", None)
+            else:
+                os.environ["DELEGATE_CACHE"] = prev_cache
+        record("36. a usage-limit refusal holds the Meter, a finished run releases it",
+               held and still and released and other,
+               f"held={held} still={still} released={released} other={other}")
+
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)
         sys.exit(1)

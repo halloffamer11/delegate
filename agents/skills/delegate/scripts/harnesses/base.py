@@ -8,6 +8,7 @@ never names a harness itself.
 """
 import copy
 import os
+import re
 import shutil
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
@@ -221,6 +222,19 @@ class Harness:
         if self.effort_in_slug:
             return lane["effort"], f"{self.name} carries effort in the model name"
         return override, None
+
+    # Patterns (case-insensitive) for the harness's own words when it refuses
+    # a run because its usage limit is reached (ticket 43). Only wording seen
+    # in a real run goes here.
+    limit_patterns = ()
+
+    def usage_limit(self, text):
+        """The line of `text` where the harness says its usage limit is
+        reached, or None."""
+        for line in (text or "").splitlines():
+            if any(re.search(p, line, re.I) for p in self.limit_patterns):
+                return line.strip()
+        return None
 
     def blocked_reason(self, run_dir):
         """Why a run the relay calls completed did not finish, read from the

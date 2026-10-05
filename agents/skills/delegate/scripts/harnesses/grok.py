@@ -73,6 +73,11 @@ class Grok(Harness):
         return [usage.meter_row(self.name, None, None, 1 - pct / 100.0, None, end,
                            note=f"tier={tier}; {ptype} meter only ({pct:g}% used); via _x.ai/billing")]
 
+    # 2026-10-04 on the free Grok Build tier: "You've reached your free Grok
+    # Build usage limit for now. Get SuperGrok for much higher limits, or try
+    # again later"
+    limit_patterns = (r"reached your .{0,40}usage limit",)
+
     def blocked_reason(self, run_dir):
         """A permission gate that cancelled the run, from grok's event stream.
 
