@@ -2,7 +2,8 @@
 """The `deck` view, the one view the dashboard draws.
 
 A tote board for one project: one Lane to a row, Tiers stacked as decks behind
-a coloured rail on the left edge.
+a coloured rail on the left edge, and beside the rail a thin line in each
+Lane's harness hue, so the Lanes of one harness read as a group.
 
 The user's verdict of 2026-09-18 chose each part from two compared layouts.  From
 one: the vertical coloured Tier line at the left edge, the terminal's own
@@ -68,8 +69,18 @@ LIGHT_ROLES = {
 RAIL_DARK = {1: "#5FB37A", 2: "#2FA8B8", 3: "#C08A3E", 4: "#A97BD1"}
 RAIL_LIGHT = {1: "#2E7D50", 2: "#17707C", 3: "#8A5D14", 4: "#6E4699"}
 
+# One hue per harness, for the line in each Lane's second column, so the
+# Lanes of one harness read as one group whatever Tier they sit in.  A harness
+# takes the hue at its place in delegate's harness registry, which the model
+# passes as `state['harnesses']`, so its colour is the same in every view and
+# on every run, and the view names no harness.  The Harness column and the
+# Harness table's labels carry the same hue, which is the key to it.
+HARNESS_DARK = ("#D97757", "#6C9EF8", "#E070B0", "#B8B8B8", "#8FBC5A")
+HARNESS_LIGHT = ("#A8502F", "#2F62C8", "#A83A78", "#5E5E5E", "#4E7D23")
+
 PAL = LIGHT_ROLES if LIGHT else DARK
 RAILS = RAIL_LIGHT if LIGHT else RAIL_DARK
+HARNESS_HUES = HARNESS_LIGHT if LIGHT else HARNESS_DARK
 
 # Nerd Codicons behind the switch; the fallbacks hold the same one cell.
 _NERD_GLYPHS = {
@@ -103,6 +114,7 @@ _PLAIN_GLYPHS = {
 }
 
 RAIL = "▌"
+HARNESS_LINE = "┃"
 RULE = "│"
 LEADER = "◆"
 BAR_FULL = "█"
@@ -119,7 +131,7 @@ ARROW = "→"
 _ONE_CELL = frozenset(
     list(_NERD_GLYPHS.values())
     + list(_PLAIN_GLYPHS.values())
-    + [RAIL, RULE, LEADER, BAR_FULL, BAR_EMPTY, BAR_UNKNOWN, MARK, HAIRLINE,
+    + [RAIL, HARNESS_LINE, RULE, LEADER, BAR_FULL, BAR_EMPTY, BAR_UNKNOWN, MARK, HAIRLINE,
        EMDASH, TIMES, ARROW]
     + list(BAR_PART)
 )
@@ -190,6 +202,7 @@ ARROWS = {"\x1b[C": "l", "\x1b[D": "h"}
 # unsaved mark's cell came out of the bar, the one column with slack to give.
 PLAN = (
     ("rail", 1, "<"),
+    ("hline", 1, "<"),
     ("icon", 1, "<"),
     ("stage", 1, "<"),
     ("ord", 3, ">"),
@@ -201,7 +214,7 @@ PLAN = (
     ("harness", 7, "<"),
     ("meter", 14, "<"),
     ("rem", 4, ">"),
-    ("bar", 22, "<"),
+    ("bar", 20, "<"),
     ("pace", 6, ">"),
     ("code", 7, "<"),
 )
@@ -219,9 +232,9 @@ LABELS = {
     "pace": "Pace",
     "code": "Reason",
 }
-# Dropped in this order as the pane narrows; rail, icon, the unsaved mark, the
-# project Tier mark and model never go: one says the change is not written yet,
-# the other that the Tier is not the one the machine sets.
+# Dropped in this order as the pane narrows; rail, the harness line, icon, the
+# unsaved mark, the project Tier mark and model never go: one says the change
+# is not written yet, the other that the Tier is not the one the machine sets.
 DROPS = (
     ("code",),
     ("pace",),
@@ -387,6 +400,16 @@ def effort_letter(row: dict[str, Any]) -> str:
 def harness_name(row_or_name: Any) -> str:
     name = row_or_name.get("harness") if isinstance(row_or_name, dict) else row_or_name
     return str(name or "").capitalize() or EMDASH
+
+
+def harness_color(row_or_name: Any, state: dict[str, Any]) -> str:
+    """The harness's own hue, by its place in the registry; quiet for a name
+    the registry does not hold."""
+    name = row_or_name.get("harness") if isinstance(row_or_name, dict) else row_or_name
+    order = list(state.get("harnesses") or ())
+    if name not in order:
+        return PAL["mute"]
+    return HARNESS_HUES[order.index(name) % len(HARNESS_HUES)]
 
 
 CODE_ROLE = {code: role for code, role, _text in CODES}
@@ -704,6 +727,7 @@ def lane_segments(row, group, state, columns, *, selected):
     name_color = PAL["gold"] if (selected or is_pick) else PAL["fg"]
     values = {
         "rail": (RAIL, RAILS.get(group.get("tier"), PAL["mute"]), False),
+        "hline": (HARNESS_LINE, harness_color(row, state), False),
         "icon": (icon, icon_color, is_pick),
         "stage": staged_mark(row) + (True,),
         "ord": (f"{EMDASH if order is None else order}{order_mark(row, state)}", PAL["mute"], False),
@@ -712,7 +736,8 @@ def lane_segments(row, group, state, columns, *, selected):
         "sep1": (RULE, PAL["mute"], False),
         "effort": (effort_letter(row), name_color, False),
         "sep2": (RULE, PAL["mute"], False),
-        "harness": (harness_name(row), name_color, False),
+        "harness": (harness_name(row),
+                    name_color if (selected or is_pick) else harness_color(row, state), False),
         "meter": (str(row.get("meter") or ""), PAL["mute"], False),
         "rem": (percent(row.get("remaining")), rem_color, False),
         "bar": (None, rem_color, False),
@@ -756,8 +781,9 @@ def head_segments(group, state, view, width, *, selected):
 
 # --- the Harness table ------------------------------------------------------
 
-# label, then one Tier column each behind a rule in the Tier's own hue.
-TABLE_LABEL = 9
+# label, then one Tier column each behind a rule in the Tier's own hue.  The
+# label is the harness's line, a space, the fold mark and the name.
+TABLE_LABEL = 11
 TABLE_GUTTER = 2  # the coloured rule and the space after it
 
 
@@ -824,7 +850,8 @@ def table_lines(state, view, width, selected_lane):
             if here:
                 cursor = len(out)
             out.append([
-                (pad(f"{glyph('folded')} {harness_name(name)}", TABLE_LABEL),
+                (HARNESS_LINE, harness_color(name, state), False),
+                (pad(f" {glyph('folded')} {harness_name(name)}", TABLE_LABEL - 1),
                  PAL["gold"] if here else PAL["fg"], True,
                  PAL["selbg"] if here else None),
                 (f"{len(rows_here)} Lanes folded · {eligible} eligible",
@@ -834,8 +861,13 @@ def table_lines(state, view, width, selected_lane):
             continue
         depth = max((len(cell.get((name, number)) or ()) for number in tiers), default=0)
         for line_no in range(max(1, depth)):
-            label = f"{glyph('open')} {harness_name(name)}" if line_no == 0 else ""
-            segments: list[tuple] = [(pad(label, TABLE_LABEL), PAL["fg"], line_no == 0)]
+            # the harness's line runs down its whole block, so a block reads
+            # as one group however many lines its fullest cell takes
+            label = f" {glyph('open')} {harness_name(name)}" if line_no == 0 else ""
+            segments: list[tuple] = [
+                (HARNESS_LINE, harness_color(name, state), False),
+                (pad(label, TABLE_LABEL - 1), harness_color(name, state), line_no == 0),
+            ]
             for number in tiers:
                 column = cell.get((name, number)) or ()
                 segments.append((RULE, RAILS.get(number, PAL["mute"]), False))

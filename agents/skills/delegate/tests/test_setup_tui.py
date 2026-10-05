@@ -1451,7 +1451,7 @@ except Exception as e:
 try:
     # a window too short for the list said nothing about it
     w, grid = prescreen_at(80, 16)
-    shown = [line for line in grid if line.startswith("[x]") or line.startswith("[ ]")]
+    shown = [line for line in grid if line[setup_tui.GUTTER:].startswith(("[x]", "[ ]"))]
     w2, tall = prescreen_at(80, 40)
     record("32 a clipped list says which rows are on screen",
            grid[2].rstrip().endswith(f"1-{len(shown)} of {len(w.view()['rows'])}")
@@ -2133,11 +2133,11 @@ try:
         cursor = [text for _y, text, role, _s in entries if role == "row-cursor"]
         if sections != ["Tier 4 (no lanes)", "Tier 3 (no lanes)", "Tier 2 (3 lanes)", "Tier 1 (1 lane)"]:
             faults.append((width, "sections", sections))
-        if not (len(cursor) == 1 and cursor[0].startswith(" 2  terra-high@codex")):
+        if not (len(cursor) == 1 and cursor[0][setup_tui.GUTTER:].startswith(" 2  terra-high@codex")):
             faults.append((width, "cursor", cursor))
         if any(len(line) > width - 1 for line in grid):
             faults.append((width, "too wide"))
-        if not any(line.startswith(" 1  sol-high@codex") for line in grid):
+        if not any(line[setup_tui.GUTTER:].startswith(" 1  sol-high@codex") for line in grid):
             faults.append((width, "numbering"))
         keys_spelled = [line for line in grid
                         if line.startswith(("J/K, shift-↑/↓", "1-4"))
@@ -2439,7 +2439,7 @@ try:
         w, grid = prescreen_at(width, height)
         view = w.view(width)
         zone = setup_tui._legend_zone(view)
-        shown = [line for line in grid if line.startswith("[x]") or line.startswith("[ ]")]
+        shown = [line for line in grid if line[setup_tui.GUTTER:].startswith(("[x]", "[ ]"))]
         budget = height - 3 - 1 - len(zone) - 1 - (setup_tui.TOP + 1)
         first_legend = grid.index(zone[0][0])
         if len(shown) != min(budget, len(view["rows"])):
@@ -2457,7 +2457,7 @@ try:
     entries = layout_lines(w.view(80), 80, 20)
     grid = overlay(entries, 80, 20)
     cursor = [text for _y, text, role, _s in entries if role.startswith("row-cursor")]
-    shown = [line for line in grid if line.startswith("[x]") or line.startswith("[ ]")]
+    shown = [line for line in grid if line[setup_tui.GUTTER:].startswith(("[x]", "[ ]"))]
     if not (len(cursor) == 1 and rows[-1]["cells"][1] in cursor[0] and len(shown) < len(rows)
             and grid[2].endswith(f"{len(rows) - len(shown) + 1}-{len(rows)} of {len(rows)}")):
         faults.append(("scroll", cursor, grid[2]))
@@ -2484,9 +2484,11 @@ try:
     note = [title[s:e] for s, e, style in spans if style == "title-note"]
     record("67 a ticked box, a reason the data gave, a key and the counter are drawn in their "
            "own style, and the cursor row is one bar",
-           styled("astra-high@codex") == ("row", [("[x]", "mark-on")])
-           and styled("astra-xhigh@codex") == ("row-dim", [("high wins on tbench", "why-data")])
-           and styled("fable-xhigh@claude") == ("row-cursor", [])
+           styled("astra-high@codex") == ("row", [("▌", "harness-1"), ("[x]", "mark-on")])
+           and styled("astra-xhigh@codex") == ("row-dim", [("▌", "harness-1"),
+                                                           ("high wins on tbench", "why-data")])
+           # the cursor row is one bar after its harness bar
+           and styled("fable-xhigh@claude") == ("row-cursor", [("▌", "harness-0"), (" ", "body")])
            and keys == ["↑/↓ or j/k", "space/x", "enter", "b", "q"]
            and note == ["1-7 of 11"],
            repr((styled("astra-high@codex"), styled("astra-xhigh@codex"),
@@ -2503,13 +2505,14 @@ try:
     class FakeCurses:
         A_BOLD, A_DIM, A_REVERSE, A_UNDERLINE = 1, 2, 4, 8
         COLOR_GREEN, COLOR_CYAN, COLOR_YELLOW = 2, 6, 3
+        COLOR_RED, COLOR_BLUE, COLOR_MAGENTA = 1, 4, 5
 
         class error(Exception):
             pass
 
-        def __init__(self, colours, refuse=False):
+        def __init__(self, colours, refuse=False, count=256):
             self.colours, self.refuse, self.pairs = colours, refuse, {}
-            self.COLORS = 256 if colours else 0
+            self.COLORS = count if colours else 0
 
         def has_colors(self):
             return self.colours
@@ -2533,6 +2536,13 @@ try:
     rich = FakeCurses(True)
     colour = setup_tui._palette(rich)
     refused = setup_tui._palette(FakeCurses(True, refuse=True))
+    eight = FakeCurses(True, count=8)
+    eight_colour = setup_tui._palette(eight)
+    os.environ["NO_COLOR"] = "1"
+    try:
+        no_colour = setup_tui._palette(FakeCurses(True))
+    finally:
+        del os.environ["NO_COLOR"]
 
     def pair_of(style):
         return rich.pairs.get(colour[style] >> 8)
@@ -2553,7 +2563,13 @@ try:
            and mono["value"] == 1 and pair_of("value") == (2, -1)
            and mono["term"] == 1 and mono["desc"] == 2 and colour["desc"] == 2
            and colour["key"] & 0xff == 1 and colour["title"] == mono["title"]
-           and len(rich.pairs) == 3,
+           # one hue per harness: a 256-colour index, the basic eight below that,
+           # and a plain bar with NO_COLOR set
+           and [pair_of(f"harness-{i}") for i in range(len(setup_tui.HARNESS_HUES))]
+           == [(hue, -1) for hue, _eight in setup_tui.HARNESS_HUES]
+           and len(rich.pairs) == 3 + len(setup_tui.HARNESS_HUES)
+           and eight.pairs.get(eight_colour["harness-0"] >> 8) == (1, -1)
+           and mono["harness-0"] == 0 and no_colour == mono,
            repr((sorted(used - set(setup_tui.STYLES)), mono, rich.pairs)))
 except Exception as e:
     record("68 every role a page emits is in the style table", False, repr(e))
@@ -2980,7 +2996,8 @@ try:
     v = w.view(80)
     rows = 12 + len(harnesses.NAMES)
     grid = screen(v, 80, rows)
-    shown = [line.split()[0] for line in grid if line.split() and line.split()[0] in harnesses.NAMES]
+    shown = [line[setup_tui.GUTTER:].split()[0] for line in grid
+             if line.startswith(setup_tui.HARNESS_BAR)]
     roomy = screen(v, 80, 25)
     record("79 the harnesses page at 80 by 12 + harnesses rows shows every harness row, and its body",
            len(v["body"]) == 2 and shown == list(harnesses.NAMES)
