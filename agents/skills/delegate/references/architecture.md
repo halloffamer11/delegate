@@ -142,7 +142,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.
   `dispatch --model` naming such a model queues it too. The queue is `new-models.json` beside the
   meter cache. The wizard's start facts name it ("Dispatch noticed") and its write empties it.
-  `$DELEGATE_MODEL_SCAN=off` stops the scan.
+  `$DELEGATE_MODEL_SCAN=off` stops the scan. A newer version of a model the catalog already runs
+  is not queued but applied (ticket 44 of the redesign): the scan swaps each Lane the refresh
+  replaces with its successor into lanes.json, keeping Tier, Order and an off Lane off, after
+  copying lanes.json to `lanes-backups/` beside the queue. The wizard names the swaps ("Dispatch
+  swapped in"). `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
   benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis
   comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
