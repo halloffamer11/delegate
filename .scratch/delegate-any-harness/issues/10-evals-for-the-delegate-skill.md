@@ -10,7 +10,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-any-harness-next-v75vlw`); the first three boxes are done. Waiting on the user for the last box: run `make eval-ping` and `make eval-orchestrate` once on the Mac. The orchestrator commands in `scripts/evals.py` (`claude -p "/delegate …"`, `codex exec …`) are the documented headless forms and are unverified until that run. Raised by the user 2026-10-02; scenarios set by the user in review the same day.
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-10-02 (this ticket's commit on `claude/delegate-any-harness-next-v75vlw`); the first three boxes are done. Waiting on the user for the last box: run `make eval-ping` and `make eval-orchestrate` once on the Mac. The orchestrator commands in `scripts/evals.py` (`claude -p "/delegate …"`, `codex exec …`) are the documented headless forms and are unverified until that run. Raised by the user 2026-10-02; scenarios set by the user in review the same day.
 
 What landed: `scripts/evals.py` (`ping`, `orchestrate`, each with `--offline`), `make eval-ping` and `make eval-orchestrate`, and `tests/test_evals.py`, which runs eval 2 (six routing cases) and evals 1 and 3 offline in `make test`. A run directory now also honours `$DELEGATE_RUNS_DIR`, so an orchestrator started by the eval writes where the eval looks. Until ticket 13 a claude Lane is native, so eval 1 reports it as skipped. Verified with `make test` on Python 3.9 and 3.13.
 

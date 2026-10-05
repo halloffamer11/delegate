@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 Lane catalog and validators.
 
-**Status:** landed 2026-09-09 (`7c76843`) on `main`; the report was rebuilt twice since — per-effort figures (ticket 17) and the HTML page. The one unticked box is the user's: reading one report and confirming it is enough to set a tier from.
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-09-09 (`7c76843`) on `main`; the report was rebuilt twice since — per-effort figures (ticket 17) and the HTML page. The one unticked box is the user's: reading one report and confirming it is enough to set a tier from.
 
 - [x] Running `bench.py` writes one dated file under the cache directory with attribution lines for both sources
 - [x] Only models present in the catalog appear; a catalog model missing from a source is listed with a gap note

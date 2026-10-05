@@ -1,6 +1,6 @@
 # 26 — The benchmark page is where tiers are drawn
 
-**Status:** implemented 2026-09-12, pending the user's review (the last box is his)
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: implemented 2026-09-12, pending the user's review (the last box is his)
 
 **What to build:** From the user's second wizard run (2026-09-12). While he assigned
 tiers he kept the page's AA plot open: he read the frontier, dragged to a cost per

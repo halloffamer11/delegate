@@ -6,7 +6,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-review-fixes-t6aitx`). Both boxes done. One step is the user's: add `"model_meter": true` to the `claude-fable` meter in each machine's `~/.config/delegate/lanes.json` (machine-local, so not in this commit).
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-10-02 (this ticket's commit on `claude/delegate-review-fixes-t6aitx`). Both boxes done. One step is the user's: add `"model_meter": true` to the `claude-fable` meter in each machine's `~/.config/delegate/lanes.json` (machine-local, so not in this commit).
 
 - [x] A Meter's per-model nature comes from the catalog or the probe row, not from its name.
 - [x] No Meter name is hardcoded in `report.py`; a test renames the Fable Meter and gets the same row.

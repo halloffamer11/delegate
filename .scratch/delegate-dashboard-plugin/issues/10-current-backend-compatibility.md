@@ -7,7 +7,7 @@ write restrictions and stale-editor protection. Keep the existing prototype scop
 
 **Blocked by:** None — prototype accepted and the user approved this pass on 2026-09-17.
 
-**Status:** landed 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes; pre-split hashes); all boxes ticked. On `main` since the dashboard merge (`df2798f`), and the `deck` dashboard (ticket 12) has since replaced the prototype. Open, the user's: the one decision below (project saves keep the canonical `catalog.edit_catalog` document shape).
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes; pre-split hashes); all boxes ticked. On `main` since the dashboard merge (`df2798f`), and the `deck` dashboard (ticket 12) has since replaced the prototype. Open, the user's: the one decision below (project saves keep the canonical `catalog.edit_catalog` document shape).
 
 - [x] Current main is merged into the isolated prototype branch; main and the Rust monitor are preserved.
 - [x] Metering on/off and its source are visible; off explains inactive Gate/Margin/Pace and cached observations.

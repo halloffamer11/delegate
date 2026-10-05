@@ -33,7 +33,7 @@ with main merged).
 
 ## Acceptance
 
-**Status:** landed 2026-09-20 (`a067fd5`, `972face`), merged to `main` by the user as `0ffffea`. Open, the user's: confirm `v` does nothing in a pane (box 1); the last box is met by his merge, and his drive verdict is not recorded yet.
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-09-20 (`a067fd5`, `972face`), merged to `main` by the user as `0ffffea`. Open, the user's: confirm `v` does nothing in a pane (box 1); the last box is met by his merge, and his drive verdict is not recorded yet.
 
 - [ ] `python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"` opens `deck`; `--layout`
       is rejected as an unknown argument; `v` does nothing.

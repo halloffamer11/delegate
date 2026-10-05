@@ -77,7 +77,7 @@ asks.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented 2026-09-12, pending the user's review
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: implemented 2026-09-12, pending the user's review
 
 Efforts:
 - [x] `discover.py` has one effort list per harness: codex from its JSON, claude from its CLI, agy from the slug suffix family (`strip_effort_suffix` already knows it), grok from a probe of its accepted values recorded here with the command that proved it. Claude: `claude --help` (Claude Code 2.1.269) prints `--effort <level>` and, on the next line, `(low, medium, high, xhigh, max)`; `parse_claude_help` reads that line, and the fixture is a copy of the real output. The same five are in https://code.claude.com/docs/en/model-config. If the help ever lists none, `catalog.HARNESS_EFFORTS["claude"]` stands in and discovery says so. Grok: `grok --help` prints `--reasoning-effort <EFFORT>` with no values, and `grok --reasoning-effort bogus models` exits 0, so the CLI checks nothing locally and no non-paid probe proves a value. Grok stays at `high`, the effort `grok46-high@grok` has run at; proving more costs a paid run, and grok's meter was at 12%. Agy: `agy --help` prints `--effort (low|medium|high)`, and `agy models` lists `-low`, `-medium` and `-high` slugs.

@@ -1,6 +1,6 @@
 # 27 — The page is the first input
 
-**Status:** implemented 2026-09-12, pending the user's review (the last box is his)
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: implemented 2026-09-12, pending the user's review (the last box is his)
 
 **What to build:** From the user's use of the ticket 26 page (2026-09-12): "The HTML has
 now surpassed the TUI." The page becomes where carry and tier decisions are made,

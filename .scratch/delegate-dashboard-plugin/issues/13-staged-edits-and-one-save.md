@@ -31,7 +31,7 @@ each key press.
 
 ## Acceptance
 
-**Status:** landed 2026-09-20 (`b2d0c0d`), merged to `main` by the user as `0ffffea`. The last box is the user's: drive staging, undo and save once in a Herdr pane and say so. The worker decisions under Landed are open to the user as well.
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-09-20 (`b2d0c0d`), merged to `main` by the user as `0ffffea`. The last box is the user's: drive staging, undo and save once in a Herdr pane and say so. The worker decisions under Landed are open to the user as well.
 
 - [x] With staged changes and no save, the bytes of every file under `.delegate/` and of
       the global catalog are unchanged (test at the public model boundary).
