@@ -32,7 +32,11 @@ steal can happen inside a tier; a lane lower in the order runs when its meter
 is well ahead, which balances the load. In a catalog with no `order`, pace
 orders each tier and a steal only crosses tiers.
 
-A meter whose probe is unknown sorts last and never blocks. With `meters` on
+A meter whose probe is unknown sorts last and never blocks. A meter whose
+harness refused a run for its usage limit reads 0% left, so the gate vetoes
+it, until its reset, a new reset read by a probe, a finished run on it, or 24
+hours, whichever comes first. The hold lives in `limits.json` beside the usage
+cache; `delegate status` notes it on the meter. With `meters` on
 (the default), meters are probed when a run starts and when it finishes.
 
 `--tier <n>` raises the floor for one job. It never admits a tier outside the

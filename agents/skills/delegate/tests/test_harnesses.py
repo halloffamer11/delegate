@@ -379,6 +379,18 @@ def test_agy_opus_pool():
            and rows["agy-claude-gpt"]["remaining_weekly"] == 0.6, repr(rows))
 
 
+def test_usage_limit():
+    """Ticket 43: grok's free-tier refusal is a usage limit; other text is not."""
+    grok = harnesses.get("grok")
+    seen = "blocked: You've reached your free Grok Build usage limit for now. Get SuperGrok"
+    record("grok reads its usage-limit refusal",
+           grok.usage_limit("x\n" + seen) == seen)
+    record("grok does not read other text as a usage limit",
+           grok.usage_limit("permission gate cancelled the run") is None)
+    record("a harness with no patterns never reads a usage limit",
+           harnesses.get("codex").usage_limit(seen) is None)
+
+
 if __name__ == "__main__":
     test_agy_opus_pool()
     test_meter_identity()
@@ -392,4 +404,5 @@ if __name__ == "__main__":
     test_ads_reads_the_registry()
     test_ads_install_fetches_a_pin_off_the_default_branch()
     test_kiro()
+    test_usage_limit()
     sys.exit(1 if fails else 0)

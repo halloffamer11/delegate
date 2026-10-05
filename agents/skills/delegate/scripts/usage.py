@@ -132,13 +132,89 @@ def _filled(observation):
     return out
 
 
-def _fill_document(document):
-    """Return a copy whose observations carry their combined figures. Does not write."""
+# A harness that refused a run for its usage limit holds its Meter at nothing
+# left until the Meter's reset, at most this long (ticket 43): a probe can read
+# a quota the refusal shows is not the one that binds.
+LIMIT_HOLD = 24 * 3600
+
+
+def limits_path(cache_path=None):
+    """limits.json beside the usage cache it overlays."""
+    return os.path.join(os.path.dirname(cache_path or get_cache_path()) or ".", "limits.json")
+
+
+def read_limits(cache_path=None):
+    """{meter: {"at", "until", "reason"}} as written, or {}."""
+    try:
+        with open(limits_path(cache_path), "r", encoding="utf-8") as f:
+            doc = json.load(f)
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_limits(doc):
+    p = limits_path()
+    parent = os.path.dirname(p)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=1)
+    os.replace(tmp, p)
+
+
+def mark_limited(meter, reason, now=None):
+    """Hold `meter` at nothing left: until its cached weekly reset when that
+    comes within LIMIT_HOLD, else for LIMIT_HOLD. Returns the until time."""
+    now = time.time() if now is None else now
+    until = now + LIMIT_HOLD
+    reset = None
+    for row in (load_cached().get("lanes") or []):
+        if row_meter(row) == meter:
+            reset = row.get("reset_weekly")
+            if isinstance(reset, (int, float)) and now < reset < until:
+                until = reset
+    doc = read_limits()
+    # `reset` is the reset the probe read when the harness refused: a probe
+    # that reads a different one has seen the vendor start a new period
+    doc[meter] = {"at": now, "until": until, "reset": reset, "reason": str(reason)[:200]}
+    _write_limits(doc)
+    return until
+
+
+def clear_limited(meter):
+    """A run on `meter` finished, so the limit no longer holds."""
+    doc = read_limits()
+    if meter in doc:
+        del doc[meter]
+        _write_limits(doc)
+
+
+def _limited(observation, limits, now):
+    hold = limits.get(row_meter(observation)) if isinstance(observation, dict) else None
+    if not isinstance(hold, dict) or not isinstance(hold.get("until"), (int, float)) or hold["until"] <= now:
+        return observation
+    if hold.get("reset") is not None and observation.get("reset_weekly") not in (None, hold["reset"]):
+        # the vendor reset the Meter early: the probe's reading stands again
+        return observation
+    out = dict(observation)
+    out.update({"remaining_weekly": 0.0, "r": 0.0, "pace": 0.0, "score": 0.0,
+                "binding": "weekly", "status": "limited"})
+    note = f"usage limit reached (held until {datetime.fromtimestamp(hold['until'], timezone.utc).strftime('%Y-%m-%d %H:%MZ')})"
+    out["note"] = f"{out['note']}; {note}" if out.get("note") else note
+    return out
+
+
+def _fill_document(document, cache_path=None):
+    """Return a copy whose observations carry their combined figures, and a
+    Meter its harness refused for a usage limit reads empty. Does not write."""
     if not isinstance(document, dict):
         return document
     out = dict(document)
     if "lanes" in out and isinstance(out["lanes"], list):
-        out["lanes"] = [_filled(entry) for entry in out["lanes"]]
+        limits, now = read_limits(cache_path), time.time()
+        out["lanes"] = [_limited(_filled(entry), limits, now) for entry in out["lanes"]]
         return out
     return {name: _filled(obs) for name, obs in out.items()}
 

@@ -340,6 +340,44 @@ def main():
     assert_true(usage.remaining(None) is None and usage.remaining(0.5) == 0.5,
                 "a fraction inside 0..1, or none, is left as it is")
 
+    # Ticket 43: a usage-limit refusal holds the Meter at nothing left until
+    # its reset (at most LIMIT_HOLD), and a new reset or a finished run lifts it.
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "usage.json")
+        now = time.time()
+        reset = now + 3600
+        doc = {"probed_at": now, "lanes": [usage.meter_row("grok", None, None, 1.0, None, reset),
+                                            usage.meter_row("codex", None, 0.5, 0.5)]}
+        with open(cache, "w") as f:
+            json.dump(doc, f)
+        with patch.dict(os.environ, {"DELEGATE_CACHE": cache}):
+            until = usage.mark_limited("grok", "You've reached your free Grok Build usage limit", now=now)
+            assert_true(until == reset, f"the hold ends at the Meter's reset when that comes first: {until}")
+            rows = {r["meter"]: r for r in usage.load_cached()["lanes"]}
+            assert_true(rows["grok"]["r"] == 0.0 and rows["grok"]["status"] == "limited"
+                        and "usage limit reached" in rows["grok"]["note"]
+                        and rows["codex"]["r"] == 0.5,
+                        f"only the refused Meter reads empty: {rows}")
+            assert_true(not usage.eligible(rows["grok"], 0.1), "the Gate vetoes a held Meter")
+            moved = dict(doc, lanes=[usage.meter_row("grok", None, None, 1.0, None, reset + 7 * 86400)])
+            with open(cache, "w") as f:
+                json.dump(moved, f)
+            rows = {r["meter"]: r for r in usage.load_cached()["lanes"]}
+            assert_true(rows["grok"]["r"] == 1.0,
+                        "a probe that reads a new reset lifts the hold (the vendor reset early)")
+            usage.clear_limited("grok")
+            assert_true(usage.read_limits() == {}, "a finished run on the Meter clears its hold")
+            with open(cache, "w") as f:
+                json.dump({"probed_at": now, "lanes": [usage.meter_row("grok", None, None, 1.0)]}, f)
+            until = usage.mark_limited("grok", "limit", now=now)
+            assert_true(abs(until - (now + usage.LIMIT_HOLD)) < 1,
+                        "with no reset known the hold lasts LIMIT_HOLD")
+            hold = usage.read_limits()["grok"]
+            hold["until"] = now - 1
+            usage._write_limits({"grok": hold})
+            rows = {r["meter"]: r for r in usage.load_cached()["lanes"]}
+            assert_true(rows["grok"]["r"] == 1.0, "an expired hold no longer applies")
+
     print("PASS: all test_usage_reset tests passed")
     sys.exit(0)
 

@@ -586,6 +586,26 @@ def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, p
     return relay_exit, secs, mapped
 
 
+def note_usage_limit(harness, meter, mapped):
+    """Hold the Meter empty when its harness refused the run for its usage
+    limit, and release it when a run on it finishes (ticket 43). Never raises:
+    the run's own result stands either way."""
+    if not meter:
+        return
+    try:
+        if mapped["status"] == "blocked":
+            text = "\n".join(str(x) for x in (mapped.get("reason"), mapped.get("deliverable")) if x)
+            line = harnesses.get(harness).usage_limit(text)
+            if line:
+                until = usage.mark_limited(meter, line)
+                stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
+                print(f"delegate: {meter} meter held at 0% left until {stamp}: {line}", file=sys.stderr)
+        elif mapped["status"] in ("done", "partial"):
+            usage.clear_limited(meter)
+    except Exception:
+        pass
+
+
 def start_failure(exc):
     """Why a run that the ledger has started could not run, in one line."""
     if isinstance(exc, FileNotFoundError) and exc.filename == "node":
@@ -716,6 +736,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     except (Exception, KeyboardInterrupt) as e:
         relay_exit, secs = None, int(time.time() - t0)
         mapped = fail_run(run_dir, secs, start_failure(e))
+    note_usage_limit(harness, resolved["lane_data"].get("meter"), mapped)
 
     # Step 8: Ledger finish
     ledger_finish(
