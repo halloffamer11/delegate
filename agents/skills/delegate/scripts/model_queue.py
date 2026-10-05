@@ -17,14 +17,25 @@ Two things put a model in the queue:
   still finds its models from the benchmark rows.
 - `asked`: `delegate dispatch --model <slug>` naming a model no Lane runs.
 
+A newer version of a model the catalog already runs is not queued: the scan
+applies it (`apply_successors`). Each Lane the refresh would replace with its
+successor (`gpt-6-sol` to `gpt-6.1-sol` at the same effort) is swapped in the
+global lanes.json, keeping its Tier, Order, Meter and weight, and staying off
+if it was off. The old lanes.json is copied beside the queue first, and native
+agent files follow. A model new to its harness, a new effort, and a superseded
+Lane with no successor at its effort still wait for the wizard, since the
+human sets those Tiers. Nothing here names a model: the harness's own list says
+what is newer. $DELEGATE_MODEL_APPLY=off keeps the scan to queueing.
+
 The queue lives beside the meter cache (`new-models.json`), or at
 $DELEGATE_MODEL_QUEUE. The wizard's confirm write empties it, since that run
 saw every model the refresh proposed. $DELEGATE_MODEL_SCAN=off stops the scan.
 
-  model_queue.py show            print the queue as JSON
+  model_queue.py show            print the queue (and the swaps applied) as JSON
   model_queue.py scan [--config-dir DIR] [--fixture-dir DIR]
 """
 import argparse
+import copy
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -37,6 +48,9 @@ import usage  # noqa: E402
 VERSION = "delegate-model-queue.v1"
 # How long a scan's answer stands before dispatch starts another
 SCAN_EVERY = timedelta(days=1)
+# How many applied swaps the queue file remembers until the next wizard run
+APPLIED_KEPT = 50
+OFF = ("off", "0", "false", "no")
 
 
 def path():
@@ -96,11 +110,13 @@ def note(entries, via):
 
 
 def clear():
-    """Empty the queue after a wizard run wrote the catalog, keeping when the
-    last scan ran so dispatch does not start another at once."""
+    """Empty the queue, and the swaps it reported, after a wizard run wrote the
+    catalog, keeping when the last scan ran so dispatch does not start another
+    at once."""
     doc = read()
-    if doc["models"]:
+    if doc["models"] or doc.get("applied"):
         doc["models"] = []
+        doc["applied"] = []
         _write(doc)
 
 
@@ -122,16 +138,96 @@ def _mark_checked():
     _write(doc)
 
 
+def applied():
+    """The swaps scans made, oldest first: `{old, new, model, at}`."""
+    return [m for m in read().get("applied") or () if isinstance(m, dict)]
+
+
+def apply_successors(lanes_doc, refreshed, plan):
+    """(catalog, [(old lane, new lane)]): `lanes_doc` with each Lane the
+    refresh replaced by a newer version of its own model swapped for that
+    successor, in its place.
+
+    The successor is the refresh's own record, so it carries the predecessor's
+    Tier, Order, Meter, weight and timeout. Unlike the wizard's refresh, it
+    also keeps the predecessor's `enabled: false`: nobody screens this swap,
+    so it never turns on a slot the user turned off. Every other change the
+    refresh proposes is left for the wizard.
+    """
+    successors = plan.get("successors") or {}
+    doc = copy.deepcopy(lanes_doc)
+    new_lanes = refreshed.get("lanes") or {}
+    ordered, swaps = {}, []
+    for name, lane in (doc.get("lanes") or {}).items():
+        names = [new for new in successors.get(name) or () if new in new_lanes]
+        if not names:
+            ordered[name] = lane
+            continue
+        for new in names:
+            record = copy.deepcopy(new_lanes[new])
+            if isinstance(lane, dict) and lane.get("enabled") is False:
+                record["enabled"] = False
+            ordered[new] = record
+            swaps.append((name, new))
+    if not swaps:
+        return doc, []
+    doc["lanes"] = ordered
+    meters = doc.setdefault("meters", {})
+    for lane in ordered.values():
+        meter = lane.get("meter") if isinstance(lane, dict) else None
+        if meter and meter not in meters and meter in (refreshed.get("meters") or {}):
+            meters[meter] = copy.deepcopy(refreshed["meters"][meter])
+    return doc, swaps
+
+
+def _backup(lanes_path, raw):
+    """Copy the lanes.json a scan is about to change beside the queue."""
+    folder = os.path.join(os.path.dirname(path()), "lanes-backups")
+    os.makedirs(folder, exist_ok=True)
+    stamp = _now().strftime("%Y%m%dT%H%M%SZ")
+    target = os.path.join(folder, f"lanes-{stamp}.json")
+    with open(target, "wb") as f:
+        f.write(raw)
+    return target
+
+
+def _write_applied(base, lanes_path, raw, doc, swaps):
+    """Write the swapped catalog, unless lanes.json changed since the scan read
+    it (a wizard run in between wins), and the native agents that follow it.
+    Returns True when it wrote."""
+    import catalog
+    import catalog_edit
+    import setup
+    catalog.validate_lanes(doc, source=lanes_path)
+    with open(lanes_path, "rb") as f:
+        if f.read() != raw:
+            return False
+    _backup(lanes_path, raw)
+    catalog_edit._write_preserving_link(lanes_path, doc)
+    change = {"new": [new for _old, new in swaps], "removed": [old for old, _new in swaps]}
+    setup.save_all_native_agents(change, doc, setup.native_targets(base))
+    return True
+
+
 def scan(config_dir=None, fixture_dir=None, present=None):
-    """Queue every model no Lane runs that the wizard's refresh would add a
-    Lane for. Returns what it added."""
+    """Apply each newer version of a model the catalog runs, then queue every
+    model no Lane runs that the wizard's refresh would add a Lane for. Returns
+    what it queued."""
     import catalog
     import discover
     base = os.path.expanduser(config_dir if config_dir is not None else catalog.CONFIG_DIR)
-    lanes_doc = catalog.load_json(os.path.join(base, "lanes.json"))
+    lanes_path = os.path.join(base, "lanes.json")
+    with open(lanes_path, "rb") as f:
+        raw = f.read()
+    lanes_doc = catalog.load_json(lanes_path)
     discovery = discover.discover(lanes_doc, present=present, fixture_dir=fixture_dir)
-    _doc, plan = discover.refresh_catalog(lanes_doc, discovery)
+    refreshed, plan = discover.refresh_catalog(lanes_doc, discovery)
     _mark_checked()
+    if os.environ.get("DELEGATE_MODEL_APPLY", "").lower() not in OFF:
+        doc, swaps = apply_successors(lanes_doc, refreshed, plan)
+        if swaps and _write_applied(base, lanes_path, raw, doc, swaps):
+            lanes_doc = doc
+            _note_applied(swaps, doc)
     # the refresh also adds Lanes at new efforts of a model the catalog runs;
     # only a model no Lane runs is one the catalog lacks
     import harnesses
@@ -141,10 +237,21 @@ def scan(config_dir=None, fixture_dir=None, present=None):
                  if (item.get("harness"), item.get("model")) not in run], "scan")
 
 
+def _note_applied(swaps, lanes_doc):
+    queue = read()
+    stamp = _now().isoformat()
+    lanes = lanes_doc.get("lanes") or {}
+    queue["applied"] = (list(queue.get("applied") or []) + [
+        {"old": old, "new": new, "model": (lanes.get(new) or {}).get("model"), "at": stamp}
+        for old, new in swaps
+    ])[-APPLIED_KEPT:]
+    _write(queue)
+
+
 def kick(config_dir=None):
     """Start a detached scan when one is due. Never raises and never waits:
     a dispatch must not slow down or fail over a model listing."""
-    if os.environ.get("DELEGATE_MODEL_SCAN", "").lower() in ("off", "0", "false", "no"):
+    if os.environ.get("DELEGATE_MODEL_SCAN", "").lower() in OFF:
         return False
     try:
         if not due():
@@ -165,7 +272,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="model_queue.py", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("show", help="print the queue as JSON")
-    p_scan = sub.add_parser("scan", help="queue the models the wizard's refresh would add")
+    p_scan = sub.add_parser("scan", help="apply newer versions and queue the models the wizard's refresh would add")
     p_scan.add_argument("--config-dir", default=None)
     p_scan.add_argument("--fixture-dir", default=None)
     args = parser.parse_args(argv)

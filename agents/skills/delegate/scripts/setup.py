@@ -412,6 +412,7 @@ def propose_generation(lanes_doc, discovery_data, rows):
     )
     # what dispatch noticed since the last run, named on the start page (ticket 29)
     refresh["queued"] = model_queue.pending()
+    refresh["applied"] = model_queue.applied()
     return lanes_doc, refresh, discover.map_lanes(discovery_data, lanes_doc)
 
 
