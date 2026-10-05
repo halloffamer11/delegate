@@ -92,7 +92,7 @@ A fork is justified only if upstream rejects a change you need inside the relay.
 
 ## 7. Open for the grilling session
 
-- Is Node an acceptable dependency on this machine and the work Mac?
+- Is Node an acceptable dependency on this machine and other machine deployments?
 - Does the courier stay an LLM, or become a hook-side script? (Deterministic relay would remove the "courier rewrote the brief" class.)
 - Mode 1 needs the global CLAUDE.md rule and the gate hook to be conditional. Which switch: env var, or move the rule into SKILL.md?
 - Astra lane: add `astra@codex	codex	gpt-6-astra	review,hard-impl	frontier; catalog 2026-09-08` to lanes.tsv (tabs). Scout class left out on purpose.

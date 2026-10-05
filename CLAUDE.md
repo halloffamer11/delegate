@@ -44,6 +44,8 @@ history. The repo is public.
   `make delegate-wizard`.
 - A project's `.delegate/` policy never goes to main.
 - Never commit `~/.config/delegate/aa-key`.
+- Keep the repo generic. Name no organization, site or machine that a deployment
+  serves; say site deployment or machine deployment. Specifics stay machine-local.
 - Preserve unrelated working-tree changes.
 - Validate the smallest affected surface before committing; `make test` runs all.
 
