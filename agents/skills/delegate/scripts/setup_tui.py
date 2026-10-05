@@ -271,6 +271,10 @@ def refresh_lines(refresh, width=80):
     queued = [item["model"] for item in refresh.get("queued") or ()]
     if queued:
         lines.append(list_line("Dispatch noticed", queued, width))
+    # newer versions dispatch's scan already swapped in since the last run
+    swapped = [f"{item['old']} -> {item['new']}" for item in refresh.get("applied") or ()]
+    if swapped:
+        lines.append(list_line("Dispatch swapped in", swapped, width))
     if not lines:
         return [fit_line("Catalog refresh: every model is the current generation", width)]
     return lines

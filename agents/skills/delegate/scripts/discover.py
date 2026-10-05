@@ -693,6 +693,8 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
         "new": list(new_lanes),
         "removed": sorted(leaving),
         "notices": notices,
+        # each lane that took a superseded lane's place, by the lane it replaces
+        "successors": {old: list(new) for old, new in successors.items()},
     }
 
 

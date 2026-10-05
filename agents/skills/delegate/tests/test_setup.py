@@ -839,7 +839,7 @@ def case_scan_and_propose_are_the_launch_steps():
           and note.startswith("Benchmark rows: Artificial Analysis from ")
           and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
           and rows[1] == "" and len(rows[0]) > 0
-          and doc == refreshed and plan_again.pop("queued") == [] and plan_again == plan
+          and doc == refreshed and plan_again.pop("queued") == [] and plan_again.pop("applied") == [] and plan_again == plan
           and mapped == discover.map_lanes(data, doc)
           and skipped == (frozen, None, "probe failed")
           and setup.collect_bench(args, doc, rows[0]) == (None, ""))
