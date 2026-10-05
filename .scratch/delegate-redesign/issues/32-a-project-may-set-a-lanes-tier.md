@@ -41,7 +41,7 @@ changes a Tier" is corrected by the session at landing.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`0f76bac`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's, and the rule is a session decision he may overrule.
+**Status:** landed 2026-09-18 (`0f76bac`); all boxes ticked. Merged to `main` 2026-09-19 with tickets 29-32 (see `3e0bb23`); the hashes above are from before the 2026-10-01 split, which rewrote them. The rule is a session decision the user may overrule.
 
 - [x] A fixture project that moves a Tier 3 Lane to Tier 2 makes it eligible for a
       Range 1–2 Class and not for a Range 3–3 Class; the same catalog with no project

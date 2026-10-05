@@ -26,7 +26,7 @@ Paths are relative to `agents/skills/delegate/`.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`4177aa5`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's.
+**Status:** landed 2026-09-18 (`4177aa5`); all boxes ticked. Merged to `main` 2026-09-19 with tickets 29-32 (see `3e0bb23`); the hashes above are from before the 2026-10-01 split, which rewrote them.
 
 - [x] A fixture with two agy efforts scored by one source, one beating the other for no
       more money, proposes the beaten Lane off and names the competitor effort.

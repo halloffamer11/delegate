@@ -64,7 +64,7 @@ for agy would let it take Margin steals. Reopen it only with the user's word.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`b750d60`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's, and he may overrule two session decisions below.
+**Status:** landed 2026-09-18 (`b750d60`); all boxes ticked. Merged to `main` 2026-09-19 with tickets 29-32 (see `3e0bb23`); the hashes above are from before the 2026-10-01 split, which rewrote them. The two session decisions below stand unless the user overrules them.
 
 - [x] The user chooses A, B, or both, and whether `overflow` defaults on. (Both, 2026-09-18.)
 - [x] `catalog.py check` and the review page warn when one Meter serves every carried
