@@ -6,7 +6,7 @@ Spec: `.scratch/delegate-any-harness/spec.md`
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-02 (this ticket's commit on `claude/delegate-review-fixes-t6aitx`). All boxes done; a live Workflow run through the courier is still the user's to try.
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-10-02 (this ticket's commit on `claude/delegate-review-fixes-t6aitx`). All boxes done; a live Workflow run through the courier is still the user's to try.
 
 - [x] The courier keys on a line only dispatch's finish writes (a distinct prefix or `run=` with a status), never on the first `delegate:` line.
 - [x] A native-lane line is reported as "spawn the native agent", not as a result.

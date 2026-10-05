@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 One run through an ADS relay; 06 Benchmark ranking report.
 
-**Status:** plain-prompt wizard landed 2026-09-09 (commit 7c76843); the selectable TUI the user asked for is ticket 07b, landed. The one unticked box here is the same one 07b ends on: the user runs the wizard once and confirms the catalog it writes.
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: plain-prompt wizard landed 2026-09-09 (commit 7c76843); the selectable TUI the user asked for is ticket 07b, landed. The one unticked box here is the same one 07b ends on: the user runs the wizard once and confirms the catalog it writes.
 
 - [x] With no catalog present, the wizard proposes lanes for every installed harness and writes a valid catalog after yes
 - [x] With a catalog present, the existing tier is the default and a plain enter keeps it

@@ -6,7 +6,7 @@ The riskiest assumption in the design is a nested Claude run from inside Claude 
 
 **Blocked by:** 01 Lane catalog and validators.
 
-**Status:** landed 2026-09-09 (`7c76843`) on `main`. The one unticked box is the user's: a real read-only run reviewed from its run directory (spec acceptance 8).
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: landed 2026-09-09 (`7c76843`) on `main`. The one unticked box is the user's: a real read-only run reviewed from its run directory (spec acceptance 8).
 
 - [x] The ADS commit is recorded in the skill's context file and the install is reproducible from that record
 - [x] Every run leaves a directory under the delegate cache that outlives the session, and two runs never share one

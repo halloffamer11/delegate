@@ -51,7 +51,7 @@ tiers (both settled).
 **Blocked by:** None — can start immediately. Ticket 19 changes which columns the
 tier pages show; whichever lands second rebases on the other.
 
-**Status:** implemented 2026-09-12, pending the user's review (the last box is his)
+**Status:** closed 2026-10-05. The open review or one-run box below is closed as moot: the user has run the wizard, the dashboard and the evals since, and asked to close out open work. Reopen the ticket to revisit it. Earlier status: implemented 2026-09-12, pending the user's review (the last box is his)
 
 Wizard:
 - [x] Tier 4 opens with no lane marked, whatever `lanes.json` holds
