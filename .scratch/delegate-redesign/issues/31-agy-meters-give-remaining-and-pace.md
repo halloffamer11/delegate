@@ -42,7 +42,7 @@ null, Windows present) must give the new figures with no fresh probe.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-18 (`50e8035`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is the user's, and the rule is a session decision he may overrule.
+**Status:** landed 2026-09-18 (`50e8035`); all boxes ticked. Merged to `main` 2026-09-19 with tickets 29-32 (see `3e0bb23`); the hashes above are from before the 2026-10-01 split, which rewrote them. The rule is a session decision the user may overrule.
 
 - [x] A fresh and a cached agy observation with both Windows give Remaining = the lower
       fraction and a Pace; with one Window missing, the documented fallback of the other
