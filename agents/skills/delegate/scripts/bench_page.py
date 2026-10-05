@@ -245,7 +245,9 @@ def _annotate(effort_rows, lanes_doc, proposals):
         item = dict(row)
         lane_model = rec.get("lane_model")
         item["_lane_model"] = lane_model
-        item["_model_lanes"] = _lanes_of_model(lanes_doc, lane_model) if lane_model else []
+        # every harness's lanes of the model, not only the grouping one's
+        item["_model_lanes"] = sorted({name for model in rec.get("lane_models") or ()
+                                       for name in _lanes_of_model(lanes_doc, model)})
         item["_lanes"] = list(rec.get("lanes") or [])
         item["_weak"] = bool(row.get("uncertain")) or row.get("provenance") in WEAK_PROVENANCE
         item["_score"] = _num(row.get("score"))
