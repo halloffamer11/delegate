@@ -1401,7 +1401,8 @@ class Wizard:
                 counts = ([str(sum(1 for h in new.values() if h == name)), str(removed.count(name))]
                           if self.refresh is not None else ["—", "—"])
                 rows.append({"cells": [name, label, models, *counts], "marked": False,
-                             "dimmed": not found, "cursor": False, "tag": ""})
+                             "dimmed": not found, "cursor": False, "tag": "",
+                             "harness": name})
             body = [self._fit(f"Scanned {self.scanned}: models per harness, benchmark rows, "
                               "current generation.")]
             if self.rows_note:
@@ -1437,7 +1438,7 @@ class Wizard:
                     ],
                     "marked": on, "dimmed": not on,
                     "cursor": index == self.cursor,
-                    "tag": "",
+                    "tag": "", "harness": lane.get("harness"),
                     # The one reason class drawn in a style of its own: a
                     # verdict the data gave, which nobody recorded and which is
                     # worth a second look. The others say nothing the box and
@@ -1475,7 +1476,7 @@ class Wizard:
                               *proposed, *self._bench_cells(name, epoch_names, aa_names)],
                     "marked": marked, "dimmed": False,
                     "cursor": index == self.cursor,
-                    "tag": "",
+                    "tag": "", "harness": lane.get("harness"),
                 })
             return self._frame(
                 "tier", f"Assign tier {self.tier}", tier=self.tier,
@@ -1512,6 +1513,7 @@ class Wizard:
                                   *self._bench_cells(name, epoch_names, aa_names)],
                         "marked": False, "dimmed": False,
                         "cursor": name == here, "tag": "",
+                        "harness": lane.get("harness"),
                     })
             off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
             # The keys spelled out, then the rule, then any warning: three
@@ -1558,7 +1560,8 @@ class Wizard:
                 # the column says `off`; a tag saying it again read `off  off`
                 rows.append({"cells": [name, "off" if off else "",
                                         f"tier {self._final_tier(name)}"],
-                             "marked": False, "dimmed": off, "tag": ""})
+                             "marked": False, "dimmed": off, "tag": "",
+                             "harness": self.lanes_doc["lanes"][name].get("harness")})
             for name in self.classes:
                 cls_info = self.routing_doc["classes"][name]
                 rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
@@ -1638,6 +1641,11 @@ def _fit_table(view, width):
     xhigh — so at 80 places they were 27 places of restatement drawn ahead of
     the benchmark scores, and the scores, which are the only reason the tier
     screen exists, were the columns that fell off the end.
+
+    They also give way to the `elastic` column: one is drawn only when the
+    elastic column keeps its whole width beside it. At 80 places the carry
+    page's harness gutter left the reasons two places short, and `no rows for
+    this l…` is a reason cut for an `effort` column the lane name already says.
     """
     columns = view["columns"]
     if not columns:
@@ -1659,8 +1667,11 @@ def _fit_table(view, width):
     # 24 places a cell at 80 and 100; a wide terminal lets a cell run longer,
     # so `classes.mechanical.ceiling` is whole at 200 instead of cut as at 80
     cap = max(24, room // 6)
+    reserve = 2 + _natural_width(view, elastic_index) if elastic_index is not None else 0
     for i in priority + rest + deferred:
         cell_width = min(_natural_width(view, i), cap)
+        if i in deferred and chosen and used + 2 + cell_width + reserve > room:
+            break
         if chosen and used + 2 + cell_width > room:
             # A column skipped over while a narrower one behind it is drawn
             # reads as data nobody gathered: at 100 places FrontierCode dropped
@@ -1687,6 +1698,8 @@ def _fit_table(view, width):
 # reference and the rows are the work.
 ROW_FLOOR = 6
 MIN_WIDTH, MIN_HEIGHT = 80, 16
+# The places left of a table whose rows name a harness: the bar and a space.
+GUTTER = 2
 # The rows above the body on every page: the trail, a blank row, the title and
 # a blank row. The body or the table starts here.
 TOP = 4
@@ -1729,6 +1742,27 @@ STYLES = {
     "key": ("bold", "cyan"),              # the keys themselves
     "message": ("bold", None),
 }
+
+# One hue per harness, for the bar in the gutter of each lane row, so the rows
+# of one harness read as one group. A harness takes the hue at its place in the
+# registry (`harnesses.NAMES`), so its colour is the same on every page and every
+# run, and a harness added to the end of the registry leaves the others theirs.
+# Each hue is a 256-colour index and the basic-eight colour that stands in for
+# it on a terminal with fewer colours. Without colour the bar is still drawn,
+# and the lane name's `@harness` says which harness it is.
+HARNESS_HUES = ((173, "red"), (33, "blue"), (135, "magenta"), (37, "cyan"), (106, "green"))
+HARNESS_BAR = "▌"
+for _index, _hue in enumerate(HARNESS_HUES):
+    STYLES[f"harness-{_index}"] = ("", _hue)
+
+
+def harness_style(name):
+    """The style of a harness's gutter bar, or None for a name the registry
+    does not hold."""
+    if name not in HARNESSES:
+        return None
+    return f"harness-{HARNESSES.index(name) % len(HARNESS_HUES)}"
+
 # A panel beside a table: the gap before its rule, the narrowest it may be
 # before it is not drawn, and the widest its prose runs, for reading.
 PANEL_GAP, PANEL_MIN, PANEL_MAX = 3, 28, 72
@@ -1822,16 +1856,23 @@ def layout_lines(view, width, height):
     `spans` is [(start, end, style)] over `text`: each a piece the renderer
     draws again in a style of its own over the line's role — a ticked box,
     the step this page is, a key, a reason the data gave. Most lines have
-    none, and the cursor row never does, so it stays one bar.
+    none, and the cursor row has only its harness bar, so it stays one bar.
 
     An entry's leading spaces are its column: a panel line beside the table
     shares a row with a table line and starts where the table ends, so it is
     drawn at its indent rather than over the row. `overlay` composes them.
+
+    A table whose rows name a `harness` keeps a gutter of `GUTTER` places on
+    its left: each such row draws `HARNESS_BAR` there in its harness's hue
+    (`harness_style`), so the rows of one harness read as one coloured line.
+    The bar is a span of its own, on the cursor row too, so the cursor's bar
+    does not hide which harness the lane runs on.
     """
     lines = []
     rows = view["rows"]
     tag_room = max([len(row["tag"]) for row in rows], default=0)
-    chosen, widths = _fit_table(view, width - (tag_room + 2 if tag_room else 0))
+    gutter = GUTTER if any(row.get("harness") for row in rows) else 0
+    chosen, widths = _fit_table(view, width - gutter - (tag_room + 2 if tag_room else 0))
     body = view.get("body") or []
     footer_y = height - 3
     # the keys never touch what stands above them
@@ -1864,7 +1905,7 @@ def layout_lines(view, width, height):
         y += 1
     first, shown = 0, 0
     if chosen and view.get("panel"):
-        table_width = sum(widths) + 2 * (len(widths) - 1)
+        table_width = gutter + sum(widths) + 2 * (len(widths) - 1)
         panel_x = table_width + PANEL_GAP
         panel_width = min(PANEL_MAX, width - 1 - panel_x - 2)
         if panel_width >= PANEL_MIN:
@@ -1884,8 +1925,9 @@ def layout_lines(view, width, height):
         if body:
             y += 1
         if y < table_end:
-            lines.append((y, "  ".join(_clip(view["columns"][i], w).ljust(w)
-                                      for i, w in zip(chosen, widths)), "header", []))
+            lines.append((y, " " * gutter + "  ".join(_clip(view["columns"][i], w).ljust(w)
+                                                      for i, w in zip(chosen, widths)),
+                          "header", []))
             y += 1
         room = max(1, table_end - y)
         cursor_index = next((i for i, row in enumerate(rows) if row["cursor"]), 0)
@@ -1899,7 +1941,7 @@ def layout_lines(view, width, height):
                 y += 1
                 shown += 1
                 continue
-            cells, spans, x = [], [], 0
+            cells, spans, x = [], [], gutter
             styles = row.get("styles") or {}
             for i, w in zip(chosen, widths):
                 cell = row["cells"][i] if i < len(row["cells"]) else ""
@@ -1914,6 +1956,14 @@ def layout_lines(view, width, height):
                 cells.append(_clip(cell, w).ljust(w))
                 x += w + 2
             line = "  ".join(cells)
+            if gutter:
+                bar = harness_style(row.get("harness"))
+                line = (HARNESS_BAR if bar else " ").ljust(gutter) + line
+                if bar:
+                    spans.insert(0, (0, len(HARNESS_BAR), bar))
+                if row["cursor"]:
+                    # the cursor's bar starts after the gutter, not on its gap
+                    spans.insert(1 if bar else 0, (len(HARNESS_BAR), gutter, "body"))
             if row["tag"]:
                 line += "  " + row["tag"]
             role = "row-cursor" if row["cursor"] else "row"
@@ -1962,32 +2012,43 @@ def _palette(curses):
     Colour comes only when the terminal has at least the basic eight and
     takes its own background (`use_default_colors`), so a light theme and a
     dark one both keep their background under the text. Without that, or if
-    a pair cannot be made, every style keeps its attributes and drops its
-    colour, so a ticked box is still bold and a key is still bold. A style
-    that is colour alone then draws as plain text: `why-data` looks like any
-    other cell, and only its words set it apart.
+    a pair cannot be made, or with `NO_COLOR` set, every style keeps its
+    attributes and drops its colour, so a ticked box is still bold and a key
+    is still bold. A style that is colour alone then draws as plain text:
+    `why-data` looks like any other cell, and only its words set it apart,
+    and a harness bar is a plain bar, with the lane name saying the harness.
+    A harness hue takes its 256-colour index where the terminal has 256
+    colours, and its basic-eight stand-in where it has fewer.
     """
     attrs = {"bold": curses.A_BOLD, "dim": curses.A_DIM,
              "reverse": curses.A_REVERSE, "underline": curses.A_UNDERLINE}
     codes = {"green": curses.COLOR_GREEN, "cyan": curses.COLOR_CYAN,
-             "yellow": curses.COLOR_YELLOW}
+             "yellow": curses.COLOR_YELLOW, "red": curses.COLOR_RED,
+             "blue": curses.COLOR_BLUE, "magenta": curses.COLOR_MAGENTA}
     mono = {}
     for style, (words, _colour) in STYLES.items():
         attr = 0
         for word in words.split():
             attr |= attrs[word]
         mono[style] = attr
+    # https://no-color.org: set to anything, it turns colour off
+    if os.environ.get("NO_COLOR"):
+        return mono
     try:
         if not (curses.has_colors() and getattr(curses, "COLORS", 0) >= 8):
             return mono
         curses.use_default_colors()
+        rich = getattr(curses, "COLORS", 0) >= 256
         pairs = {}
         palette = dict(mono)
         for style, (_words, colour) in STYLES.items():
             if colour:
+                # a harness hue is (256-colour index, basic-eight stand-in)
+                if isinstance(colour, tuple):
+                    colour = colour[0] if rich else colour[1]
                 if colour not in pairs:
                     pairs[colour] = len(pairs) + 1
-                    curses.init_pair(pairs[colour], codes[colour], -1)
+                    curses.init_pair(pairs[colour], codes.get(colour, colour), -1)
                 palette[style] |= curses.color_pair(pairs[colour])
         return palette
     except curses.error:

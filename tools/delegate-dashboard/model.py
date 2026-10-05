@@ -590,6 +590,8 @@ class DashboardModel:
                 "probed_at": meters.get("probed_at") if "lanes" in meters else None,
             },
             "tiers": tiers,
+            # the registry's order, which gives each harness its colour
+            "harnesses": list(harnesses.NAMES),
             "project_tiers": project_tiers,
             "staged": staged,
             "revision": self._revision,
