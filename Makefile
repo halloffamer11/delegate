@@ -1,8 +1,9 @@
 # delegate/Makefile — install delegate on this machine and run its tools.
 #
 # Usage:
-#   make install             # link the skills, each orchestrator's agents (Claude's courier) and the `delegate` command; write the codex home;
-#                            # fetch the relays at the pin (ads.sh install)
+#   make install             # link the skills, each orchestrator's agents (Claude's courier) and the `delegate` command; then runtime
+#   make runtime             # what a plugin install also needs: the codex home and the relays at the pin
+#                            # (ads.sh install, skipped when ads.sh check passes). `delegate setup` runs it.
 #   make test                # every script test and the dashboard test (stdlib only, no network);
 #                            # PYTHON=python3.X picks the interpreter, 3.9 or newer
 #   make eval-ping           # eval 1: a pong job on every installed harness (spends a little quota);
@@ -38,9 +39,9 @@ DELEGATE_DASHBOARD_PLACEMENT ?= split
 # oldest one in use sets the minimum: 3.9, macOS's /usr/bin/python3.
 PYTHON ?= python3
 
-.PHONY: install test eval-ping eval-orchestrate delegate-codex-home delegate-wizard delegate-dashboard
+.PHONY: install runtime test eval-ping eval-orchestrate delegate-codex-home delegate-wizard delegate-dashboard
 
-install: delegate-codex-home
+install: runtime
 	@# A real directory at a link path is someone's data: stop rather than nest a link inside it.
 	@for t in $(HARNESS_SKILL_DIRS); do for s in $(SKILLS); do \
 		if [ -e $$t/$$s ] && [ ! -L $$t/$$s ]; then echo "ERROR: $$t/$$s is a real directory — move it aside first"; exit 1; fi; \
@@ -55,8 +56,14 @@ install: delegate-codex-home
 	$(PYTHON) $(CURDIR)/agents/skills/delegate/scripts/orchestrators.py agents | while IFS='	' read -r src link; do \
 		mkdir -p "$$(dirname "$$link")" && ln -sfn "$$src" "$$link" && echo "link $$link"; done
 	ln -sfn $(CURDIR)/bin/delegate $(HOME)/.local/bin/delegate
-	@# The relays at the pinned commit. Offline, install still finishes; ads.sh check says what is missing.
-	@sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh install || echo "WARNING: could not fetch the relays; run 'sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh install' once online"
+
+# The machine state outside any harness's skill dir. A plugin install ships the skills
+# and puts bin/ on PATH but runs no make, so `delegate setup` runs this first.
+runtime: delegate-codex-home
+	@# The relays at the pinned commit. Offline, this still finishes; ads.sh check says what is missing.
+	@sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh check >/dev/null 2>&1 \
+		|| sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh install \
+		|| echo "WARNING: could not fetch the relays; run 'sh $(CURDIR)/agents/skills/delegate/scripts/ads.sh install' once online"
 
 test:
 	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else "make test: delegate needs Python 3.9 or newer; $(PYTHON) is " + sys.version.split()[0])'

@@ -1,0 +1,19 @@
+{
+  "name": "delegate",
+  "description": "Routes worker jobs to external or native models by capability and remaining subscription usage, plus council. Puts the `delegate` command on PATH; run `delegate setup` once per machine.",
+  "author": {
+    "name": "halloffamer11",
+    "url": "https://github.com/halloffamer11"
+  },
+  "homepage": "https://github.com/halloffamer11/delegate",
+  "repository": "https://github.com/halloffamer11/delegate",
+  "keywords": [
+    "delegation",
+    "routing",
+    "subagents"
+  ],
+  "skills": [
+    "./agents/skills/delegate",
+    "./agents/skills/council"
+  ]
+}

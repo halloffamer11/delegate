@@ -8,15 +8,18 @@ disable-model-invocation: true
 
 The session plans, adjudicates and synthesizes; a worker does one job on one
 **lane**, a (harness, model, effort) tuple that drains one subscription
-**meter**. Every step is the `delegate` command on PATH (`make install` in the
-delegate checkout links it), so any harness with a shell can drive it.
+**meter**. Every step is the `delegate` command on PATH (the plugin puts it
+there, or `make install` in the delegate checkout links it), so any harness
+with a shell can drive it. When `delegate` is not on PATH, run `bin/delegate`
+at the root of the checkout this skill sits in, three directories above this
+file.
 
 Delegate only when the user asks for it. Never start a worker because a task
 looks worker-shaped, and never pick a harness or a lane to spend a quota.
 
 The terms (harness, lane, meter, class, tier, floor, ceiling, range, pace,
 gate, margin, native lane, and the rest) are defined in `CONTEXT.md` at the
-root of the delegate checkout (`~/projects/delegate/CONTEXT.md` by default).
+root of the delegate checkout, which `delegate where` prints.
 Read it once per session before the first run.
 
 ## Workflow
