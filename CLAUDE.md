@@ -20,6 +20,8 @@ history. The repo is public.
 - `bin/delegate`: the `delegate` command, the contract every harness calls
   (`rank`, `run`, `dispatch`, `status`, `catalog`, `global`, `project`, ...).
 - `tools/delegate-dashboard/`: the Herdr plugin and `deck` dashboard.
+- `.claude-plugin/plugin.json`: the plugin manifest (Claude Code and Codex). The
+  marketplace that lists it is in `halloffamer11/skills`.
 
 ## Where state lives
 
