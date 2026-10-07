@@ -7,9 +7,10 @@
     delegate status [--json] ...    remaining usage per Meter
     delegate log|runs|cost ...      record and read adjudicated runs
     delegate catalog ...            show, check or edit the catalog
-    delegate setup [args]           the setup wizard (the same as global)
+    delegate setup [args]           first run on a machine: the runtime, then the wizard
     delegate global [args]          edit the global catalog (the setup wizard)
     delegate project [args]         edit this Git project's settings (the dashboard)
+    delegate where                  print the checkout this command runs from
 
 The command is the contract: the skill, council and the courier call it, and
 never a path under any harness's home, so any harness that can run a shell
@@ -18,6 +19,11 @@ to, found from its own resolved path rather than a fixed checkout, so the Mac
 checkout, a Herdr worktree and omarchy each run their own (ticket 34). The
 Makefile stays the one place that lists the wizard's arguments: `global`
 passes anything further as WIZARD_ARGS.
+
+Installed as a plugin, the checkout is the plugin's copy and the harness puts
+`bin/` on PATH, so nothing is linked. `setup` then also makes the runtime (the
+codex home and the relays at the pin) before the wizard, which is all of
+`make install` that a plugin install lacks.
 """
 import os
 import shlex
@@ -32,7 +38,9 @@ USAGE = (
     "delegate log|runs|cost ...   record and read adjudicated runs\n"
     "delegate catalog ...   show, check or edit the catalog\n"
     "delegate global [args]   edit the global catalog (the setup wizard)\n"
-    "delegate project [args]  edit this Git project's settings (the dashboard)"
+    "delegate project [args]  edit this Git project's settings (the dashboard)\n"
+    "delegate setup [args]   first run on a machine: the runtime, then the wizard\n"
+    "delegate where   print the checkout this command runs from"
 )
 
 # This file is <checkout>/bin/delegate, and `make install` links it into
@@ -90,9 +98,15 @@ def main(argv):
         script, lead = SCRIPT_COMMANDS[command]
         return subprocess.call([sys.executable, os.path.join(SCRIPTS, script), *lead, *rest])
 
+    if command == "where":
+        print(CHECKOUT)
+        return 0
+
     if command in ("global", "setup"):
+        # setup first makes the runtime, so a plugin install needs no `make install`
+        targets = ["runtime", "delegate-wizard"] if command == "setup" else ["delegate-wizard"]
         return subprocess.call([
-            "make", "-C", CHECKOUT, "delegate-wizard",
+            "make", "-C", CHECKOUT, *targets,
             # one make variable, re-split by the recipe's shell, so a path with
             # a space in it survives
             "WIZARD_ARGS=" + " ".join(shlex.quote(arg) for arg in rest),

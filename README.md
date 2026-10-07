@@ -27,8 +27,33 @@ Source: `docs/diagrams/routing.d2`; rebuild with `sh docs/diagrams/render.sh`.
 
 ## Install
 
-Needs Python 3.9 or newer as `python3` (macOS ships 3.9 at `/usr/bin/python3`) and
-`node` for relayed lanes. The scripts use the standard library only.
+Needs Python 3.9 or newer as `python3` (macOS ships 3.9 at `/usr/bin/python3`),
+`make`, `git`, and `node` for relayed lanes. The scripts use the standard library only.
+
+### As a plugin
+
+The marketplace in [halloffamer11/skills](https://github.com/halloffamer11/skills)
+lists delegate as the `delegate` plugin, with `delegate` and `council`.
+
+```sh
+claude plugin marketplace add halloffamer11/skills   # Claude Code; or /plugin in a session
+claude plugin install delegate@halloffamer11
+codex plugin marketplace add halloffamer11/skills    # Codex
+codex plugin add delegate@halloffamer11
+```
+
+Then run `delegate setup` once on the machine. It writes the codex home, fetches
+the relays at their pin, and opens the wizard for this machine's catalog. Claude
+Code puts the plugin's `bin/` on PATH. In Codex, run the plugin copy's
+`bin/delegate setup` or link it onto PATH yourself. A plugin install does not ship
+the courier agent, which only Claude Workflow scripts need; use the checkout
+install for it. The Codex copy is under
+`~/.codex/plugins/cache/halloffamer11/delegate/`. Install delegate one way per
+machine: the plugin and the checkout's links would load each skill twice.
+
+### From a checkout
+
+Use this to edit delegate: each skill is a symlink, so an edit is live.
 
 ```sh
 git clone https://github.com/halloffamer11/delegate ~/projects/delegate

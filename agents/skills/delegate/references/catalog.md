@@ -102,7 +102,9 @@ screen. Use the CLI commands above where there is no terminal.
 ## The wizard
 
 `delegate setup` (also `delegate global`, or `make delegate-wizard` in the
-checkout) builds or revises this machine's catalog. At start it fetches the
+checkout) builds or revises this machine's catalog. `setup` first runs
+`make runtime` (the codex home and the relays), which a plugin install needs
+once. At start it fetches the
 Artificial Analysis rows (cached for 24 hours) and asks each installed
 harness for its models, then proposes the current generation in memory: a
 lane for every effort of every current model, each new lane in its

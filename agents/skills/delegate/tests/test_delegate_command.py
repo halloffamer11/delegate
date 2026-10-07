@@ -213,6 +213,34 @@ for args, (program, argv) in expected.items():
         )
 
 # -------------------------------------------------------------
+# 9. `delegate setup` makes the runtime before the wizard, so a plugin install
+#    (no `make install`) gets the codex home and the relays on its first run.
+with tempfile.TemporaryDirectory() as td:
+    checkout, command, env, record_to = make_checkout(td)
+    res = run(command, ["setup", "--plain"], env, td)
+    called = ran(record_to)
+    record(
+        "9 delegate setup runs the runtime target, then the wizard",
+        res.returncode == 7 and called is not None
+        and called["argv"] == ["-C", os.path.realpath(checkout), "runtime", "delegate-wizard",
+                               "WIZARD_ARGS=--plain"],
+        repr(called),
+    )
+
+# -------------------------------------------------------------
+# 10. `delegate where` prints the checkout it runs from and runs nothing; the
+#     skill reads CONTEXT.md there, wherever the plugin or the clone put it.
+with tempfile.TemporaryDirectory() as td:
+    checkout, command, env, record_to = make_checkout(td)
+    res = run(command, ["where"], env, td)
+    record(
+        "10 delegate where prints its own checkout",
+        res.returncode == 0 and res.stdout.strip() == os.path.realpath(checkout)
+        and ran(record_to) is None,
+        f"rc={res.returncode} out={res.stdout!r}",
+    )
+
+# -------------------------------------------------------------
 # 7. The shipped file is executable, so the link is a runnable command.
 record(
     "7 the shipped command is executable and is Python 3",
