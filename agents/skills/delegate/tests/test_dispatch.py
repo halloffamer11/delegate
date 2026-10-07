@@ -99,6 +99,13 @@ exec /usr/bin/git "$@"
             f.write("#!/bin/sh\nexit 0\n")
         os.chmod(stub, 0o755)
 
+    # The host's own Seatbelt state never reaches the cases: a sandbox-exec
+    # that nests stands in for /usr/bin/sandbox-exec (case 12g swaps it).
+    seatbelt = os.path.join(fake_bin, "sandbox-exec")
+    with open(seatbelt, "w") as f:
+        f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(seatbelt, 0o755)
+
     # Keep real node/sh/python3 reachable without exposing real harness CLIs
     # that share a directory with them (e.g. ~/.local/bin/{node,grok,claude}).
     for tool in ("node", "sh", "python3"):
@@ -698,6 +705,37 @@ def main():
         )
         record("12f. a return.json that cannot be written still leaves a ledger finish", ok12f,
                f"rc={res12f.returncode} err={res12f.stderr[-400:]} ledger={new12f}")
+
+        # 12g. Inside a Seatbelt sandbox that refuses a nested one, a codex lane
+        # is blocked before its relay runs and says why; a lane on a harness
+        # that does not nest Seatbelt still runs.
+        seatbelt = os.path.join(t_env["fake_bin"], "sandbox-exec")
+        with open(seatbelt, "w") as f:
+            f.write("#!/bin/sh\necho 'sandbox-exec: sandbox_apply: Operation not permitted' >&2\nexit 71\n")
+        try:
+            ledger_before12g = len(ledger_lines())
+            res12g = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd])
+            dir12g = parse_run_dir_from_stdout(res12g.stdout)
+            new12g = ledger_lines()[ledger_before12g:]
+            ret12g = json.load(open(os.path.join(dir12g, "return.json"))) if dir12g else {}
+            ok12g = (
+                res12g.returncode == 1 and dir12g is not None and
+                not os.path.exists(os.path.join(dir12g, "result.json")) and
+                [e.get("kind") for e in new12g] == ["dispatch.start", "dispatch.finish"] and
+                new12g[1].get("status") == "blocked" and
+                ret12g.get("status") == "blocked" and
+                "sandbox_apply: Operation not permitted" in ret12g.get("deliverable", "") and
+                "Herdr" in ret12g.get("deliverable", "")
+            )
+            record("12g. a codex lane inside a Seatbelt that refuses nesting is blocked before the relay", ok12g,
+                   f"rc={res12g.returncode} out={res12g.stdout} err={res12g.stderr[-400:]} ret={ret12g}")
+
+            res12h = run_dispatch(t_env, ["--lane", "grok46-high@grok", "--class", "impl", "--brief", b12d, "--cwd", cwd])
+            record("12h. a grok lane is not probed and still runs", res12h.returncode == 0,
+                   f"rc={res12h.returncode} out={res12h.stdout} err={res12h.stderr[-400:]}")
+        finally:
+            with open(seatbelt, "w") as f:
+                f.write("#!/bin/sh\nexit 0\n")
 
 
         # -------------------------------------------------------------

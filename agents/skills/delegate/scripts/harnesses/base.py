@@ -10,6 +10,7 @@ import copy
 import os
 import re
 import shutil
+import subprocess
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # The same words longest first, for a pattern that reads an effort off the end
@@ -241,6 +242,12 @@ class Harness:
         run directory, or None. Only a harness whose events say so has one."""
         return None
 
+    def preflight(self, write_dir):
+        """Why this machine cannot start a run on the harness right now, in one
+        line, or None. Asked before the relay runs, so a run that could only
+        fail spends no Meter."""
+        return None
+
     def run_args(self, effort, timeout, write_dir):
         """(relay flags, env overrides or None) for one run, after the
         `--brief --cd --out-dir --model` every relay takes."""
@@ -257,3 +264,28 @@ class Harness:
         """The effort a browser probe overrides to, or None to keep the
         Lane's."""
         return "low"
+
+
+def seatbelt_blocked():
+    """The error when this process sits inside a macOS Seatbelt sandbox that
+    refuses a nested one, or None.
+
+    Seatbelt profiles do not nest: under an outer profile with any real rule,
+    a second `sandbox_apply` fails with EPERM and `sandbox-exec` exits 71. A
+    harness that sandboxes its own commands with Seatbelt then cannot run a
+    single command, though its own process starts fine. A Claude Code session with its Bash sandbox on is one such
+    outer profile. Probing with the most permissive inner profile there is
+    tells the two cases apart. Only macOS has `sandbox-exec`, so elsewhere
+    there is nothing to probe.
+    """
+    if not shutil.which("sandbox-exec"):
+        return None
+    try:
+        proc = subprocess.run(["sandbox-exec", "-p", "(version 1)(allow default)", "/usr/bin/true"],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode == 0:
+        return None
+    lines = (proc.stderr or "").strip().splitlines()
+    return lines[-1] if lines else f"sandbox-exec exited {proc.returncode}"

@@ -376,6 +376,18 @@ follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_r
 reason is the harness adapter's `blocked_reason`, which only grok's implements (fixture
 `tests/fixtures/dispatch/grok-gate-cancel/`).
 
+## Codex inside another sandbox
+
+macOS Seatbelt profiles do not nest: under an outer profile with any real rule, a second
+`sandbox_apply` fails with `Operation not permitted` and `sandbox-exec` exits 71 (reproduced on
+macOS 27 with codex 0.160.1, 2026-10-07). Codex sandboxes every command it runs with Seatbelt, so
+a codex lane started from a Claude Code session whose Bash sandbox is on cannot run a single
+command. `Codex.preflight` probes for this (`harnesses.base.seatbelt_blocked`) and dispatch
+returns `blocked` with the reason before the relay runs or a Meter is spent. Run such a lane from
+a shell outside the outer sandbox, such as a Herdr pane: Herdr's server starts the process, not
+the sandboxed shell. Turning off Codex's own sandbox instead would leave a read-only lane
+unenforced, so delegate does not do it.
+
 ## Browser use per harness
 
 Browser use per harness, as proven on the Mac on 2026-09-12. **agy**: works, disposable browser,
