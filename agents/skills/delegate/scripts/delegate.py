@@ -553,6 +553,11 @@ def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, p
     before-probe would only repeat it (and `claude -p /usage` can spend the
     quota it measures).
     """
+    # Step 4b: a harness that cannot start here fails before it spends a Meter
+    reason = harnesses.get(harness).preflight(write)
+    if reason:
+        raise Preflight(reason)
+
     # Step 5: Probe meters (before)
     if not probed:
         probe_meters(no_probe, routing)
@@ -606,8 +611,14 @@ def note_usage_limit(harness, meter, mapped):
         pass
 
 
+class Preflight(Exception):
+    """The harness said, before its relay ran, that it cannot run here."""
+
+
 def start_failure(exc):
     """Why a run that the ledger has started could not run, in one line."""
+    if isinstance(exc, Preflight):
+        return str(exc)
     if isinstance(exc, FileNotFoundError) and exc.filename == "node":
         return "node is not on PATH; the relay needs Node.js"
     if isinstance(exc, KeyboardInterrupt):

@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 
-from .base import EFFORTS, Harness
+from .base import EFFORTS, Harness, seatbelt_blocked
 
 
 class Codex(Harness):
@@ -86,6 +86,15 @@ class Codex(Harness):
             wins["weekly" if mins >= 24 * 60 else "5h"] = win(w)
         f5, r5 = wins.get("5h", (None, None)); fw, rw = wins.get("weekly", (None, None))
         return [usage.meter_row(self.name, None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
+
+    def preflight(self, write_dir):
+        # Codex runs every command under its own Seatbelt profile, read-only
+        # and workspace-write alike, so it cannot run inside another one.
+        error = seatbelt_blocked()
+        if not error:
+            return None
+        return (f"codex cannot start its sandbox inside this shell's sandbox ({error}); "
+                "run the lane from a shell outside it, such as a Herdr pane")
 
     def run_args(self, effort, timeout, write_dir):
         args = ["--effort", effort, "--timeout", timeout, "--skip-git-repo-check"]
