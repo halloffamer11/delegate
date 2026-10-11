@@ -138,8 +138,10 @@ model swap dispatch's scan made, the save names the file, writes nothing and
 exits 1, so start setup again. A file the session left as it was keeps its
 bytes, and each one the save replaces is first copied to
 `~/.config/delegate/backups/` (the newest 20 of each are kept). The save also
-writes the agent file of each new native lane where the orchestrator profile
-keeps them, and removes superseded ones.
+gives every native lane in the catalog its agent file where the orchestrator
+profile keeps them, and removes the files of the lanes it took out. The start
+page names what dispatch noticed and swapped in since the last run, and the
+save forgets exactly those; a model noticed while setup is open stays queued.
 
 `delegate project` opens the dashboard for the current directory's Git
 project.

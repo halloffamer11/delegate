@@ -21,15 +21,20 @@ A newer version of a model the catalog already runs is not queued: the scan
 applies it (`apply_successors`). Each Lane the refresh would replace with its
 successor (`gpt-6-sol` to `gpt-6.1-sol` at the same effort) is swapped in the
 global lanes.json, keeping its Tier, Order, Meter and weight, and staying off
-if it was off. The old lanes.json is copied beside the queue first, and native
-agent files follow. A model new to its harness, a new effort, and a superseded
-Lane with no successor at its effort still wait for the wizard, since the
-human sets those Tiers. Nothing here names a model: the harness's own list says
-what is newer. $DELEGATE_MODEL_APPLY=off keeps the scan to queueing.
+if it was off. The scan reads and writes the catalog through `catalog_commit`,
+so the old lanes.json is backed up to `<config dir>/backups` and the Agent
+files follow, and a catalog that changed while the scan listed models is left
+to the writer in between: the newer version then waits in the queue. A model
+new to its harness, a new effort, and a superseded Lane with no successor at
+its effort still wait for the wizard, since the human sets those Tiers.
+Nothing here names a model: the harness's own list says what is newer.
+$DELEGATE_MODEL_APPLY=off keeps the scan to queueing.
 
 The queue lives beside the meter cache (`new-models.json`), or at
-$DELEGATE_MODEL_QUEUE. The wizard's confirm write empties it, since that run
-saw every model the refresh proposed. $DELEGATE_MODEL_SCAN=off stops the scan.
+$DELEGATE_MODEL_QUEUE. A full wizard run reads it with the catalog and names
+it on its start page, whether or not its refresh ran; its save forgets
+exactly the entries that page named and keeps any noted since (deepening
+D.4). $DELEGATE_MODEL_SCAN=off stops the scan.
 
   model_queue.py show            print the queue (and the swaps applied) as JSON
   model_queue.py scan [--config-dir DIR] [--fixture-dir DIR]
@@ -109,14 +114,19 @@ def note(entries, via):
     return added
 
 
-def clear():
-    """Empty the queue, and the swaps it reported, after a wizard run wrote the
-    catalog, keeping when the last scan ran so dispatch does not start another
-    at once."""
+def forget(models=(), swaps=()):
+    """Take out exactly these queued models and applied swaps: the ones a
+    wizard run read with its catalog and named on its start page, now that
+    its commit wrote (`catalog_commit`, decision D.4). Entries added since
+    stay, and so does when the last scan ran, so dispatch does not start
+    another at once."""
     doc = read()
-    if doc["models"] or doc.get("applied"):
-        doc["models"] = []
-        doc["applied"] = []
+    applied_now = list(doc.get("applied") or ())
+    kept = [m for m in doc["models"] if m not in models]
+    kept_swaps = [m for m in applied_now if m not in swaps]
+    if len(kept) != len(doc["models"]) or len(kept_swaps) != len(applied_now):
+        doc["models"] = kept
+        doc["applied"] = kept_swaps
         _write(doc)
 
 
@@ -180,53 +190,34 @@ def apply_successors(lanes_doc, refreshed, plan):
     return doc, swaps
 
 
-def _backup(lanes_path, raw):
-    """Copy the lanes.json a scan is about to change beside the queue."""
-    folder = os.path.join(os.path.dirname(path()), "lanes-backups")
-    os.makedirs(folder, exist_ok=True)
-    stamp = _now().strftime("%Y%m%dT%H%M%SZ")
-    target = os.path.join(folder, f"lanes-{stamp}.json")
-    with open(target, "wb") as f:
-        f.write(raw)
-    return target
-
-
-def _write_applied(base, lanes_path, raw, doc, swaps):
-    """Write the swapped catalog, unless lanes.json changed since the scan read
-    it (a wizard run in between wins), and the native agents that follow it.
-    Returns True when it wrote."""
-    import catalog
-    import setup
-    catalog.validate_lanes(doc, source=lanes_path)
-    with open(lanes_path, "rb") as f:
-        if f.read() != raw:
-            return False
-    _backup(lanes_path, raw)
-    catalog.write_json(lanes_path, doc)
-    change = {"new": [new for _old, new in swaps], "removed": [old for old, _new in swaps]}
-    setup.save_all_native_agents(change, doc, setup.native_targets(base))
-    return True
-
-
 def scan(config_dir=None, fixture_dir=None, present=None):
     """Apply each newer version of a model the catalog runs, then queue every
     model no Lane runs that the wizard's refresh would add a Lane for. Returns
     what it queued."""
     import catalog
+    import catalog_commit
     import discover
-    base = os.path.expanduser(config_dir if config_dir is not None else catalog.CONFIG_DIR)
-    lanes_path = os.path.join(base, "lanes.json")
-    with open(lanes_path, "rb") as f:
-        raw = f.read()
-    lanes_doc = catalog.load_json(lanes_path)
+    snap = catalog_commit.read(config_dir)
+    lanes_doc = snap.lanes
+    if lanes_doc is None:
+        raise catalog.CatalogError(f"{snap.files['lanes']}: file is missing")
     discovery = discover.discover(lanes_doc, present=present, fixture_dir=fixture_dir)
     refreshed, plan = discover.refresh_catalog(lanes_doc, discovery)
     _mark_checked()
     if os.environ.get("DELEGATE_MODEL_APPLY", "").lower() not in OFF:
         doc, swaps = apply_successors(lanes_doc, refreshed, plan)
-        if swaps and _write_applied(base, lanes_path, raw, doc, swaps):
-            lanes_doc = doc
-            _note_applied(swaps, doc)
+        if swaps:
+            try:
+                done = catalog_commit.commit(snap, {"lanes": doc})
+            except catalog_commit.CatalogChanged:
+                # a wizard save or a catalog set in between wins; the newer
+                # version is queued below for the next wizard run instead
+                pass
+            else:
+                for line in done.lines:
+                    sys.stderr.write(f"{line}\n")
+                lanes_doc = doc
+                _note_applied(swaps, doc)
     # the refresh also adds Lanes at new efforts of a model the catalog runs;
     # only a model no Lane runs is one the catalog lacks
     import harnesses

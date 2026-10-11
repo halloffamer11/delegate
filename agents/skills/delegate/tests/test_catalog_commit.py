@@ -4,7 +4,9 @@
 Every case runs on a temp config dir copied from assets/samples, never the live
 catalog. Run: python3 tests/test_catalog_commit.py
 """
+import contextlib
 import copy
+import json
 import os
 import shutil
 import sys
@@ -16,11 +18,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # invoking checkout's own `.delegate/` documents.
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
+# never the real Model queue, even in a case that sets no HOME of its own
+os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(_ISOLATED_CWD.name, "new-models.json")
 SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
+# a catalog with sixteen claude Lanes: the native Lanes of the Claude profile
+REFRESH_DIR = os.path.join(HERE, "fixtures", "refresh-2026-09-22")
 sys.path.insert(0, SCRIPTS)
 import catalog  # noqa: E402
 import catalog_commit  # noqa: E402
+import model_queue  # noqa: E402
 
 fails = 0
 
@@ -317,6 +324,251 @@ def case_a_first_run_commits_onto_absent_documents():
         return ok, f"written={done.written} raced={e!r}"
 
 
+# --- D2: Agent files and the Model queue follow the commit -------------------
+
+@contextlib.contextmanager
+def temp_home():
+    """A temp HOME: ~/.config/delegate there is a throwaway live catalog and
+    ~/.claude/agents a throwaway agents directory, with its own Model queue
+    and only the shipped orchestrator profiles."""
+    keys = ("HOME", "DELEGATE_MODEL_QUEUE", "DELEGATE_ORCHESTRATORS_DIR")
+    saved = {key: os.environ.get(key) for key in keys}
+    with tempfile.TemporaryDirectory() as home:
+        os.environ["HOME"] = home
+        os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(home, "new-models.json")
+        os.environ.pop("DELEGATE_ORCHESTRATORS_DIR", None)
+        try:
+            yield home
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def native_catalog(root, cfg=None):
+    """A config dir holding the refresh fixture's lanes (sixteen claude
+    Lanes) and the sample routing: by default the live one under `root`, a
+    temp HOME. Returns (config dir, the agents directory of the Claude
+    profile under `root`)."""
+    cfg = cfg or os.path.join(root, ".config", "delegate")
+    os.makedirs(cfg)
+    shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), cfg)
+    shutil.copy(os.path.join(SAMPLES, "routing.json"), cfg)
+    return cfg, os.path.join(root, ".claude", "agents")
+
+
+def claude_lanes(doc):
+    return [name for name, lane in doc["lanes"].items() if lane["harness"] == "claude"]
+
+
+def agent_file(agents, lane):
+    """A claude Lane's Agent file: `lane-<model-effort>.md`."""
+    return os.path.join(agents, f"lane-{lane.split('@')[0]}.md")
+
+
+def text_of(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def place(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+# The Agent file of opus55-high@claude, byte for byte as a real save wrote it.
+OPUS55_HIGH = (
+    "---\n"
+    "name: lane-opus55-high\n"
+    'description: "Delegate native lane opus55-high@claude. Use only when /delegate '
+    'prints a native line that names this agent, or when the user names this lane."\n'
+    "model: claude-opus-5-5\n"
+    "effort: high\n"
+    "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright\n"
+    "---\n"
+    "\n"
+    "You are a delegate worker. Read the prompt file named in your task and follow it "
+    "exactly. Your final message is the return block that the prompt asks for.\n"
+)
+
+
+def case_native_lanes_added_and_removed_gain_and_lose_their_agent_files():
+    """A commit of the live catalog's lanes gives every claude Lane after it
+    an Agent file in the template's text, the new Lane and the Lanes that had
+    none alike, and removes the file of the Lane it took out. A file in the
+    agents directory that is no Lane's stays (decision D.7)."""
+    with temp_home() as home:
+        cfg, agents = native_catalog(home)
+        place(agent_file(agents, "opus-high@claude"), "placed by an earlier save\n")
+        place(os.path.join(agents, "courier.md"), "not a lane\n")
+        snap = catalog_commit.read(cfg)
+        lanes = copy.deepcopy(snap.lanes)
+        opus55 = dict(lanes["lanes"].pop("opus-high@claude"), model="claude-opus-5-5")
+        opus55.pop("published_as", None)
+        lanes["lanes"]["opus55-high@claude"] = opus55
+        done = catalog_commit.commit(snap, {"lanes": lanes})
+        files = sorted(os.listdir(agents))
+        expected = sorted([os.path.basename(agent_file(agents, n)) for n in claude_lanes(lanes)]
+                          + ["courier.md"])
+        ok = (files == expected and "lane-opus-high.md" not in files
+              and text_of(agent_file(agents, "opus55-high@claude")) == OPUS55_HIGH
+              and text_of(os.path.join(agents, "courier.md")) == "not a lane\n"
+              and f"wrote {agent_file(agents, 'opus55-high@claude')}" in done.lines
+              and f"removed {agent_file(agents, 'opus-high@claude')}" in done.lines
+              and len(done.lines) == len(claude_lanes(lanes)) + 1)
+        return ok, f"files={files} lines={done.lines}"
+
+
+def case_a_link_at_a_lanes_agent_path_is_replaced():
+    """A link at a Lane's Agent path is a repository's file (a stow link):
+    the commit replaces it with a plain file and never writes through it, so
+    the file it named keeps its text (decision D.2). A commit that changes no
+    document still keeps the Agent files in step."""
+    with temp_home() as home:
+        cfg, agents = native_catalog(home)
+        repo_file = os.path.join(home, "dotfiles", "agents", "lane-opus-high.md")
+        place(repo_file, "the repo's copy\n")
+        os.makedirs(agents)
+        path = agent_file(agents, "opus-high@claude")
+        os.symlink(repo_file, path)
+        snap = catalog_commit.read(cfg)
+        done = catalog_commit.commit(snap, {"lanes": snap.lanes})
+        ok = (done.written == () and not os.path.islink(path) and os.path.isfile(path)
+              and "name: lane-opus-high\n" in text_of(path)
+              and text_of(repo_file) == "the repo's copy\n"
+              and f"wrote {path}" in done.lines)
+        return ok, f"link={os.path.islink(path)} repo={text_of(repo_file)!r} lines={done.lines[:3]}"
+
+
+def case_a_template_change_reaches_the_lanes_already_placed():
+    """An Agent file that no longer matches its profile's template (browser
+    ticket 02's `tools` line) is rewritten by the next commit; one that
+    matches is left alone, mtime and all."""
+    with temp_home() as home:
+        cfg, agents = native_catalog(home)
+        snap = catalog_commit.read(cfg)
+        catalog_commit.commit(snap, {"lanes": snap.lanes})
+        old = agent_file(agents, "fable-high@claude")
+        same = agent_file(agents, "opus-high@claude")
+        place(old, "---\nname: the old form, no tools line\n---\n")
+        os.utime(same, (1_000_000, 1_000_000))
+        snap = catalog_commit.read(cfg)
+        done = catalog_commit.commit(snap, {"lanes": snap.lanes})
+        ok = (done.lines == (f"updated {old}",)
+              and "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright\n"
+              in text_of(old)
+              and os.stat(same).st_mtime == 1_000_000)
+        return ok, f"lines={done.lines} text={text_of(old)!r}"
+
+
+def case_a_catalog_that_is_not_the_live_one_gets_a_note():
+    """The Agent files belong to the live catalog, so a commit of another
+    catalog's lanes writes none, not even the agents directory, and says so
+    in one note line."""
+    with temp_home() as home:
+        cfg, _agents = native_catalog(home, os.path.join(home, "elsewhere"))
+        snap = catalog_commit.read(cfg)
+        done = catalog_commit.commit(snap, {"lanes": with_tier(snap.lanes, "opus-high@claude", 1)})
+        ok = (done.written == (os.path.join(cfg, "lanes.json"),)
+              and not os.path.exists(os.path.join(home, ".claude"))
+              and len(done.lines) == 1 and done.lines[0].startswith("note: ")
+              and "agent file" in done.lines[0] and "not the live one" in done.lines[0])
+        return ok, f"lines={done.lines}"
+
+
+def case_a_commit_of_project_documents_alone_writes_no_agent_file():
+    """The dashboard's project-scope `catalog set` commits a project document
+    alone; it never touches the agents directory, even on the live catalog
+    whose claude Lanes have no Agent file yet."""
+    with temp_home() as home:
+        cfg, agents = native_catalog(home)
+        repo = os.path.join(home, "repo")
+        os.makedirs(os.path.join(repo, ".delegate"))
+        open(os.path.join(repo, ".git"), "w").close()
+        project = os.path.join(repo, ".delegate", "routing.json")
+        catalog.write_json(project, {"gate": 0.2})
+        snap = catalog_commit.read(cfg, project_dir=repo)
+        done = catalog_commit.commit(snap, {"project": {"gate": 0.3}})
+        ok = (done.written == (project,) and done.lines == ()
+              and not os.path.exists(agents))
+        return ok, f"written={done.written} lines={done.lines}"
+
+
+NOTICED = [{"harness": "codex", "model": "gpt-6-astra", "predecessor": None, "via": "scan",
+            "first_seen": "2026-10-09T08:00:00+00:00"},
+           {"harness": "agy", "model": "gemini-3.1-pro", "predecessor": None, "via": "asked",
+            "first_seen": "2026-10-09T09:00:00+00:00"}]
+SWAPPED = [{"old": "sol-high@codex", "new": "sol61-high@codex", "model": "gpt-6.1-sol",
+            "at": "2026-10-09T08:00:00+00:00"}]
+
+
+def write_queue(models, applied):
+    """The Model queue file as dispatch leaves it, last scanned on 10 October."""
+    with open(model_queue.path(), "w", encoding="utf-8") as f:
+        json.dump({"version": model_queue.VERSION, "checked_at": "2026-10-10T00:00:00+00:00",
+                   "models": models, "applied": applied}, f)
+
+
+def queue_file():
+    with open(model_queue.path(), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def case_a_commit_forgets_exactly_the_queue_entries_its_read_returned():
+    """A wizard reads the queue with the catalog and names it on its start
+    page; its commit forgets exactly those entries. A model noticed and a
+    swap applied while it was open stay for the next run, and so does when
+    the last scan ran. A commit that is refused forgets nothing (decision
+    D.4)."""
+    with temp_home() as home:
+        cfg = sample_config(home)
+        write_queue(NOTICED, SWAPPED)
+        snap = catalog_commit.read(cfg, queue=True)
+        # dispatch notes a model and its scan swaps one in while the wizard is open
+        later = model_queue.note([{"harness": "codex", "model": "gpt-7-nova"}], "asked")
+        doc = queue_file()
+        late_swap = {"old": "terra-high@codex", "new": "terra2-high@codex", "model": "gpt-6.2-terra",
+                     "at": "2026-10-10T12:00:00+00:00"}
+        doc["applied"].append(late_swap)
+        with open(model_queue.path(), "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        done = catalog_commit.commit(snap, {"lanes": with_tier(snap.lanes, "terra-high@codex", 1)})
+        after = queue_file()
+
+        stale = catalog_commit.read(cfg, queue=True)
+        catalog.write_json(os.path.join(cfg, "lanes.json"), with_tier(stale.lanes, "sol-high@codex", 1))
+        refused = refusal(catalog_commit.commit, stale,
+                          {"lanes": with_tier(stale.lanes, "terra-high@codex", 2)})
+        ok = (snap.queued == tuple(NOTICED) and snap.applied == tuple(SWAPPED)
+              and done.written == (os.path.join(cfg, "lanes.json"),)
+              and after["models"] == later and after["applied"] == [late_swap]
+              and after["checked_at"] == "2026-10-10T00:00:00+00:00"
+              and stale.queued == tuple(later)
+              and isinstance(refused, catalog_commit.CatalogChanged)
+              and queue_file() == after)
+        return ok, f"queued={snap.queued} after={after} lines={done.lines}"
+
+
+def case_a_read_without_the_queue_leaves_the_queue_alone():
+    """Focused screens, the scan and `catalog set` read no queue: their read
+    names none, and their commit leaves the queue file as it was."""
+    with temp_home() as home:
+        cfg = sample_config(home)
+        write_queue(NOTICED, SWAPPED)
+        with open(model_queue.path(), "rb") as f:
+            before = f.read()
+        snap = catalog_commit.read(cfg)
+        done = catalog_commit.commit(snap, {"lanes": with_tier(snap.lanes, "terra-high@codex", 1)})
+        with open(model_queue.path(), "rb") as f:
+            after = f.read()
+        ok = (snap.queued == () and snap.applied == () and len(done.written) == 1
+              and after == before)
+        return ok, f"queued={snap.queued} lines={done.lines}"
+
+
 for name, case in (
     ("a commit writes only the documents that changed",
      case_a_commit_writes_only_the_documents_that_changed),
@@ -336,6 +588,20 @@ for name, case in (
      case_a_failed_write_puts_back_what_the_commit_wrote),
     ("a first run commits onto absent documents",
      case_a_first_run_commits_onto_absent_documents),
+    ("native Lanes added and removed gain and lose their agent files",
+     case_native_lanes_added_and_removed_gain_and_lose_their_agent_files),
+    ("a link at a Lane's agent path is replaced and its target is untouched",
+     case_a_link_at_a_lanes_agent_path_is_replaced),
+    ("a template change reaches the Lanes already placed",
+     case_a_template_change_reaches_the_lanes_already_placed),
+    ("a catalog that is not the live one gets no agent file and a note",
+     case_a_catalog_that_is_not_the_live_one_gets_a_note),
+    ("a commit of project documents alone writes no agent file",
+     case_a_commit_of_project_documents_alone_writes_no_agent_file),
+    ("a commit forgets exactly the queue entries its read returned",
+     case_a_commit_forgets_exactly_the_queue_entries_its_read_returned),
+    ("a read without the queue leaves the queue alone",
+     case_a_read_without_the_queue_leaves_the_queue_alone),
 ):
     try:
         ok, detail = case()

@@ -117,7 +117,7 @@ The catalog's documents as one session read them, with where each file resolved 
 _Avoid_: snapshot (alone), cache, revision (which is only its hash)
 
 **Catalog commit**:
-The one write of catalog documents. It refuses an Intervening edit, writes through links and backs up what it replaces.
+The one write of catalog documents. It refuses an Intervening edit, writes through links, backs up what it replaces, keeps the Agent files in step and forgets the Model queue entries its read returned.
 _Avoid_: save (when you mean the write path), apply, flush
 
 **Intervening edit**:
@@ -137,7 +137,7 @@ Dispatch's scan replacing a lane with the same lane at a newer version of its mo
 _Avoid_: upgrade, migration, auto-update
 
 **Model queue**:
-The models dispatch noticed that no lane runs, and the Model swaps its scan applied. They are kept until a wizard run names them on its start page.
+The models dispatch noticed that no lane runs, and the Model swaps its scan applied. They are kept until a wizard run that named them on its start page saves.
 _Avoid_: inbox, backlog, new-models list
 
 ## Delegate: benchmarks

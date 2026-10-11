@@ -234,18 +234,20 @@ def plural(count, word):
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
-def refresh_lines(refresh, width=80):
-    """What the catalog refresh proposes, one line per model (ticket 33).
+def refresh_lines(refresh, width=80, queued=(), applied=()):
+    """What the catalog refresh proposes, one line per model (ticket 33), then
+    the Model queue the wizard read with the catalog: `queued` and `applied`,
+    named whether or not the refresh ran, since the save forgets exactly what
+    is named here (deepening D.4).
 
     A model that takes another's place reads
     `gpt-5.6-sol → gpt-6-sol: sol6-*@codex replace sol-*@codex (6 Lanes)`, and
     one that takes nobody's reads `new gemini-3.1-pro: pro31-*@agy (2 Lanes)`.
     A refresh that did not run says so rather than reading as no change.
     """
-    if refresh is None:
-        return []
+    plan = refresh or {}
     lines = []
-    for item in refresh.get("models") or []:
+    for item in plan.get("models") or []:
         family = harness_registry.lane_name(item["stem"], "*", item["harness"])
         count = plural(len(item["new"]), "Lane")
         if item.get("predecessor"):
@@ -259,40 +261,41 @@ def refresh_lines(refresh, width=80):
             lines.append(fit_line(f"new {item['model']}: {family} ({count})", width))
     # a superseded lane with no successor at its effort leaves with no line of
     # its own above, so it is named here
-    covered = {name for item in refresh.get("models") or [] for name in item["replaced"]}
-    orphans = [name for name in refresh.get("removed") or [] if name not in covered]
+    covered = {name for item in plan.get("models") or [] for name in item["replaced"]}
+    orphans = [name for name in plan.get("removed") or [] if name not in covered]
     if orphans:
         lines.append(list_line("Superseded Lanes removed", orphans, width))
     # an effort a harness lists that no Lane may carry yet: named, not proposed
-    for notice in refresh.get("notices") or ():
+    for notice in plan.get("notices") or ():
         lines.append(fit_line(notice, width))
     # models dispatch noticed since the last run (ticket 29); the refresh
     # lines above are the Lanes this run proposes for them
-    queued = [item["model"] for item in refresh.get("queued") or ()]
-    if queued:
-        lines.append(list_line("Dispatch noticed", queued, width))
+    noticed = [item["model"] for item in queued or ()]
+    if noticed:
+        lines.append(list_line("Dispatch noticed", noticed, width))
     # newer versions dispatch's scan already swapped in since the last run
-    swapped = [f"{item['old']} -> {item['new']}" for item in refresh.get("applied") or ()]
+    swapped = [f"{item['old']} -> {item['new']}" for item in applied or ()]
     if swapped:
         lines.append(list_line("Dispatch swapped in", swapped, width))
-    if not lines:
+    if not lines and refresh is not None:
         return [fit_line("Catalog refresh: every model is the current generation", width)]
     return lines
 
 
 def start_facts(lanes_path, routing_path, page_path, discovery, width=80,
-                refresh=None, rows_note=""):
+                refresh=None, rows_note="", queued=(), applied=()):
     """What the start page says, and what `--plain` prints first: the two files
     it will write, the benchmark page, where the benchmark rows came from, what
-    the refresh proposes, and the discovery notices. Facts only — the terms are
-    defined in CONTEXT.md, and the people who run this know them (the user,
-    2026-09-11; tickets 25 and 33)."""
+    the refresh proposes and what dispatch noticed and swapped in, and the
+    discovery notices. Facts only — the terms are defined in CONTEXT.md, and
+    the people who run this know them (the user, 2026-09-11; tickets 25 and
+    33)."""
     return [
         fit_line(f"Will write {lanes_path}", width),
         fit_line(f"Will write {routing_path}", width),
         fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
         *([fit_line(rows_note, width)] if rows_note else []),
-        *refresh_lines(refresh, width),
+        *refresh_lines(refresh, width, queued=queued, applied=applied),
         *discovery_notices(discovery, width),
     ]
 
@@ -321,7 +324,7 @@ class Wizard:
                  lanes_path, routing_path, initial_message="",
                  bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
                  focus=None, refresh=None, rows_note="", rescan=None, tier_lines=None,
-                 clock=None, class_guide=None):
+                 clock=None, class_guide=None, queued=(), applied=()):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         # every shipped Class is on the routing page, with the default Range
@@ -338,6 +341,9 @@ class Wizard:
         self.tier_lines = tier_lines
         self._clock = clock or (lambda: time.strftime("%H:%M"))
         self.scanned = "at launch"
+        # the Model queue read with the catalog: a start-page fact that a
+        # rescan leaves as it is, since the save forgets exactly these
+        self.queued, self.applied = tuple(queued), tuple(applied)
         # the routing page's class descriptions, from the Class guide
         self.class_guide = (class_descriptions(extra=[os.path.join(os.path.dirname(routing_path), "classes.md")])
                             if class_guide is None else class_guide)
@@ -1354,7 +1360,8 @@ class Wizard:
             body = [
                 *start_facts(self.lanes_path, self.routing_path, self.bench_page_path,
                              self.discovery, self._width, refresh=self.refresh,
-                             rows_note=self.rows_note),
+                             rows_note=self.rows_note, queued=self.queued,
+                             applied=self.applied),
                 "",
                 "Nothing is written until the confirm screen; q leaves without writing.",
             ]

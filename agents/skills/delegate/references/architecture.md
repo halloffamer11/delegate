@@ -62,8 +62,12 @@ replaces partial use of invalid documents.
   skips a document equal to its read, copies each global document it replaces to
   `<config dir>/backups/<name>-<UTC stamp>.json` (the newest 20 per document kept; project
   documents are not backed up), writes through links, and puts back what it already wrote when a
-  later write fails. The wizard's full save and `--plain` save commit through the read taken at
-  launch.
+  later write fails. A commit whose documents include the live catalog's global lanes (the config
+  dir resolves to `catalog.CONFIG_DIR`) then gives every native Lane its Agent file and removes the
+  file of each native Lane it took out; another catalog, or project documents alone, write none.
+  Last it forgets the Model queue entries its read returned (`read(queue=True)`). A failure in
+  either step is a line in `Committed.lines`, which callers print to stderr. The wizard's full save
+  and `--plain` save commit through the read taken at launch, and so does dispatch's scan.
 - `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
   previews cached Picks and resolved source paths from `catalog_commit.read()`, validates complete
   proposals, and rechecks the revision before writing one document through `catalog.write_json`,
@@ -155,12 +159,18 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.
   `dispatch --model` naming such a model queues it too. The queue is `new-models.json` beside the
-  meter cache. The wizard's start facts name it ("Dispatch noticed") and its write empties it.
-  `$DELEGATE_MODEL_SCAN=off` stops the scan. A newer version of a model the catalog already runs
-  is not queued but applied (ticket 44 of the redesign): the scan swaps each Lane the refresh
-  replaces with its successor into lanes.json, keeping Tier, Order and an off Lane off, after
-  copying lanes.json to `lanes-backups/` beside the queue. The wizard names the swaps ("Dispatch
-  swapped in"). `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
+  meter cache. The full wizard reads it with the catalog (`catalog_commit.read(queue=True)`) and
+  its start facts name it ("Dispatch noticed") whether or not the refresh ran; its save forgets
+  exactly the entries those facts named and keeps any noted since (deepening D.4, which replaces
+  any-harness ticket 29's "the wizard's confirm write empties the queue" and the rule that a run
+  whose refresh did not run keeps it). Focused screens read no queue and forget nothing. `$DELEGATE_MODEL_SCAN=off` stops the scan. A newer version of a model
+  the catalog already runs is not queued but applied (ticket 44 of the redesign): the scan swaps
+  each Lane the refresh replaces with its successor into lanes.json, keeping Tier, Order and an off
+  Lane off, through a Catalog commit, so the old lanes.json is backed up to
+  `<config dir>/backups` and the Agent files follow. A catalog that changed while the scan listed
+  models (`CatalogChanged`) is left to that writer, and the newer version is queued instead. The
+  scan imports `catalog_commit`, never `setup` or `catalog_edit`. The wizard names the swaps
+  ("Dispatch swapped in"). `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
   benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis
   comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
@@ -284,15 +294,14 @@ stays on the repo's rows, and `--fixture-dir` reads `aa-accepted.json` beside th
 harness fixtures instead, so a test touches no network and no cache. The fetch runs
 in a thread beside the harness probes. `discover.refresh_catalog` then proposes the
 current generation in memory and `setup_tui.refresh_lines` states it on the start
-page, one line per model. The save writes the agent file of each new native lane, for every profile
-that
-declares native Lanes, and removes each superseded one (`setup.save_native_agents`,
-`setup.native_agent_text`, from the profile's template); `setup.native_agents_dir` returns the
-profile's agents directory only
-when the catalog being written is the live `~/.config/delegate`, so a catalog in a
-temp directory gets a note instead of a file. The agent files are machine-local like
-the catalog, and a stow link left at a lane's path is removed before the write, so the
-write never lands in the repo. Prices are never proposed.
+page, one line per model. The save's Catalog commit gives every native lane in the
+catalog its agent file, for every profile that declares native Lanes, in the profile's
+template, and removes the file of each lane it took out (`catalog_commit`, deepening
+D.7). It does so only when the catalog being written is the live `~/.config/delegate`,
+so a catalog in a temp directory gets a note instead of a file. The agent files are
+machine-local like the catalog, and a stow link left at a lane's path is replaced by a
+plain file, never written through, so the write never lands in the repo. Prices are
+never proposed.
 A project file that names a lane the refresh removed warns on stderr and is ignored
 (`catalog.warn_stale_lane`); the next project save drops it. A lane the wizard turned
 off is the same case (`catalog.warn_off_lane`, ticket 36): on the read it warns and

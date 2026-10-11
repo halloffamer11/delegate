@@ -28,10 +28,7 @@ sys.path.insert(0, DELEGATE_DIR)
 import catalog
 import harnesses
 import catalog_edit
-import catalog_commit
-import orchestrators  # noqa: E402
-# The shipped Claude Code profile: the one that runs claude Lanes in-process.
-CLAUDE_PROFILE = orchestrators.load([orchestrators.SHIPPED_DIR])["claude"]
+import catalog_commit  # noqa: E402
 
 fails = 0
 lanes_sample = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
@@ -756,17 +753,19 @@ def case_a_failed_forced_fetch_keeps_the_launch_rows():
         return ok, f"paths={paths} note={note!r}"
 
 
-def case_the_save_after_a_rescan_uses_the_rescans_plan():
-    """The TUI save writes and removes the agent files from the plan the
-    wizard holds, which `r` replaced: launch here found no models, so its
-    plan was none, and the rescan's plan adds the opus55 lanes and
-    supersedes the opus ones (wizard-design 01)."""
+def case_the_save_after_a_rescan_writes_the_agent_files_of_the_lanes_it_saved():
+    """The TUI save after `r` keeps the Agent files in step with the catalog
+    it wrote: launch here found no models, the rescan proposes the opus55
+    Lanes in place of the opus ones, and after the save every claude Lane
+    saved has its file and the superseded ones have none (wizard-design 01,
+    deepening D.7). It runs under a temp HOME, so ~/.config/delegate there is
+    the live catalog."""
     import io
     import setup
     import setup_tui
-    real_scan, real_run, real_agents = setup.scan, setup_tui.run_curses, setup.native_targets
-    real_config = catalog.CONFIG_DIR
-    real_in, real_out = sys.stdin, sys.stdout
+    real_scan, real_run = setup.scan, setup_tui.run_curses
+    real_in, real_out, real_err = sys.stdin, sys.stdout, sys.stderr
+    real_env = {key: os.environ.get(key) for key in ("HOME", "DELEGATE_MODEL_QUEUE")}
     aa = os.path.join(REFRESH_DIR, "aa-accepted.json")
     seen = []
 
@@ -791,7 +790,6 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
             return True
 
     with tempfile.TemporaryDirectory() as td:
-        # a stand-in for ~/.config/delegate and ~/.claude/agents
         agents = os.path.join(td, ".claude", "agents")
         config = os.path.join(td, ".config", "delegate")
         os.makedirs(agents)
@@ -801,24 +799,33 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
         for effort in ("low", "medium", "high", "xhigh", "max"):
             with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
                 f.write("superseded\n")
-        out = Terminal()
-        setup.scan, setup_tui.run_curses, setup.native_targets = (
-            scan, run_curses, lambda _config: [(CLAUDE_PROFILE, agents)])
-        catalog.CONFIG_DIR = config
-        sys.stdin, sys.stdout = Terminal(), out
+        out, err = Terminal(), io.StringIO()
+        setup.scan, setup_tui.run_curses = scan, run_curses
+        sys.stdin, sys.stdout, sys.stderr = Terminal(), out, err
+        os.environ["HOME"] = td
+        os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(td, "new-models.json")
         try:
             code = setup.main(["--config-dir", config, "--fixture-dir", REFRESH_DIR,
                                "--effort-rows", aa, "--no-bench"])
         finally:
-            setup.scan, setup_tui.run_curses, setup.native_targets = real_scan, real_run, real_agents
-            catalog.CONFIG_DIR = real_config
-            sys.stdin, sys.stdout = real_in, real_out
+            setup.scan, setup_tui.run_curses = real_scan, real_run
+            sys.stdin, sys.stdout, sys.stderr = real_in, real_out, real_err
+            for key, value in real_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
         written = sorted(os.listdir(agents))
+        saved = catalog.load_json(os.path.join(config, "lanes.json"))["lanes"]
+        claude = sorted(f"lane-{name.split('@')[0]}.md" for name, lane in saved.items()
+                        if lane["harness"] == "claude")
+        opus55 = [f"lane-opus55-{e}.md" for e in ("low", "medium", "high", "xhigh", "max")]
         ok = (code == 0 and seen[0] == (False, None) and seen[1] == (True, [aa])
               and str(seen[2]).startswith("Rescanned at ")
-              and written == sorted(f"lane-opus55-{e}.md"
-                                    for e in ("low", "medium", "high", "xhigh", "max")))
-        return ok, f"code={code} seen={seen} written={written} out={out.getvalue()[-400:]!r}"
+              and written == claude and all(name in written for name in opus55)
+              and not any(name.startswith("lane-opus-") for name in written)
+              and f"removed {os.path.join(agents, 'lane-opus-high.md')}" in err.getvalue())
+        return ok, f"code={code} seen={seen} written={written} err={err.getvalue()[-400:]!r}"
 
 
 def case_scan_and_propose_are_the_launch_steps():
@@ -841,137 +848,11 @@ def case_scan_and_propose_are_the_launch_steps():
           and note.startswith("Benchmark rows: Artificial Analysis from ")
           and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
           and rows[1] == "" and len(rows[0]) > 0
-          and doc == refreshed and plan_again.pop("queued") == [] and plan_again.pop("applied") == [] and plan_again == plan
+          and doc == refreshed and plan_again == plan
           and mapped == discover.map_lanes(data, doc)
           and skipped == (frozen, None, "probe failed")
           and setup.collect_bench(args, doc, rows[0]) == (None, ""))
     return ok, f"note={note!r} new={len(plan_again['new'])} removed={len(plan_again['removed'])}"
-
-
-def case_native_agent_files_follow_the_claude_lanes():
-    """The save writes an agent file for each new claude lane, in the form the
-    files beside it take, and removes each superseded one (ticket 33)."""
-    import setup
-    _frozen, refreshed, plan = refresh_fixture()
-    # the form, byte for byte: what a real run of this code wrote for this lane
-    shape = (
-        "---\n"
-        "name: lane-opus55-high\n"
-        'description: "Delegate native lane opus55-high@claude. Use only when /delegate '
-        'prints a native line that names this agent, or when the user names this lane."\n'
-        "model: claude-opus-5-5\n"
-        "effort: high\n"
-        "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright\n"
-        "---\n"
-        "\n"
-        + CLAUDE_PROFILE["native"]["template"][-2] + "\n"
-    )
-    with tempfile.TemporaryDirectory() as td:
-        agents = os.path.join(td, "agents")
-        os.makedirs(agents)
-        for effort in ("low", "medium", "high", "xhigh", "max"):
-            with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
-                f.write("superseded\n")
-        lines = setup.save_native_agents(plan, refreshed, agents, CLAUDE_PROFILE)
-        written = sorted(os.listdir(agents))
-        with open(os.path.join(agents, "lane-opus55-high.md"), encoding="utf-8") as f:
-            text = f.read()
-        ok = (written == sorted(f"lane-opus55-{e}.md"
-                                for e in ("low", "medium", "high", "xhigh", "max"))
-              and text == shape
-              and len(lines) == 10)
-        return ok, f"written={written} lines={lines} text={text!r}"
-
-
-def case_a_catalog_elsewhere_gets_no_agent_file():
-    """The agent files belong to the live catalog, so a catalog somewhere else
-    gets none, and the run says so rather than writing into ~/.claude/agents."""
-    import setup
-    _frozen, refreshed, plan = refresh_fixture()
-    with tempfile.TemporaryDirectory() as td:
-        lines = setup.save_native_agents(plan, refreshed, setup.native_agents_dir(td, CLAUDE_PROFILE),
-                                         CLAUDE_PROFILE)
-        ok = (setup.native_agents_dir(td, CLAUDE_PROFILE) is None
-              and len(lines) == 1 and "agent file" in lines[0])
-        return ok, f"lines={lines}"
-
-
-def case_the_live_catalog_gets_the_agent_files():
-    """The wizard's default config dir is the live catalog, ~/.config/delegate,
-    and its agent files go to ~/.claude/agents, never the repo (the user,
-    2026-09-29). Nothing is written: this only asks where."""
-    import setup
-    found = setup.native_agents_dir(catalog.CONFIG_DIR, CLAUDE_PROFILE)
-    ok = found == os.path.expanduser("~/.claude/agents")
-    return ok, f"{catalog.CONFIG_DIR} -> {found}"
-
-
-def case_the_real_layout_saves_the_agent_files():
-    """The same layout under a temp HOME, end to end: the live config dir gets
-    the new claude lanes' agent files in ~/.claude/agents and loses the
-    superseded ones. A stow link left at a new lane's path is replaced by a
-    plain file, and the repo file it pointed at is not written."""
-    import setup
-    _frozen, refreshed, plan = refresh_fixture()
-    real_home = os.environ.get("HOME")
-    with tempfile.TemporaryDirectory() as td:
-        agents = os.path.join(td, ".claude", "agents")
-        config = os.path.join(td, ".config", "delegate")
-        repo_file = os.path.join(td, "dotfiles", "agents", "agents", "lane-opus55-high.md")
-        os.makedirs(agents)
-        os.makedirs(config)
-        os.makedirs(os.path.dirname(repo_file))
-        with open(repo_file, "w") as f:
-            f.write("the repo's copy\n")
-        os.symlink(repo_file, os.path.join(agents, "lane-opus55-high.md"))
-        for effort in ("low", "medium", "high", "xhigh", "max"):
-            with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
-                f.write("superseded\n")
-        os.environ["HOME"] = td
-        try:
-            found = setup.native_agents_dir("~/.config/delegate", CLAUDE_PROFILE)
-            lines = setup.save_native_agents(plan, refreshed, found, CLAUDE_PROFILE)
-        finally:
-            if real_home is None:
-                del os.environ["HOME"]
-            else:
-                os.environ["HOME"] = real_home
-        written = sorted(os.listdir(agents))
-        with open(repo_file) as f:
-            repo_text = f.read()
-        ok = (found == agents
-              and written == sorted(f"lane-opus55-{e}.md"
-                                    for e in ("low", "medium", "high", "xhigh", "max"))
-              and not os.path.islink(os.path.join(agents, "lane-opus55-high.md"))
-              and repo_text == "the repo's copy\n"
-              and len(lines) == 10)
-        return ok, f"found={found} written={written} repo={repo_text!r}"
-
-
-def case_a_template_change_reaches_the_placed_lanes():
-    """An agent file of a Lane already in the catalog that no longer matches
-    the template is rewritten (browser ticket 02's `tools` line), one that
-    matches is left alone, and the run runs with no refresh at all."""
-    import setup
-    _frozen, refreshed, _plan = refresh_fixture()
-    claude = sorted(n for n, l in refreshed["lanes"].items() if l.get("harness") == "claude")
-    old, same = claude[0], claude[1]
-    with tempfile.TemporaryDirectory() as td:
-        old_path = orchestrators.agent_path(CLAUDE_PROFILE, old, td)
-        same_path = orchestrators.agent_path(CLAUDE_PROFILE, same, td)
-        with open(old_path, "w") as f:
-            f.write("---\nname: the old form, no tools line\n---\n")
-        with open(same_path, "w") as f:
-            f.write(setup.native_agent_text(same, refreshed["lanes"][same], CLAUDE_PROFILE))
-        before = os.stat(same_path).st_mtime_ns
-        lines = setup.save_native_agents(None, refreshed, td, CLAUDE_PROFILE)
-        with open(old_path) as f:
-            text = f.read()
-        ok = (lines == [f"updated {old_path}"]
-              and "tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, mcp__playwright" in text
-              and os.stat(same_path).st_mtime_ns == before
-              and sorted(os.listdir(td)) == sorted([os.path.basename(old_path), os.path.basename(same_path)]))
-        return ok, f"lines={lines} text={text!r}"
 
 
 def case_the_refreshed_rows_reach_the_new_lanes():
@@ -1047,8 +928,9 @@ def case_plain_prints_the_refresh_change_lines():
               and check.returncode == 0
               and "sol6-high@codex" in written["lanes"]
               and "sol-high@codex" not in written["lanes"]
-              # the temp catalog is not this checkout's, so no agent file moved
-              and "agent file" in result.stdout)
+              # the temp catalog is not the live one, so no agent file moved,
+              # and the commit's note says so on stderr
+              and "agent file" in result.stderr and "agent file" not in result.stdout)
         return ok, (f"code={result.returncode} check={check.returncode} "
                     f"expected={expected} stdout={result.stdout[:600]!r}")
 
@@ -1212,6 +1094,58 @@ def case_the_plain_save_refuses_a_catalog_changed_while_it_asked():
         return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
 
 
+# --- deepening D2: Agent files and the Model queue follow the commit --------
+
+def refresh_catalog_in(cfg):
+    """`cfg` holding the frozen refresh-2026-09-22 lanes (sixteen claude
+    Lanes) and the sample routing."""
+    os.makedirs(cfg)
+    shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(cfg, "lanes.json"))
+    catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
+    return cfg
+
+
+def case_a_model_noticed_while_the_wizard_is_open_stays_queued():
+    """Dispatch notes a model while the wizard is open; the save forgets the
+    entry the start page named and keeps the one it never showed (deepening
+    D.4, bug 2)."""
+    import model_queue
+    with tempfile.TemporaryDirectory() as td:
+        cfg = refresh_catalog_in(os.path.join(td, "cfg"))
+        shown = {"harness": "codex", "model": "gpt-6-astra", "predecessor": None, "via": "scan",
+                 "first_seen": "2026-10-09T08:00:00+00:00"}
+        catalog.write_json(os.path.join(td, "new-models.json"),
+                           {"version": model_queue.VERSION, "checked_at": None, "models": [shown]})
+        noticed = []
+
+        def note():
+            noticed.extend(model_queue.note([{"harness": "agy", "model": "gemini-9-pro"}], "asked"))
+
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--fixture-dir", REFRESH_DIR, "--no-bench"], during=note)
+        queue = catalog.load_json(os.path.join(td, "new-models.json"))
+        ok = (code == 0 and len(noticed) == 1 and queue["models"] == noticed
+              and "wrote" in out)
+        return ok, f"code={code} queue={queue} err={err[-300:]!r}"
+
+
+def case_a_save_gives_every_native_lane_its_agent_file():
+    """On the live catalog, a save gives every claude Lane in the catalog its
+    Agent file, the Lanes the save did not add included: here none had one
+    (deepening D.7)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = refresh_catalog_in(os.path.join(td, ".config", "delegate"))
+        agents = os.path.join(td, ".claude", "agents")
+        code, out, err = wizard_in_process(td, ["--config-dir", cfg, "--no-discover", "--no-bench"])
+        saved = catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"]
+        claude = sorted(f"lane-{name.split('@')[0]}.md" for name, lane in saved.items()
+                        if lane["harness"] == "claude")
+        files = sorted(os.listdir(agents)) if os.path.isdir(agents) else []
+        ok = (code == 0 and len(claude) == 16 and files == claude
+              and f"wrote {os.path.join(agents, 'lane-opus-high.md')}" in err)
+        return ok, f"code={code} files={files} err={err[-300:]!r}"
+
+
 for name, case in (
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
@@ -1222,15 +1156,9 @@ for name, case in (
     ("a failed fetch keeps the repo rows", case_a_failed_fetch_keeps_the_repo_rows),
     ("a forced fetch passes a fresh cache", case_a_forced_fetch_passes_a_fresh_cache),
     ("a failed forced fetch keeps the launch rows", case_a_failed_forced_fetch_keeps_the_launch_rows),
-    ("the save after a rescan uses the rescan's plan",
-     case_the_save_after_a_rescan_uses_the_rescans_plan),
+    ("the save after a rescan writes the agent files of the Lanes it saved",
+     case_the_save_after_a_rescan_writes_the_agent_files_of_the_lanes_it_saved),
     ("scan and propose are the launch steps", case_scan_and_propose_are_the_launch_steps),
-    ("native agent files follow the claude lanes",
-     case_native_agent_files_follow_the_claude_lanes),
-    ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),
-    ("the live catalog gets the agent files", case_the_live_catalog_gets_the_agent_files),
-    ("the real layout saves the agent files", case_the_real_layout_saves_the_agent_files),
-    ("a template change reaches the placed lanes", case_a_template_change_reaches_the_placed_lanes),
     ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
     ("no-discover fetches no rows", case_no_discover_fetches_no_rows),
     ("plain prints the refresh change lines", case_plain_prints_the_refresh_change_lines),
@@ -1259,6 +1187,10 @@ for name, case in (
     ("the full save writes through a linked catalog", case_the_full_save_writes_through_a_linked_catalog),
     ("the plain save refuses a catalog changed while it asked",
      case_the_plain_save_refuses_a_catalog_changed_while_it_asked),
+    ("a model noticed while the wizard is open stays queued",
+     case_a_model_noticed_while_the_wizard_is_open_stays_queued),
+    ("a save gives every native Lane in the catalog its agent file",
+     case_a_save_gives_every_native_lane_its_agent_file),
 ):
     try:
         ok, detail = case()

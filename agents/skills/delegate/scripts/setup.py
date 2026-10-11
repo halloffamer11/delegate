@@ -16,9 +16,6 @@ import catalog_commit
 import tier_lines as tier_line_rules
 import discover
 import effort
-import harnesses
-import model_queue
-import orchestrators
 import setup_tui
 from catalog import CatalogError, load_json, validate_lanes, validate_routing
 from harnesses import NAMES as HARNESSES
@@ -29,14 +26,6 @@ AA_CACHE_DIR = os.path.expanduser("~/.cache/delegate/bench/aa")
 AA_MAX_AGE = 24 * 60 * 60
 # The rows a fixture run reads instead of fetching, beside the harness fixtures.
 AA_FIXTURE = "aa-accepted.json"
-
-# A native Lane runs in-process in its orchestrator, so the Lane is not live
-# until its agent file is (ticket 22). Which orchestrators run Lanes natively,
-# where their agent files live and what they hold is profile data
-# (orchestrators.py); setup writes files only for a profile that declares them.
-# The catalog is machine-local, so its agent files are too: they go straight
-# into the profile's agents directory, and never into the repo (the user,
-# 2026-09-29).
 
 
 class SetupAbort(Exception):
@@ -412,9 +401,6 @@ def propose_generation(lanes_doc, discovery_data, rows):
     lanes_doc, refresh = discover.refresh_catalog(
         lanes_doc, discovery_data, published_models=published_model_names(rows[0])
     )
-    # what dispatch noticed since the last run, named on the start page (ticket 29)
-    refresh["queued"] = model_queue.pending()
-    refresh["applied"] = model_queue.applied()
     return lanes_doc, refresh, discover.map_lanes(discovery_data, lanes_doc)
 
 
@@ -440,99 +426,6 @@ def published_model_names(rows):
         if isinstance(row, dict) and row.get("source") == effort.AA_SOURCE
         and isinstance(row.get("model"), str)
     })
-
-
-def native_agent_text(lane_name, lane, profile):
-    """The agent file for one native Lane, from its orchestrator profile's
-    template. A model that takes no effort level carries no `effort` line."""
-    effort = lane["effort"] if discover.model_takes_effort(lane.get("harness"), lane["model"]) else None
-    return orchestrators.agent_text(profile, lane_name, lane["model"], effort)
-
-
-def native_agents_dir(config_dir, profile):
-    """Where a native Lane's agent file goes for this profile, or None.
-
-    The agent files and the catalog have to stay in step, so they are written
-    only when the catalog being written is this machine's live one,
-    `catalog.CONFIG_DIR`. A catalog somewhere else — a test, a throwaway copy —
-    gets none, because the profile's agents directory is not that catalog's.
-    """
-    here = os.path.realpath(os.path.expanduser(config_dir or ""))
-    live = os.path.realpath(os.path.expanduser(catalog.CONFIG_DIR))
-    return os.path.expanduser(profile["native"]["agents_dir"]) if here == live else None
-
-
-def native_targets(config_dir):
-    """[(profile, agents directory or None)] for each profile with native Lanes."""
-    return [(profile, native_agents_dir(config_dir, profile))
-            for profile in orchestrators.native_profiles()]
-
-
-def save_native_agents(refresh, lanes_doc, agents_dir, profile):
-    """Write the agent file of each new Lane on the profile's harness, remove
-    each superseded one, and return the lines to print.
-
-    A native Lane runs in-process, so a new Lane is not live until its file is,
-    and the wizard writes it before it exits (ticket 33). A link left at a
-    Lane's path — the stow link of a lane file the repo used to carry — is
-    removed first, so the write never lands in the repo through it.
-
-    An existing file of a Lane in the catalog that no longer matches the
-    template is rewritten, so a template change (browser ticket 02's `tools`
-    line) reaches the Lanes already placed.
-    """
-    refresh = refresh or {}
-    harness = profile["harness"]
-    lanes = lanes_doc.get("lanes") or {}
-    if agents_dir is None:
-        waiting = [name for name in refresh.get("new") or ()
-                   if (lanes.get(name) or {}).get("harness") == harness]
-        if not waiting:
-            return []
-        return [f"note: {len(waiting)} new {harness} lanes need an agent file; this catalog is "
-                "not the live one, so none was written"]
-    lines = []
-    for name in refresh.get("new") or ():
-        lane = lanes.get(name)
-        if not isinstance(lane, dict) or lane.get("harness") != harness:
-            continue
-        os.makedirs(agents_dir, exist_ok=True)
-        path = orchestrators.agent_path(profile, name, agents_dir)
-        if os.path.islink(path):
-            os.remove(path)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(native_agent_text(name, lane, profile))
-        lines.append(f"wrote {path}")
-    for name in refresh.get("removed") or ():
-        if harnesses.split_lane(name)[1] != harness or name in lanes:
-            continue
-        path = orchestrators.agent_path(profile, name, agents_dir)
-        if os.path.isfile(path) or os.path.islink(path):
-            os.remove(path)
-            lines.append(f"removed {path}")
-    fresh = set(refresh.get("new") or ())
-    for name, lane in lanes.items():
-        if name in fresh or not isinstance(lane, dict) or lane.get("harness") != harness:
-            continue
-        path = orchestrators.agent_path(profile, name, agents_dir)
-        if not os.path.isfile(path) or os.path.islink(path):
-            continue
-        text = native_agent_text(name, lane, profile)
-        with open(path, encoding="utf-8") as f:
-            if f.read() == text:
-                continue
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        lines.append(f"updated {path}")
-    return lines
-
-
-def save_all_native_agents(refresh, lanes_doc, targets):
-    """save_native_agents for every native profile's (profile, directory)."""
-    lines = []
-    for profile, agents_dir in targets or ():
-        lines += save_native_agents(refresh, lanes_doc, agents_dir, profile)
-    return lines
 
 
 def load_effort_rows(paths):
@@ -568,19 +461,9 @@ def read_tier_lines(path):
         raise CatalogError(f"tiers-from: {e}") from e
 
 
-def clear_queue(refresh):
-    """Empty dispatch's model queue once a run that saw it wrote the catalog
-    (ticket 29). A run whose refresh did not run saw no models, so it keeps
-    the queue for the next one."""
-    if refresh is not None and "queued" in refresh:
-        try:
-            model_queue.clear()
-        except OSError as e:
-            print(f"note: could not empty the model queue: {e}")
-
-
 def report_commit(done):
-    """What a save wrote, on stdout, and the commit's own lines on stderr."""
+    """What a save wrote, on stdout, and the commit's own lines on stderr: the
+    Agent files it wrote, updated or removed, and its notes."""
     for path in done.written:
         print(f"wrote {path}")
     if not done.written:
@@ -589,9 +472,10 @@ def report_commit(done):
         sys.stderr.write(f"{line}\n")
 
 
-def confirm_and_write(snap, lanes_doc, routing_doc, refresh=None, targets=None):
+def confirm_and_write(snap, lanes_doc, routing_doc):
     """The --plain confirm: list what the save writes, then commit both
-    documents through the launch read `snap`."""
+    documents through the launch read `snap`, which also keeps the Agent
+    files in step and forgets the Model queue entries the start facts named."""
     print(snap.files["lanes"])
     print(snap.files["routing"])
     for name, lane in lanes_doc["lanes"].items():
@@ -603,9 +487,6 @@ def confirm_and_write(snap, lanes_doc, routing_doc, refresh=None, targets=None):
         print("nothing written")
         return
     report_commit(catalog_commit.commit(snap, {"lanes": lanes_doc, "routing": routing_doc}))
-    clear_queue(refresh)
-    for line in save_all_native_agents(refresh, lanes_doc, targets):
-        print(line)
 
 
 def write_focused(config_dir, revision, original_lanes, original_routing,
@@ -664,7 +545,9 @@ def main(argv=None):
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
         # The catalog as read at launch. Every save commits through it, so a
         # change made while the wizard is open is refused, never overwritten.
-        snap = catalog_commit.read(config_dir)
+        # The full wizard reads the Model queue with it: the start facts name
+        # that queue, and its commit forgets exactly what they named (D.4).
+        snap = catalog_commit.read(config_dir, queue=args.screen == "start")
         focused_revision = snap.revision if args.screen != "start" else None
         tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
         existing = snap.lanes is not None
@@ -691,7 +574,8 @@ def main(argv=None):
             # the report instead, so the page line says (not written)
             for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
                                               width=10_000, refresh=refresh,
-                                              rows_note=rows_note):
+                                              rows_note=rows_note, queued=snap.queued,
+                                              applied=snap.applied):
                 print(line)
             if tier_lines is not None:
                 # the same parser and summary as the review page's `v`; the
@@ -714,8 +598,7 @@ def main(argv=None):
                 # order written (ticket 28)
                 tier_line_rules.write_order_from_lines(lanes_doc, parsed)
             ask_routing(routing_doc)
-            confirm_and_write(snap, lanes_doc, routing_doc,
-                              refresh=refresh, targets=native_targets(config_dir))
+            confirm_and_write(snap, lanes_doc, routing_doc)
         else:
             if args.bench_report:
                 print("note: --bench-report is ignored in TUI mode")
@@ -758,6 +641,8 @@ def main(argv=None):
                 rows_note=rows_note,
                 rescan=rescan if args.screen == "start" else None,
                 tier_lines=tier_lines,
+                queued=snap.queued,
+                applied=snap.applied,
             )
             if tier_lines is not None:
                 summary = wizard.apply_start_lines()
@@ -773,11 +658,6 @@ def main(argv=None):
                 else:
                     report_commit(catalog_commit.commit(
                         snap, {"lanes": result_lanes, "routing": result_routing}))
-                    clear_queue(wizard.refresh)
-                    # the plan the wizard holds: a rescan replaced launch's
-                    for line in save_all_native_agents(wizard.refresh, result_lanes,
-                                                       native_targets(config_dir)):
-                        print(line)
     except SetupAbort:
         return 130
     except catalog_commit.CatalogChanged as e:

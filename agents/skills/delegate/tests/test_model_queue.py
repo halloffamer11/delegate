@@ -15,8 +15,10 @@ SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 FIXTURES = os.path.join(HERE, "fixtures", "discover")
 sys.path.insert(0, SCRIPTS)
+import catalog  # noqa: E402
+import catalog_commit  # noqa: E402
+import discover  # noqa: E402
 import model_queue  # noqa: E402
-import setup  # noqa: E402
 import setup_tui  # noqa: E402
 
 failures = []
@@ -56,6 +58,14 @@ def load(path):
         return json.load(f)
 
 
+def start_facts(cfg):
+    """The wizard's start facts from a read that takes the queue, as the full
+    wizard reads it, with no refresh run."""
+    snap = catalog_commit.read(cfg, queue=True)
+    return setup_tui.start_facts(snap.files["lanes"], snap.files["routing"], None, None,
+                                 width=200, queued=snap.queued, applied=snap.applied)
+
+
 def apply_tests(root):
     present = {"codex", "agy", "grok"}
     fixtures = newer_fixtures(root)
@@ -69,22 +79,21 @@ def apply_tests(root):
     new = [n for n, lane in after["lanes"].items() if lane["model"] == "gpt-6.1-sol"]
     old_at = list(before["lanes"]).index("sol-high@codex")
     lane = after["lanes"][new[0]] if len(new) == 1 else {}
-    backups = os.listdir(os.path.join(root, "q9", "lanes-backups"))
+    # the catalog commit backs up the lanes.json it replaces beside the catalog
+    folder = os.path.join(cfg, "backups")
+    backups = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
     record("9. a newer version of a model the catalog runs takes its lane's place, tier and all",
            "sol-high@codex" not in after["lanes"] and len(new) == 1
            and names.index(new[0]) == old_at and lane.get("tier") == 3 and lane.get("effort") == "high"
-           and "enabled" not in lane and len(backups) == 1
-           and load(os.path.join(root, "q9", "lanes-backups", backups[0])) == before
+           and "enabled" not in lane and len(backups) == 1 and backups[0].startswith("lanes-")
+           and load(os.path.join(folder, backups[0])) == before
+           and not os.path.exists(os.path.join(root, "q9", "lanes-backups"))
            and [(a["old"], a["new"]) for a in model_queue.applied()] == [("sol-high@codex", new[0])],
            repr((new, names, lane, backups, model_queue.applied())))
-    lines = setup_tui.refresh_lines({"models": [], "removed": [], "notices": [], "queued": [],
-                                     "applied": model_queue.applied()}, width=200)
+    lines = start_facts(cfg)
     record("9b. the wizard's start facts name the swap",
            any(line.startswith(f"Dispatch swapped in: sol-high@codex -> {new[0]}") for line in lines),
            repr(lines))
-    setup.clear_queue({"models": [], "queued": model_queue.pending()})
-    record("9c. the wizard's write empties the swaps it reported",
-           model_queue.applied() == [])
     models = [(m["harness"], m["model"]) for m in queued]
     record("10. the applied model is not queued; a model new to the harness still is",
            ("codex", "gpt-6.1-sol") not in models and ("codex", "gpt-6-astra") in models,
@@ -116,17 +125,67 @@ def apply_tests(root):
            same and ("codex", "gpt-6.1-sol") in [(m["harness"], m["model"]) for m in model_queue.pending()]
            and model_queue.applied() == [])
 
-    doc = load(path)
-    swapped = dict(doc, lanes={"x@codex": doc["lanes"]["sol-high@codex"]})
-    wrote = model_queue._write_applied(cfg, path, raw + b" ", swapped, [("sol-high@codex", "x@codex")])
-    record("13. a catalog changed since the scan read it is not overwritten",
-           wrote is False and load(path) == doc)
+    os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(root, "q13", "new-models.json")
+    cfg = config_dir(os.path.join(root, "a13"))
+    path = os.path.join(cfg, "lanes.json")
+    real_discover = discover.discover
+
+    def listing(lanes_doc, **kwargs):
+        # a catalog set lands while the scan lists the harnesses' models
+        doc = load(path)
+        doc["lanes"]["sol-high@codex"]["tier"] = 1
+        catalog.write_json(path, doc)
+        return real_discover(lanes_doc, **kwargs)
+
+    discover.discover = listing
+    try:
+        model_queue.scan(config_dir=cfg, fixture_dir=fixtures, present=present)
+    finally:
+        discover.discover = real_discover
+    after = load(path)
+    queued = [(m["harness"], m["model"]) for m in model_queue.pending()]
+    record("13. a scan whose catalog changed while it listed models writes nothing and still queues",
+           after["lanes"]["sol-high@codex"]["tier"] == 1
+           and not any(lane["model"] == "gpt-6.1-sol" for lane in after["lanes"].values())
+           and not os.path.exists(os.path.join(cfg, "backups"))
+           and ("codex", "gpt-6.1-sol") in queued and model_queue.applied() == [],
+           repr((queued, model_queue.applied())))
+
+
+def scan_imports_test(root):
+    """A detached scan swaps a newer model into the catalog and writes it, and
+    loads no module of the wizard to do it (deepening D2)."""
+    cfg = config_dir(os.path.join(root, "a14"))
+    fixtures = newer_fixtures(root)
+    wizard = ("setup", "setup_tui", "bench", "bench_page", "effort")
+    code = (
+        "import json, sys\n"
+        f"sys.path.insert(0, {SCRIPTS!r})\n"
+        "import model_queue\n"
+        f"model_queue.scan(config_dir={cfg!r}, fixture_dir={fixtures!r},\n"
+        "                 present={'codex', 'agy', 'grok'})\n"
+        f"print(json.dumps(sorted(m for m in {wizard!r} if m in sys.modules)))\n"
+    )
+    env = dict(os.environ, HOME=root, DELEGATE_MODEL_QUEUE=os.path.join(root, "q14", "new-models.json"))
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         env=env, cwd=root, timeout=120)
+    try:
+        loaded = json.loads(res.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        loaded = None
+    swapped = any(lane["model"] == "gpt-6.1-sol"
+                  for lane in load(os.path.join(cfg, "lanes.json"))["lanes"].values())
+    record("14. the scan imports no wizard module",
+           res.returncode == 0 and loaded == [] and swapped,
+           f"rc={res.returncode} loaded={loaded} swapped={swapped} stderr={res.stderr[-400:]!r}")
 
 
 def main():
     with tempfile.TemporaryDirectory() as root:
         os.environ.pop("DELEGATE_MODEL_APPLY", None)
         apply_tests(root)
+    with tempfile.TemporaryDirectory() as root:
+        scan_imports_test(root)
     with tempfile.TemporaryDirectory() as root:
         os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(root, "q", "new-models.json")
         os.environ.pop("DELEGATE_MODEL_SCAN", None)
@@ -168,20 +227,15 @@ def main():
                model_queue.due() and model_queue.kick(cfg) is False and model_queue.due())
         os.environ.pop("DELEGATE_MODEL_SCAN")
 
-        lines = setup_tui.refresh_lines({"models": [], "removed": [], "notices": [],
-                                         "queued": model_queue.pending()}, width=200)
+        lines = start_facts(cfg)
         record("6. the wizard's start facts name what dispatch noticed",
                any(line.startswith("Dispatch noticed (4): gpt-6-astra, gpt-5.5, gemini-3.1-pro, claude-opus-5-5")
                    for line in lines),
                repr(lines))
 
-        setup.clear_queue(None)
-        kept = len(model_queue.pending())
-        setup.clear_queue({"models": [], "queued": model_queue.pending()})
-        record("7. a write after a run that saw the queue empties it; one that saw none keeps it",
-               kept == 4 and model_queue.pending() == [])
-
-        # dispatch naming a model no Lane runs queues it, and still refuses
+        # dispatch naming a model no Lane runs queues it, and still refuses;
+        # on a queue of its own, so the entries above do not count
+        os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(root, "q8", "new-models.json")
         env = dict(os.environ, DELEGATE_MODEL_SCAN="off", DELEGATE_CACHE=os.path.join(root, "usage.json"))
         brief = os.path.join(root, "brief.md")
         with open(brief, "w") as f:
