@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""published_names.py — which lane model a benchmark's printed name denotes.
+"""lane_evidence.py — which benchmark rows belong to which Lane.
 
 The catalog keys on slugs; a leaderboard prints a slug or a display name. This
 is the one reconciliation of the two, used by `catalog.validate_lanes` (a
 `published_as` entry may not name another lane's model) and by the benchmark
-readers (`bench`, `tier_proposal`). Split out of catalog.py (ticket 26).
+readers: `LaneEvidence` for carry, the Tier proposal, the wizard and the
+benchmark page, the resolvers for `bench`. Split out of catalog.py (ticket 26)
+as `published_names`. It imports only `harnesses`, which decides what one
+Model is and which efforts it runs, never the spelling.
 """
+from __future__ import annotations
+
 import os
 import re
 import sys
+from typing import List, Optional, Sequence
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import harnesses  # noqa: E402
@@ -138,33 +144,107 @@ def resolve_published_models(published, lanes_doc, effort=None):
     return out
 
 
-def resolve_effort_rows(lanes_doc, effort_rows):
-    """Returns (rows keyed by catalog model, published names that name no lane).
+# A source that did not state an effort has not said which Lane it measured.
+UNSTATED_EFFORTS = (None, "", "unknown")
 
-    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
-    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
-    comparison below is against `lane["model"]`, so each row is re-keyed to the
-    lane model its printed name denotes, and the catalog owns that mapping
-    (`published_names.resolve_published_model`). A row naming no lane model is dropped
-    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
-    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
-    all is what a human needs to spot a `published_as` they still owe us.
+
+def _stated_effort(row):
+    """The effort a row (or a Lane) states, or None when it states none."""
+    effort = row.get("effort")
+    return None if effort in UNSTATED_EFFORTS else str(effort)
+
+
+def _model_identity(lane):
+    """What "one Model" means across harnesses: the harness's family base,
+    normalized, so agy's `claude-opus-5-5-high` and Claude Code's
+    `claude-opus-5-5` are one Model, and a codex slug ending in an effort word
+    is a Model of its own."""
+    lane = lane or {}
+    return normalize_name(harnesses.family(lane.get("harness"), lane.get("model") or "")[0])
+
+
+class LaneEvidence:
+    """Which benchmark rows belong to which Lanes, for one catalog and one row set.
+
+    The constructor attributes every row once; every query after it is a lookup
+    that returns the caller's own row objects, unchanged and in input order.
+    Whether a row counts (uncertain, composite, its score's shape) is the
+    reader's question. A caller that changes a Lane's model, harness, effort or
+    `published_as` builds a new one; `enabled`, `tier` and `order` are not read.
     """
-    resolved, unmatched = [], []
-    for row in effort_rows or []:
-        if not isinstance(row, dict):
-            continue
-        models = resolve_published_models(row.get("model"), lanes_doc, effort=row.get("effort"))
-        if not models:
-            name = row.get("model")
-            if isinstance(name, str) and name.strip() and name not in unmatched:
-                unmatched.append(name)
-            continue
-        for model in models:
-            if model == row.get("model"):
-                resolved.append(row)
-            else:
-                copied = dict(row)
-                copied["model"] = model
-                resolved.append(copied)
-    return resolved, unmatched
+
+    def __init__(self, lanes_doc: dict, rows: Optional[Sequence[dict]]) -> None:
+        self._available = rows is not None
+        lanes = {name: lane for name, lane in ((lanes_doc or {}).get("lanes") or {}).items()
+                 if isinstance(lane, dict) and isinstance(lane.get("model"), str)
+                 and lane["model"].strip()}
+        model_of = {name: (lane.get("harness"), _model_identity(lane)) for name, lane in lanes.items()}
+        # A printed name names a Model when, normalized, it is a `published_as`
+        # entry (the Model of the Lane carrying it), a Lane's Model identity or
+        # its model string. A name two Models answer to names neither.
+        names = {}
+        for name, lane in lanes.items():
+            spellings = [model_of[name][1], lane["model"]] + [
+                entry for entry in lane.get("published_as") or () if isinstance(entry, str)]
+            for key in filter(None, map(normalize_name, spellings)):
+                names.setdefault(key, set()).add(model_of[name][1])
+        claimed, self._unmatched = {}, []
+        for row in rows or ():
+            if not isinstance(row, dict):
+                continue
+            printed = row.get("model")
+            found = names.get(normalize_name(printed)) or set()
+            if len(found) == 1:
+                claimed.setdefault(next(iter(found)), []).append(row)
+            elif isinstance(printed, str) and printed.strip() and printed not in self._unmatched:
+                self._unmatched.append(printed)
+        self._model_rows, self._lane_rows, shared = {}, {}, {}
+        for name, lane in lanes.items():
+            if model_of[name] not in shared:
+                harness, model = model_of[name]
+                slugs = [lanes[n]["model"] for n in lanes if model_of[n] == model_of[name]]
+                shared[model_of[name]] = [row for row in claimed.get(model, ())
+                                          if _runs(harness, slugs, _stated_effort(row))]
+            self._model_rows[name] = shared[model_of[name]]
+            effort = _stated_effort(lane)
+            self._lane_rows[name] = [row for row in shared[model_of[name]]
+                                     if effort is not None and _stated_effort(row) == effort]
+
+    def __eq__(self, other):
+        """Equal rows attributed alike: the wizard compares its state by value."""
+        if not isinstance(other, LaneEvidence):
+            return NotImplemented
+        return ((self._available, self._model_rows, self._lane_rows, self._unmatched)
+                == (other._available, other._model_rows, other._lane_rows, other._unmatched))
+
+    @property
+    def available(self) -> bool:
+        """False for no rows at all (None), as distinct from none that matched."""
+        return self._available
+
+    def model_rows(self, lane: str) -> List[dict]:
+        """This Lane's Model's rows that state no effort or one its Harness
+        runs for that Model (`offers_effort`; no adapter runs every effort):
+        Claude Code's Opus at xhigh is no row of agy's. [] for an unknown Lane."""
+        return list(self._model_rows.get(lane, ()))
+
+    def lane_rows(self, lane: str) -> List[dict]:
+        """This Lane's evidence: the part of `model_rows` measured at its own
+        effort, the one attribution rule. An unstated effort (None, empty or
+        `unknown`) is no Lane's."""
+        return list(self._lane_rows.get(lane, ()))
+
+    def unmatched(self) -> List[str]:
+        """The printed names no Model answers to, each once, first seen first."""
+        return list(self._unmatched)
+
+
+def _runs(harness, models, effort):
+    """Whether a Harness runs `effort` for a Model it carries as `models`; an
+    unstated effort is the Model's context everywhere."""
+    if effort is None:
+        return True
+    adapter = harnesses.get(harness)
+    if adapter is None:
+        return True
+    return any(adapter.offers_effort(model, effort) for model in models)

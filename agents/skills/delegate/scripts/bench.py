@@ -28,14 +28,13 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import catalog
-import published_names
+import lane_evidence
 import carry  # noqa: E402
-# Reconciling a source's printed model name against a lane model is
-# `published_names`'s; both this report and the carry pre-screen read it from
-# there rather than keeping a second copy.
+# Which benchmark rows belong to which Lane is `lane_evidence`'s; this report,
+# the carry pre-screen and the Tier proposal read it from there rather than
+# keeping a second copy.
 from catalog import CatalogError
 from harnesses import EFFORTS
-from published_names import resolve_published_model, strip_effort_suffix
 
 EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
 DEFAULT_OUT_DIR = "~/.cache/delegate/bench/"
@@ -139,7 +138,7 @@ def lane_effort_of(rec):
 def model_matches_slug(catalog_model, slug):
     if slug == catalog_model:
         return True
-    base, _suffix_effort = strip_effort_suffix(catalog_model)
+    base, _suffix_effort = lane_evidence.strip_effort_suffix(catalog_model)
     return bool(base) and slug == base
 
 
@@ -342,11 +341,10 @@ def collect_epoch_cells(rows):
 def effort_attributes(measured_effort, lane_effort):
     """Whether a figure measured at `measured_effort` is this lane's figure.
 
-    The whole of the attribution rule, in one place: equality, and `unknown`
-    matching nothing, because a source that did not state an effort has not
-    said which lane it measured. The report, the wizard and the page all read
-    it from here, so the page can never disagree with the decision the wizard
-    offers (the reason `carry.dominating_row` is shared rather than copied).
+    Equality, and `unknown` matching nothing, because a source that did not
+    state an effort has not said which lane it measured. The report reads it
+    here; the carry pre-screen, the Tier proposal and the page's plots read the
+    same rule through `lane_evidence.LaneEvidence.lane_rows`.
     """
     if not lane_effort:
         return False
@@ -487,7 +485,7 @@ def aa_component_rows(effort_rows, lanes_doc):
             continue
         effort = row.get("effort")
         # every harness that runs the model gets the row (any-harness ticket 31)
-        for model in published_names.resolve_published_models(row.get("model"), lanes_doc,
+        for model in lane_evidence.resolve_published_models(row.get("model"), lanes_doc,
                                                                effort=effort):
             out.append({
                 "model": model,
@@ -1089,8 +1087,8 @@ def _canonical_model(published, models):
     harnesses run the model it names: the model whose slug the name matches
     whole (`claude-opus-5-5`, one model at every effort) before a member that
     carries the effort in its slug (`claude-opus-5-5-high` on agy)."""
-    key = published_names.normalize_name(published)
-    whole = [m for m in models if published_names.normalize_name(m) == key]
+    key = lane_evidence.normalize_name(published)
+    whole = [m for m in models if lane_evidence.normalize_name(m) == key]
     return (whole or list(models))[0]
 
 
@@ -1106,7 +1104,7 @@ def identity_of(published, lanes_doc, effort=None):
     Resolving against the catalog as one pool gave a row only to the agy
     member at its effort, so Claude Code's Opus lanes had no rows at all.
     """
-    resolved = published_names.resolve_published_models(published, lanes_doc, effort=effort)
+    resolved = lane_evidence.resolve_published_models(published, lanes_doc, effort=effort)
     if resolved:
         return {
             "lane_model": _canonical_model(published, resolved),
@@ -1115,7 +1113,7 @@ def identity_of(published, lanes_doc, effort=None):
             "identity_reason": None,
             "candidates": list(resolved),
         }
-    key = published_names.normalize_name(published)
+    key = lane_evidence.normalize_name(published)
     if not key:
         return {
             "lane_model": None,
@@ -1130,8 +1128,8 @@ def identity_of(published, lanes_doc, effort=None):
         model = lane.get("model")
         if not isinstance(model, str) or not model.strip():
             continue
-        normalized = published_names.normalize_name(model)
-        base, _suffix = published_names.strip_effort_suffix(normalized)
+        normalized = lane_evidence.normalize_name(model)
+        base, _suffix = lane_evidence.strip_effort_suffix(normalized)
         if key in (normalized, base):
             candidates.add(model)
     ordered = sorted(candidates)
@@ -1167,11 +1165,11 @@ def inspect_targets(query, lanes_doc):
             models.append(model)
     if query in models:
         return [query], ident
-    qn = published_names.normalize_name(query)
+    qn = lane_evidence.normalize_name(query)
     family = []
     for model in models:
-        normalized = published_names.normalize_name(model)
-        base, _suffix = published_names.strip_effort_suffix(normalized)
+        normalized = lane_evidence.normalize_name(model)
+        base, _suffix = lane_evidence.strip_effort_suffix(normalized)
         if qn and qn in (normalized, base):
             family.append(model)
     if family:
@@ -1399,8 +1397,8 @@ def _record_matches_query(rec, query, targets):
         return True
     if set(rec.get("candidates") or ()).intersection(targets):
         return True
-    qn = published_names.normalize_name(query)
-    if qn and published_names.normalize_name(rec.get("published")) == qn:
+    qn = lane_evidence.normalize_name(query)
+    if qn and lane_evidence.normalize_name(rec.get("published")) == qn:
         return True
     slug = rec.get("slug")
     if slug:

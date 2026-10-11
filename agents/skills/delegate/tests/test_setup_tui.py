@@ -31,7 +31,7 @@ sys.path.insert(0, DELEGATE_DIR)
 import bench
 import carry
 import catalog
-import published_names
+import lane_evidence
 import harnesses
 import catalog_edit
 import tier_lines
@@ -1121,8 +1121,8 @@ try:
         _packet, AA_ROWS = effort.aa_extract(f.read(), observed="2026-09-11")
     doc = astra_lanes()
     lane_models = {lane["model"] for lane in doc["lanes"].values()}
-    resolved = {(r["model"], published_names.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
-    _rows, unmatched = published_names.resolve_effort_rows(doc, AA_ROWS)
+    resolved = {(r["model"], lane_evidence.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
+    unmatched = lane_evidence.LaneEvidence(doc, AA_ROWS).unmatched()
     w = wizard(lanes=doc, effort_rows=AA_ROWS)
     w.handle("enter")
     w.handle("enter")

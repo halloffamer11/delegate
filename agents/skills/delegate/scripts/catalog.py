@@ -17,7 +17,7 @@ One job: load, validate and project the effective catalog. The rest of what
 catalog.py once held lives beside it (ticket 26): the edit engine in
 `catalog_edit`, the Class guide checks in `class_guides`, the `delegate
 catalog` command in `catalog_cli`, bulk Tier lines in `tier_lines` and the
-published-name reconciliation in `published_names`.
+published-name reconciliation in `lane_evidence`.
 """
 import copy
 import json
@@ -30,7 +30,7 @@ CONFIG_DIR = "~/.config/delegate"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import harnesses  # noqa: E402
-import published_names  # noqa: E402
+import lane_evidence  # noqa: E402
 
 # The starting catalog's routing: the shipped Classes and the Tier proposal
 # rule a catalog falls back to.
@@ -220,8 +220,8 @@ def validate_lanes(doc, source="lanes.json"):
         model = lane.get("model")
         if not isinstance(model, str) or not model.strip():
             continue
-        normalized = published_names.normalize_name(model)
-        base, _effort = published_names.strip_effort_suffix(normalized)
+        normalized = lane_evidence.normalize_name(model)
+        base, _effort = lane_evidence.strip_effort_suffix(normalized)
         for key in {normalized, base}:
             owners.setdefault(key, set()).add(model)
 
@@ -342,7 +342,7 @@ def validate_lanes(doc, source="lanes.json"):
                         f"{source}: lane '{lane_name}': published_as entries must be "
                         f"non-empty strings, got {name!r}"
                     )
-                key = published_names.normalize_name(name)
+                key = lane_evidence.normalize_name(name)
                 foreign = sorted(m for m in owners.get(key, ()) if m != lane["model"])
                 if foreign:
                     raise CatalogError(

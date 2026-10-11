@@ -29,6 +29,7 @@ import catalog
 import discover
 import harnesses
 from harnesses import agy as agy_module, grok as grok_module
+from lane_evidence import LaneEvidence
 import setup_tui
 
 fails = 0
@@ -657,7 +658,7 @@ record(
 # lane may make it: a new lane records no `enabled` at all, and ultra reads as
 # ultra (ticket 35).
 new_reasons = {name: bench.carry_reason(decision)
-               for name, decision in carry.decisions(refreshed, frozen_rows).items()
+               for name, decision in carry.decisions(refreshed, LaneEvidence(refreshed, frozen_rows)).items()
                if name in set(plan["new"])}
 record(
     "no new lane's carry reason claims catalog state the file does not hold",

@@ -48,7 +48,7 @@ replaces partial use of invalid documents.
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`,
   `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`): load,
   validate and project the effective catalog, and nothing else (ticket 26). It imports no other
-  delegate script but `harnesses` and `published_names`, so `rank` can import it with no cycle.
+  delegate script but `harnesses` and `lane_evidence`, so `rank` can import it with no cycle.
   The efforts a harness offers are its adapter's `efforts`, with the command or page that proved
   each list; `check` and `delegate.py --effort` refuse anything outside them (ticket 19).
 - `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
@@ -63,9 +63,12 @@ replaces partial use of invalid documents.
 - `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
   edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
   `scripts/tier_lines.py`: bulk Tier lines for the wizard.
-- `scripts/published_names.py`: the mapping from a benchmark source's printed model name to a
-  lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the
-  member of an agy slug family); `bench.py`, `tier_proposal.py` and the setup pre-screen read it.
+- `scripts/lane_evidence.py` (once `published_names.py`): which benchmark rows belong to which
+  Lane. `LaneEvidence(lanes_doc, rows)` attributes every row once, by the Model its printed name
+  names (the lane field `published_as` names the Model, so it reaches every Harness that runs it)
+  and the effort it states; `lane_rows`, `model_rows`, `available` and `unmatched` are lookups.
+  The carry pre-screen, the Tier proposal, the wizard and the benchmark page read one; `bench.py`
+  still resolves names through `resolve_published_models`. It imports only `harnesses`.
 - `catalog.single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
   Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
   neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
@@ -154,10 +157,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   task beside them and the composite never a column. `collect()` returns two views of the same
   figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes`
   (only the figures measured at that lane's own effort, with `mean`/`n` over those).
-  `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the
-  page both read it from there. Display order lives beside `collect` (`group_lanes`,
+  `effort_attributes(measured, lane_effort)` is the report's attribution rule; the wizard, the
+  Tier proposal and the page's plots read the same equality through `LaneEvidence.lane_rows`.
+  Display order lives beside `collect` (`group_lanes`,
   `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
-  `scripts/carry.py` (ticket 27): `families()`, `beats()` and `decisions()`, which returns
+  `scripts/carry.py` (ticket 27): `beats()` and `decisions(lanes_doc, evidence)`, which returns
   structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
   `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
   reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares
@@ -203,12 +207,15 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
-  opens, which reads its attribution and its lane order (`bench.lane_order`, `group_lanes`) from
-  `bench.py` and its domination rule (`carry.decisions`, `carry.dominating_row`) from `carry.py`
-  rather than deciding any of them again. HTML
-  carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline
-  JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with
-  its own filters and the frontier of what is shown, and only lays out what Python decided. Each
+  opens, which reads its records and its lane order (`bench.lane_order`, `group_lanes`) from
+  `bench.py`, each point's Lanes from one `LaneEvidence`, and the wizard's own verdicts
+  (`carry.decisions` on that evidence, asked once per render, never caught) rather than deciding
+  any of them again. Each Lane on a point carries its own verdict, a point is struck only when
+  every Lane on it is proposed off, and "beaten by" comes only from an off verdict on the board's
+  own source. HTML carries kind/source/competitor; reason prose is display-only. It embeds its
+  plot data as inline JSON; `assets/bench_page.js`, inlined beside it, draws one
+  score-against-cost plot per panel with its own filters and the frontier of what is shown, and
+  only lays out what Python decided. Each
   board shows what it measures, quoted from its source's methodology page with the URL beside it
   (`assets/boards.json`; a board with no entry says so and is never described from memory); an open
   table under the plots compares every board, and every evidence table sits collapsed below that.
@@ -332,14 +339,17 @@ down one Tier; Tier 1 requires Carry to switch off.
 - The carry page's domination rule is `carry.dominating_effort`: another effort of the same model,
   for no more money (`carry.beats`, which the Tier proposal's cost frontier also uses), beats the
   lane on more than half of the benchmarks one source scored both on.
-  Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is
-  a family key, not the model string (ticket 30): `carry.families(lanes_doc)` keys every
-  harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
-  because agy names each effort as its own model. The harness decides, never the spelling. That
-  family rule has one implementation, the adapter's `family` (`harnesses/agy.py`, reached through
-  `harnesses.family`, and per Lane through `carry.model_of`, which also groups the pages' rows),
-  which the agy adapter's `group` also groups its model listing with. `dominating_effort`,
-  `dominating_row` and `first_domination` take the map; without one every model is its own family.
+  Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model"
+  is the Lane's Model on its own Harness, at an effort that Harness runs:
+  `carry.decisions(lanes_doc, evidence)` compares a Lane's own rows (`LaneEvidence.lane_rows`)
+  with the rest of `LaneEvidence.model_rows`, which holds only efforts the Harness offers
+  (`offers_effort`), so Claude Code's Opus at xhigh switches off no agy Opus Lane and an effort
+  the grok CLI cannot run switches off no grok Lane. Its no-rows check reads `lane_rows`, and it
+  compares no efforts to attribute a row itself. The harness decides what one Model is, never the
+  spelling (ticket 30): agy names each effort as its own slug, and the adapter's `family`
+  (`harnesses/agy.py`, reached through `harnesses.family`) is the one implementation, which
+  `lane_evidence` names a Model with, `carry.model_of` groups the pages' rows with, and the agy
+  adapter's `group` groups its model listing with.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
   `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.

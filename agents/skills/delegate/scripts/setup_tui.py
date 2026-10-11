@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Selectable terminal setup UI for delegate catalogs."""
 import copy
-import published_names
 import carry
+import lane_evidence
 import os
 import subprocess
 import textwrap
@@ -373,8 +373,13 @@ class Wizard:
         # and each lane's place in the last lines applied, which starts it
         self._tier_order = {tier: [] for tier in range(1, 5)}
         self._line_order = {}
-        _rows, self._unmatched = published_names.resolve_effort_rows(self.lanes_doc, effort_rows)
-        self._proposals = carry.decisions(self.lanes_doc, effort_rows)
+        # One evidence per scrub: the carry page, its unmatched line and the
+        # Tier proposal all read it, so none can claim a row another does not.
+        # Only `enabled`, `tier` and `order` change after this, and the
+        # evidence does not read them.
+        self._evidence = lane_evidence.LaneEvidence(self.lanes_doc, effort_rows)
+        self._unmatched = self._evidence.unmatched()
+        self._proposals = carry.decisions(self.lanes_doc, self._evidence)
         self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
         # A focused screen starts from the catalog as it stands and never
         # applies carry proposals the operator has not seen.
@@ -714,7 +719,7 @@ class Wizard:
         """{lane: proposal} for the carried Lanes with a score on the chosen
         benchmark (ticket 17). A proposal is shown, never applied, until `p`."""
         settings = catalog.tier_proposal_settings(self.routing_doc)
-        return tier_proposal.propose(self.lanes_doc, self.effort_rows, settings,
+        return tier_proposal.propose(self.lanes_doc, self._evidence, settings,
                                      names=self._carried())
 
     def take_proposals(self):

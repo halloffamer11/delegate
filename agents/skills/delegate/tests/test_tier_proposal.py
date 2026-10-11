@@ -11,9 +11,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, SCRIPTS)
 
+import carry  # noqa: E402
 import catalog  # noqa: E402
 import harnesses  # noqa: E402
 import tier_proposal  # noqa: E402
+from lane_evidence import LaneEvidence  # noqa: E402
 from setup_tui import Wizard  # noqa: E402
 
 fails = 0
@@ -93,7 +95,7 @@ def test_settings_are_data():
 
 
 def test_bands_and_frontier():
-    proposals = tier_proposal.propose(LANES, AA_ROWS, SETTINGS)
+    proposals = tier_proposal.propose(LANES, LaneEvidence(LANES, AA_ROWS), SETTINGS)
     tiers = {name: p["tier"] for name, p in proposals.items()}
     record("a Lane without a row at its own effort gets no proposal", "luna-low@codex" not in proposals,
            repr(tiers))
@@ -112,8 +114,8 @@ def test_bands_and_frontier():
 def test_diversity():
     """Sol clears Tier 4 but Fable beats it on score and cost: off the cost
     frontier, Sol still holds Tier 4 for codex."""
-    with_rule = tier_proposal.propose(LANES, AA_ROWS, SETTINGS)
-    without = tier_proposal.propose(LANES, AA_ROWS, settings(diversity=False))
+    with_rule = tier_proposal.propose(LANES, LaneEvidence(LANES, AA_ROWS), SETTINGS)
+    without = tier_proposal.propose(LANES, LaneEvidence(LANES, AA_ROWS), settings(diversity=False))
     record("a harness whose best Lane is off the frontier keeps a proposal in that Tier",
            with_rule["sol-high@codex"]["tier"] == 4 and with_rule["sol-high@codex"]["why"] == "diversity"
            and with_rule["fable-xhigh@claude"]["why"] == "frontier",
@@ -126,13 +128,65 @@ def test_diversity():
 
 def test_switching_the_benchmark():
     tb = settings(source="tbench", benchmark="Terminal-Bench")
-    proposals = tier_proposal.propose(LANES, AA_ROWS + TB_ROWS, tb)
+    proposals = tier_proposal.propose(LANES, LaneEvidence(LANES, AA_ROWS + TB_ROWS), tb)
     record("switching to Terminal-Bench recomputes the proposals from its rows",
            set(proposals) == {"fable-xhigh@claude", "sol-high@codex"}
            and proposals["sol-high@codex"]["tier"] == 4
            and proposals["fable-xhigh@claude"]["tier"] == 1
            and proposals["sol-high@codex"]["benchmark"] == "Terminal-Bench 4.0",
            repr(proposals))
+
+
+def opus_lane(harness, model, effort, **extra):
+    out = {"harness": harness, "model": model, "effort": effort, "tier": 3,
+           "meter": "claude-general" if harness == "claude" else "agy-claude-gpt"}
+    out.update(extra)
+    return out
+
+
+# A published name on Claude Code's Opus Lane names the Model, so it reaches
+# agy's Opus Lanes too.
+PUBLISHED_AS_OPUS = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "opus-high@claude": opus_lane("claude", "claude-opus-5-5", "high",
+                                      published_as=["Opus 5.5 Thinking"]),
+        "opus-high@agy": opus_lane("agy", "claude-opus-5-5-high", "high"),
+        "opus-low@agy": opus_lane("agy", "claude-opus-5-5-low", "low"),
+    },
+}
+# agy's flash family, with a published name on its high member only.
+PUBLISHED_AS_FLASH = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        f"flash-{e}@agy": {"harness": "agy", "model": f"gemini-3.8-flash-{e}", "effort": e,
+                           "tier": 1, "meter": "agy-gemini",
+                           **({"published_as": ["Gemini Flash 3.8 Preview"]} if e == "high" else {})}
+        for e in ("low", "medium", "high")
+    },
+}
+
+
+def test_one_published_name_reaches_every_harness():
+    rows = [row("Opus 5.5 Thinking", "high", 52.0, 2.0), row("Opus 5.5 Thinking", "low", 35.0, 0.5)]
+    proposals = tier_proposal.propose(PUBLISHED_AS_OPUS, LaneEvidence(PUBLISHED_AS_OPUS, rows), SETTINGS)
+    scores = {name: p["score"] for name, p in proposals.items()}
+    record("a published_as name on Claude Code's Opus Lane scores agy's Opus Lanes too",
+           scores == {"opus-high@claude": 52.0, "opus-high@agy": 52.0, "opus-low@agy": 35.0},
+           repr(scores))
+
+
+def test_carry_and_the_proposal_agree():
+    """The published name is on flash-high, the row is at low: both readers
+    give it to flash-low, the Lane measured at that effort."""
+    rows = [row("Gemini Flash 3.8 Preview", "low", 35.0, 0.2)]
+    evidence = LaneEvidence(PUBLISHED_AS_FLASH, rows)
+    decided = carry.decisions(PUBLISHED_AS_FLASH, evidence)
+    with_rows = {name for name, d in decided.items() if d["kind"] != carry.KIND_NO_ROWS}
+    scored = set(tier_proposal.propose(PUBLISHED_AS_FLASH, evidence, SETTINGS))
+    record("carry and the Tier proposal claim the same rows for a Lane",
+           with_rows == scored == {"flash-low@agy"},
+           f"carry={ {n: d['kind'] for n, d in decided.items()} } proposal={sorted(scored)}")
 
 
 def walk_to_tier_four(w):
@@ -145,7 +199,7 @@ def test_order_is_a_list():
     """The proposal order is a list of Lane names, not text a caller parses:
     highest Tier first, each Tier's Lanes by place, and the `<lane> <tier>`
     lines and the wizard's `p` both follow it."""
-    proposals = tier_proposal.propose(LANES, AA_ROWS, SETTINGS)
+    proposals = tier_proposal.propose(LANES, LaneEvidence(LANES, AA_ROWS), SETTINGS)
     names = tier_proposal.ordered(proposals)
     keys = [(-proposals[n]["tier"], proposals[n]["place"]) for n in names]
     record("ordered() names every proposal, highest Tier first, then by place",
@@ -180,7 +234,8 @@ def test_wizard_confirm_and_quit():
     w.handle("enter")      # routing -> confirm
     w.handle("y")
     result = w.result()
-    expected = {name: p["tier"] for name, p in tier_proposal.propose(LANES, AA_ROWS, SETTINGS).items()}
+    proposed = tier_proposal.propose(LANES, LaneEvidence(LANES, AA_ROWS), SETTINGS)
+    expected = {name: p["tier"] for name, p in proposed.items()}
     written = result and {name: lane["tier"] for name, lane in result[0]["lanes"].items()}
     record("confirming writes the proposed Tiers; a Lane with no score keeps its own",
            written is not None
@@ -200,6 +255,8 @@ if __name__ == "__main__":
     test_bands_and_frontier()
     test_diversity()
     test_switching_the_benchmark()
+    test_one_published_name_reaches_every_harness()
+    test_carry_and_the_proposal_agree()
     test_order_is_a_list()
     test_wizard_confirm_and_quit()
     sys.exit(1 if fails else 0)

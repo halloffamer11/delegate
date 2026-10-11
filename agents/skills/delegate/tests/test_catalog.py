@@ -22,7 +22,7 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog_cli.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
-import published_names
+import lane_evidence
 import class_guides
 import catalog_edit
 import catalog_cli
@@ -676,7 +676,7 @@ record(
 )
 
 # 7.5 resolution: what the pre-screen asks of the catalog
-resolve = published_names.resolve_published_model
+resolve = lane_evidence.resolve_published_model
 astra = copy.deepcopy(lanes_sample)
 astra["lanes"]["astra-high@codex"] = copy.deepcopy(astra["lanes"]["sol-high@codex"])
 astra["lanes"]["astra-high@codex"]["model"] = "gpt-6-astra"
@@ -751,11 +751,11 @@ record(
 
 record(
     "7.8 every effort strips as a suffix, longest first",
-    [published_names.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]
+    [lane_evidence.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]
     == [("m", e) for e in harnesses.EFFORTS]
-    and published_names.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
-    and published_names.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
-    str([published_names.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]),
+    and lane_evidence.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
+    and lane_evidence.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
+    str([lane_evidence.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]),
 )
 
 # The published name is reconciled against the lane's model, reaching past an
@@ -3020,11 +3020,11 @@ with tempfile.TemporaryDirectory() as td:
 # One effort list: the suffixes are EFFORTS longest first, not a copy of it.
 record(
     "20.1 the effort suffixes are EFFORTS, longest first",
-    sorted(e for _, e in published_names.MODEL_EFFORT_SUFFIXES) == sorted(harnesses.EFFORTS)
-    and all(suffix == f"-{e}" for suffix, e in published_names.MODEL_EFFORT_SUFFIXES)
-    and [len(e) for _, e in published_names.MODEL_EFFORT_SUFFIXES]
+    sorted(e for _, e in lane_evidence.MODEL_EFFORT_SUFFIXES) == sorted(harnesses.EFFORTS)
+    and all(suffix == f"-{e}" for suffix, e in lane_evidence.MODEL_EFFORT_SUFFIXES)
+    and [len(e) for _, e in lane_evidence.MODEL_EFFORT_SUFFIXES]
     == sorted((len(e) for e in harnesses.EFFORTS), reverse=True),
-    str(published_names.MODEL_EFFORT_SUFFIXES),
+    str(lane_evidence.MODEL_EFFORT_SUFFIXES),
 )
 
 # agy carries the effort in the slug, so a slug agy lists at xhigh is a lane at

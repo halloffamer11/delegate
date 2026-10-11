@@ -40,6 +40,7 @@ import catalog
 import harnesses
 import setup_tui
 import tier_lines  # noqa: E402
+from lane_evidence import LaneEvidence  # noqa: E402
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
 NODE = shutil.which("node")
@@ -315,7 +316,7 @@ except Exception as e:
 # --- the page is the evidence for the pre-screen, so it has to say the same -----
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
-    proposals = carry.decisions(ASTRA, SWEEP)
+    proposals = carry.decisions(ASTRA, LaneEvidence(ASTRA, SWEEP))
     off = sorted(name for name, decision in proposals.items()
                  if not decision["enabled"] and setup_tui.is_dominated_reason(decision))
     struck = [p for p in board_named(data_of(page), "Terminal-Bench 4.0")["points"] if p["kind"] == "lane_off"]
@@ -370,6 +371,74 @@ try:
            f"points={[(p['effort'], p['kind'], p.get('beatenBy')) for p in points]}")
 except Exception as e:
     record("the page marks a dominated agy effort the way it marks a codex one", False, repr(e))
+
+# any-harness ticket 31: Claude Code runs Opus at low to xhigh, agy at low to
+# high. A point both harnesses share is one Lane per harness, each with its own
+# verdict, and the page strikes it only when every Lane on it is off.
+OPUS_TWO_HARNESSES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        **{f"opus55-{e}@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": e,
+                                  "tier": 3, "meter": "claude-general"}
+           for e in ("low", "medium", "high", "xhigh")},
+        **{f"opus55-{e}@agy": {"harness": "agy", "model": f"claude-opus-5-5-{e}", "effort": e,
+                               "tier": 3, "meter": "agy-claude-gpt"}
+           for e in ("low", "medium", "high")},
+    },
+}
+OPUS_ROWS = [{"source": "aa", "model": "Claude Opus 5.5", "effort": e, "benchmark": b,
+              "score": s, "cost_usd": c, "uncertain": False}
+             for e, s, c in (("low", 0.40, 1.0), ("medium", 0.60, 0.9),
+                             ("high", 0.70, 2.0), ("xhigh", 0.80, 1.5))
+             for b in ("b1", "b2")]
+
+try:
+    data = bench_page.plot_data(OPUS_ROWS, OPUS_TWO_HARNESSES)
+    shared = {}
+    for name in ("b1", "b2"):
+        board = board_named(data, name)
+        points = {p["effort"]: p for p in board["points"]}
+        high, low = points["high"], points["low"]
+        verdicts = {lane["name"]: lane["off"] for lane in high["lanes"]}
+        shared[name] = (
+            high["kind"] == "lane" and high["off"] is None
+            and verdicts == {"opus55-high@agy": None, "opus55-high@claude": "xhigh wins on aa"}
+            and {lane["name"]: lane["kind"] for lane in high["lanes"]}
+            == {"opus55-high@agy": "not_dominated", "opus55-high@claude": "dominated"}
+            and low["kind"] == "lane_off" and low["beatenBy"] == "medium"
+            and all(lane["off"] == "medium wins on aa" and lane["competitor"] == "medium"
+                    and lane["source"] == "aa" for lane in low["lanes"])
+            and "opus55-high@claude" in board["finding"]
+            and "opus55-high@agy" not in board["finding"],
+            high, low["kind"], low["beatenBy"], board["finding"])
+    page = bench_page.render(None, OPUS_TWO_HARNESSES, OPUS_ROWS)
+    record("one Opus point both harnesses share strikes only the Lane carry proposes off",
+           all(ok for ok, *_ in shared.values())
+           and "opus55-high@agy" not in re.search(r'<p class="verdict">(.*?)</p>', page, re.S).group(1),
+           repr(shared))
+except Exception as e:
+    record("one Opus point both harnesses share strikes only the Lane carry proposes off", False, repr(e))
+
+try:
+    # The wizard runs the same pre-screen first, so a failure here is no new
+    # crash path; drawing no verdicts would be a page that disagrees with it.
+    real = carry.decisions
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("pre-screen broke")
+
+    carry.decisions = broken
+    try:
+        bench_page.render(None, OPUS_TWO_HARNESSES, OPUS_ROWS)
+        raised = None
+    except RuntimeError as e:
+        raised = str(e)
+    finally:
+        carry.decisions = real
+    record("a pre-screen failure stops the page instead of drawing no verdicts",
+           raised == "pre-screen broke", repr(raised))
+except Exception as e:
+    record("a pre-screen failure stops the page instead of drawing no verdicts", False, repr(e))
 
 try:
     missing = bench_page.render(None, LANES, None)
@@ -1526,5 +1595,37 @@ try:
                repr(out["values"]))
 except Exception as e:
     record("36.10 the cheapest label goes above its dot, not over its link", False, repr(e))
+
+# The script names the Python it mirrors in its comments (`carry.beats`), so a
+# reader can check one against the other. A citation that names a module the
+# function does not live in sends that reader to the wrong file.
+try:
+    import ast
+    with open(bench_page.SCRIPT_PATH, encoding="utf-8") as f:
+        script = f.read()
+    comments = re.findall(r"//[^\n]*|/\*.*?\*/", script, re.S)
+    modules = {name[:-3] for name in os.listdir(DELEGATE_DIR) if name.endswith(".py")}
+    cited = sorted({(m.group(1), m.group(2)) for text in comments
+                    for m in re.finditer(r"\b([a-z_][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b", text)
+                    if m.group(1) in modules and m.group(2) != "py"})
+
+    def defined(module):
+        """The names a module defines itself, at its top level: an import is
+        not a definition."""
+        with open(os.path.join(DELEGATE_DIR, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        names = set()
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.Assign):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        return names
+
+    wrong = [f"{module}.{name}" for module, name in cited if name not in defined(module)]
+    record("every Python function bench_page.js cites lives where it says",
+           cited and not wrong, f"cited={cited} wrong={wrong}")
+except Exception as e:
+    record("every Python function bench_page.js cites lives where it says", False, repr(e))
 
 sys.exit(1 if fails else 0)

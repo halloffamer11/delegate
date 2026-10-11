@@ -21,7 +21,7 @@ BENCH_PY = os.path.join(DELEGATE_DIR, "bench.py")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench  # noqa: E402  (after sys.path, as the other test files do)
-import published_names  # noqa: E402
+from lane_evidence import LaneEvidence  # noqa: E402
 import carry  # noqa: E402
 import harnesses  # noqa: E402
 AGY = harnesses.get("agy")
@@ -660,7 +660,7 @@ try:
         carry_row("low", "b1", 0.7, 0.5), carry_row("low", "b2", 0.1, 0.5),
         carry_row("low", "b3", 0.1, 0.5),
     ]
-    proposals = carry.decisions(CARRY_LANES, rows)
+    proposals = carry.decisions(CARRY_LANES, LaneEvidence(CARRY_LANES, rows))
     high, medium, low = (proposals[f"luna-{e}@codex"] for e in ("high", "medium", "low"))
     record(
         "dominating_effort is same-source majority, returned as kind/source/competitor",
@@ -683,7 +683,7 @@ try:
         carry_row("medium", "index", 50.0, 1.0, composite=True),
         carry_row("high", "index", 40.0, 2.0, composite=True),
     ]
-    high = carry.decisions(CARRY_LANES, rows)["luna-high@codex"]
+    high = carry.decisions(CARRY_LANES, LaneEvidence(CARRY_LANES, rows))["luna-high@codex"]
     record(
         "the AA composite is shown and never counted in domination",
         high["kind"] == "not_dominated" and high["enabled"] is True,
@@ -693,13 +693,13 @@ except Exception as e:
     record("the AA composite is shown and never counted in domination", False, repr(e))
 
 try:
-    none_rows = carry.decisions(CARRY_LANES, None)
-    empty_rows = carry.decisions(CARRY_LANES, [])
+    none_rows = carry.decisions(CARRY_LANES, LaneEvidence(CARRY_LANES, None))
+    empty_rows = carry.decisions(CARRY_LANES, LaneEvidence(CARRY_LANES, []))
     record(
         "unavailable evidence and an empty proposal remain distinct",
         all(d["kind"] == "unavailable" for d in none_rows.values())
-        and carry.evidence_unavailable(None, none_rows)
-        and not carry.evidence_unavailable([], empty_rows)
+        and carry.evidence_unavailable(LaneEvidence(CARRY_LANES, None), none_rows)
+        and not carry.evidence_unavailable(LaneEvidence(CARRY_LANES, []), empty_rows)
         and all(d["kind"] == "no_rows" for d in empty_rows.values())
         and bench.carry_reason(none_rows["luna-low@codex"]) == "no per-effort data"
         and bench.carry_reason(empty_rows["luna-low@codex"]) == "no rows for this lane",
@@ -717,8 +717,8 @@ try:
         carry_row("high", "b", 5.0, 2.0, source="t"),
         carry_row("medium", "b", 5.0, 1.5, source="t"),
     ]
-    tied_p = carry.decisions(CARRY_LANES, tied)
-    cheap_p = carry.decisions(CARRY_LANES, cheaper)
+    tied_p = carry.decisions(CARRY_LANES, LaneEvidence(CARRY_LANES, tied))
+    cheap_p = carry.decisions(CARRY_LANES, LaneEvidence(CARRY_LANES, cheaper))
     record(
         "equal score at equal cost does not dominate; a cheaper equal score does",
         tied_p["luna-high@codex"]["kind"] == "not_dominated"
@@ -777,7 +777,7 @@ try:
         agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
         agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
     ]
-    proposals = carry.decisions(AGY_CARRY_LANES, rows)
+    proposals = carry.decisions(AGY_CARRY_LANES, LaneEvidence(AGY_CARRY_LANES, rows))
     high = proposals["flash-high@agy"]
     record(
         "an agy effort is dominated by another effort of the same slug family",
@@ -794,7 +794,7 @@ except Exception as e:
 
 try:
     rows = [agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0)]
-    proposals = carry.decisions(AGY_CARRY_LANES, rows)
+    proposals = carry.decisions(AGY_CARRY_LANES, LaneEvidence(AGY_CARRY_LANES, rows))
     record(
         "two agy efforts sharing no benchmark propose nothing",
         proposals["flash-high@agy"]["kind"] == "not_dominated"
@@ -806,32 +806,23 @@ except Exception as e:
     record("two agy efforts sharing no benchmark propose nothing", False, repr(e))
 
 try:
-    families = carry.families(AGY_CARRY_LANES)
-    guard_families = carry.families(GUARD_LANES)
     guard_rows = [
         agy_row("low", "b1", 0.90, 0.5, model="gpt-6-edge-low"),
         agy_row("low", "b2", 0.90, 0.5, model="gpt-6-edge-low"),
         agy_row("high", "b1", 0.50, 2.0, model="gpt-6-edge-high"),
         agy_row("high", "b2", 0.50, 2.0, model="gpt-6-edge-high"),
     ]
-    guard = carry.decisions(GUARD_LANES, guard_rows)
+    guard = carry.decisions(GUARD_LANES, LaneEvidence(GUARD_LANES, guard_rows))
     record(
-        "every harness but agy keys the carry rule on the model string",
-        families == {"gemini-3.8-flash-low": ("agy", "gemini-3.8-flash"),
-                     "gemini-3.8-flash-medium": ("agy", "gemini-3.8-flash"),
-                     "gemini-3.8-flash-high": ("agy", "gemini-3.8-flash")}
-        and guard_families == {"gpt-6-edge-low": ("codex", "gpt-6-edge-low"),
-                               "gpt-6-edge-high": ("codex", "gpt-6-edge-high"),
-                               "grok-4.6": ("grok", "grok-4.6"),
-                               "claude-opus-5": ("claude", "claude-opus-5")}
-        and guard["edge-high@codex"]["kind"] == "not_dominated"
+        "a codex slug ending in an effort word is no other codex slug's effort",
+        guard["edge-high@codex"]["kind"] == "not_dominated"
         and guard["edge-low@codex"]["kind"] == "not_dominated"
         and guard["grok46-high@grok"]["kind"] == "no_rows"
         and guard["opus-high@claude"]["kind"] == "no_rows",
-        f"agy={families} guard={guard_families} proposals={guard}",
+        f"proposals={guard}",
     )
 except Exception as e:
-    record("every harness but agy keys the carry rule on the model string", False, repr(e))
+    record("a codex slug ending in an effort word is no other codex slug's effort", False, repr(e))
 
 # any-harness ticket 31: Opus runs on agy (effort in the slug, low to high) and
 # on Claude Code (one model string, low to max). A published Opus row is
@@ -848,23 +839,23 @@ OPUS_TWO_HARNESSES = {
            for e in ("low", "medium", "high")},
     },
 }
+# The same with one agy member only: a family of one is still agy's Opus, and
+# agy still runs no xhigh.
+OPUS_ONE_AGY = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        **{name: lane for name, lane in OPUS_TWO_HARNESSES["lanes"].items()
+           if lane["harness"] == "claude"},
+        "opus55-high@agy": OPUS_TWO_HARNESSES["lanes"]["opus55-high@agy"],
+    },
+}
+OPUS_ROWS = [agy_row(e, b, score, cost, model="Claude Opus 5.5")
+             for e, score, cost in (("low", 0.40, 1.0), ("medium", 0.60, 0.9),
+                                    ("high", 0.70, 2.0), ("xhigh", 0.80, 1.5))
+             for b in ("b1", "b2")]
 
 try:
-    opus_rows = [agy_row(e, b, score, cost, model="Claude Opus 5.5")
-                 for e, score, cost in (("low", 0.40, 1.0), ("medium", 0.60, 0.9),
-                                        ("high", 0.70, 2.0), ("xhigh", 0.80, 1.5))
-                 for b in ("b1", "b2")]
-    resolved, _unmatched = published_names.resolve_effort_rows(OPUS_TWO_HARNESSES, opus_rows)
-    by_model = sorted({(r["model"], r["effort"]) for r in resolved})
-    opus = carry.decisions(OPUS_TWO_HARNESSES, opus_rows)
-    record(
-        "one published Opus row reaches the lanes of both harnesses that run it",
-        by_model == [("claude-opus-5-5", "high"), ("claude-opus-5-5", "low"),
-                     ("claude-opus-5-5", "medium"), ("claude-opus-5-5", "xhigh"),
-                     ("claude-opus-5-5-high", "high"), ("claude-opus-5-5-low", "low"),
-                     ("claude-opus-5-5-medium", "medium")],
-        repr(by_model),
-    )
+    opus = carry.decisions(OPUS_TWO_HARNESSES, LaneEvidence(OPUS_TWO_HARNESSES, OPUS_ROWS))
     record(
         "the carry rule compares agy Opus only with agy Opus",
         opus["opus55-high@claude"]["kind"] == "dominated"
@@ -879,10 +870,25 @@ except Exception as e:
     record("the carry rule compares agy Opus only with agy Opus", False, repr(e))
 
 try:
+    # With one agy member, the old family map gave it every Opus row, so
+    # Claude Code's xhigh proposed agy's only Opus Lane off.
+    one = carry.decisions(OPUS_ONE_AGY, LaneEvidence(OPUS_ONE_AGY, OPUS_ROWS))
+    record(
+        "agy's only Opus Lane is not proposed off by an effort agy does not run",
+        one["opus55-high@agy"]["kind"] == "not_dominated"
+        and one["opus55-high@agy"]["enabled"] is True
+        and one["opus55-high@claude"]["kind"] == "dominated"
+        and one["opus55-high@claude"]["competitor"] == "xhigh",
+        repr({name: (d["kind"], d["competitor"]) for name, d in one.items()}),
+    )
+except Exception as e:
+    record("agy's only Opus Lane is not proposed off by an effort agy does not run", False, repr(e))
+
+try:
     # The benchmark page reads evidence records, not the carry rule's rows: a
     # record resolved against the catalog as one pool gave the agy member every
     # Opus row, and Claude Code's Opus lanes were drawn with none.
-    recs = bench.evidence_records(opus_rows, OPUS_TWO_HARNESSES)
+    recs = bench.evidence_records(OPUS_ROWS, OPUS_TWO_HARNESSES)
     by_effort = {r["effort"]: r for r in recs if r["benchmark"] == "b1"}
     record(
         "an evidence record names the lanes of every harness that runs the model",
@@ -893,34 +899,18 @@ try:
         and all(r["attributed"] for r in recs),
         repr([(r["effort"], r["lane_model"], r["lanes"]) for r in recs]),
     )
-    components = bench.aa_component_rows(opus_rows, OPUS_TWO_HARNESSES)
+    components = bench.aa_component_rows(OPUS_ROWS, OPUS_TWO_HARNESSES)
     record(
         "an Artificial Analysis component row reaches both harnesses' Opus",
-        sorted({(r["model"], r["effort"]) for r in components}) == by_model,
+        sorted({(r["model"], r["effort"]) for r in components})
+        == [("claude-opus-5-5", "high"), ("claude-opus-5-5", "low"),
+            ("claude-opus-5-5", "medium"), ("claude-opus-5-5", "xhigh"),
+            ("claude-opus-5-5-high", "high"), ("claude-opus-5-5-low", "low"),
+            ("claude-opus-5-5-medium", "medium")],
         repr(components),
     )
 except Exception as e:
     record("an evidence record names the lanes of every harness that runs the model",
-           False, repr(e))
-
-try:
-    resolved, _unmatched = published_names.resolve_effort_rows(AGY_CARRY_LANES, [
-        agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
-        agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
-    ])
-    certain = carry.certain_effort_rows(resolved)
-    families = carry.families(AGY_CARRY_LANES)
-    target = next(r for r in certain if r["effort"] == "high" and r["benchmark"] == "b1")
-    other = carry.dominating_row(target, certain, families)
-    record(
-        "dominating_row gives the agy competitor's point on the row's own board",
-        other is not None and other["effort"] == "medium" and other["benchmark"] == "b1"
-        and other["model"] == "gemini-3.8-flash-medium"
-        and carry.dominating_row(target, certain) is None,
-        str(other),
-    )
-except Exception as e:
-    record("dominating_row gives the agy competitor's point on the row's own board",
            False, repr(e))
 
 try:
