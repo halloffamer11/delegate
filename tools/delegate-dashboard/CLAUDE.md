@@ -82,8 +82,9 @@ staged editing through `stage_move_lane()`, `stage_move_lane_tier()`,
 `move_lane()`, `move_lane_tier()` and `save_project_policy()` are the immediate writers
 underneath; no key reaches them any more, and they stay as the reference a staged save
 is compared against byte for byte. Construction resolves and pins one Git root.
-Refreshes read the effective catalog and call delegate's canonical `tier_leaders()`;
-they use cached observations and never acquire Meter data or run a vendor probe.
+Refreshes read the effective catalog and call delegate's canonical `tier_leaders()`
+with the Meter snapshot `usage.read(None, usage.CACHED, path=...)`; they never acquire
+Meter data or run a vendor probe.
 
 The public state contains `project`, sourced `policy`, read-only `usage`, four `tiers`,
 `harnesses` (the harness registry's order, which gives each harness its colour: the
@@ -96,10 +97,13 @@ fallback position can be derived, not literally stored. `project_tiers` is
 `project` or `global` from it. A project Tier drops the Lane's global Order, so such a
 row shows `—` in Ord and sorts after the placed Lanes in its new Tier.
 
-Project policy, project Lanes, global catalog and Meter cache watches compare file
-bytes. An invalid policy reload retains the last valid view with an error; missing or
-malformed Meter data becomes explicit unknown observations through
-`rank.meter_observations()`. The dashboard does not maintain a separate validity rule.
+Project policy, project Lanes and global catalog watches compare file bytes; the Meter
+watch compares the snapshot's `signature`, so a usage-limit hold written or lifted
+beside the cache reloads the view (ticket 16). An invalid policy reload retains the last
+valid view with an error; a missing or malformed Meter cache reads as unknown Meters,
+and `usage` reports the snapshot's `status`, `detail` and `taken_at` (as `probed_at`).
+The dashboard neither finds nor parses the cache itself, and keeps no validity rule of
+its own. The same snapshot goes to `catalog_edit.edit_catalog` as `meters`.
 
 ## Staged edits
 

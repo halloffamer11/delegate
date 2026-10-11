@@ -1516,4 +1516,30 @@ for bad29 in ("dollars", 1, None):
         ok29 = "quota_unit" in str(e)
     record(f"case 29d quota_unit {bad29!r} is refused", ok29)
 
+# case 30 (ticket 16): rank reads each Lane's Meter through the Meter snapshot,
+# so a usage-limit hold beside the document it read vetoes the held Lane, and
+# a plain document (Snapshot.of) carries no hold.
+with tempfile.TemporaryDirectory() as td30:
+    p30 = os.path.join(td30, "usage.json")
+    doc30 = write_meters_doc(p30, [
+        meter("codex", weekly=0.55, five_h=0.55, pace=0.75),
+        meter("grok", weekly=1.00, pace=0.90),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85),
+        meter("claude-general", weekly=0.70, five_h=0.70, pace=0.85),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27),
+    ])
+    usage.hold("grok", "You've reached your free Grok Build usage limit", path=p30)
+    held30 = rank.rank("impl", cat, usage.read(None, usage.CACHED, path=p30), ALL_HARNESSES)
+    plain30 = rank.rank("impl", cat, doc30, ALL_HARNESSES)
+    grok30 = next(r for r in held30 if r["lane"] == "grok46-high@grok")
+record(
+    "case 30 a hold beside the read document vetoes its Lane; the plain document holds nothing",
+    grok30["reason"] == "vetoed:gate, grok46-high@grok: grok meter 0% left < gate 10%"
+    and grok30["r"] == 0.0 and grok30["pace"] == 0.0 and grok30["remaining_weekly"] == 0.0
+    and grok30["meter_status"] == "unavailable"
+    and held30[0]["lane"] == "terra-high@codex" and held30[0]["pick"]
+    and plain30[0]["lane"] == "grok46-high@grok",
+    [(r["lane"], r["reason"]) for r in held30],
+)
+
 sys.exit(1 if fails else 0)

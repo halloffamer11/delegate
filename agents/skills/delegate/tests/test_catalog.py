@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,6 +29,7 @@ import catalog_edit
 import catalog_cli
 import harnesses  # noqa: E402
 import rank
+import usage
 
 fails = 0
 
@@ -1442,6 +1444,44 @@ with tempfile.TemporaryDirectory() as td:
         and project_after["note"] == "keep me"
         and project_after["margin"] == 0.5,
         repr(applied.get("changed")),
+    )
+
+    # Ticket 16: `meters` takes a Meter snapshot, which carries the usage-limit
+    # hold beside the document it read; a plain document carries none.
+    meters_path = os.path.join(td, "usage.json")
+    with open(meters_path, "w", encoding="utf-8") as f:
+        json.dump({"probed_at": time.time(), "lanes": [
+            {"meter": "codex", "r": 0.5, "pace": 0.5, "remaining_weekly": 0.5},
+            {"meter": "grok", "r": 0.9, "pace": 1.5, "remaining_weekly": 0.9}]}, f)
+    with open(meters_path, encoding="utf-8") as f:
+        plain_doc = json.load(f)
+    usage.hold("grok", "You've reached your free Grok Build usage limit", path=meters_path)
+    snap = usage.read(None, usage.CACHED, path=meters_path)
+    held = catalog_edit.edit_catalog(
+        "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+        config_dir=cfg, present=present, meters=snap,
+    )
+    plain = catalog_edit.edit_catalog(
+        "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+        config_dir=cfg, present=present, meters=plain_doc,
+    )
+    held_picks, held_leaders = expected_picks_leaders(repo, cfg, meters=snap)
+    invalid = catalog_edit.edit_catalog(
+        "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+        config_dir=cfg, present=present, meters=usage.Snapshot.of({"lanes": []}),
+    )
+    record(
+        "10.1c edit_catalog ranks on a Meter snapshot, hold included, and names the Meters it has no reading for",
+        held["picks"]["before"] == held_picks
+        and held["leaders"]["before"] == held_leaders
+        and held_leaders[1]["leader"] == "terra-high@codex"
+        and plain["leaders"]["before"][1]["leader"] == "grok46-high@grok"
+        and held["observations"] == "cached"
+        and held["missing_observations"] == ["agy-gemini", "claude-fable", "claude-general"]
+        and invalid["observations"] == "invalid"
+        and set(invalid["missing_observations"]) == set(lanes_sample["meters"]),
+        repr((held["leaders"]["before"], plain["leaders"]["before"], held["observations"],
+              held["missing_observations"], invalid["observations"])),
     )
 
     stale = check_catalog_error(

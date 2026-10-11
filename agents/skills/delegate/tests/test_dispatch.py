@@ -1554,21 +1554,27 @@ def main():
 
     # 36. Ticket 43: a blocked run whose harness says its usage limit is
     # reached holds the Lane's Meter; a finished run on it releases it.
+    # The hold is read where every reader reads it: the Meter snapshot.
     with tempfile.TemporaryDirectory() as td36:
         prev_cache = os.environ.get("DELEGATE_CACHE")
-        os.environ["DELEGATE_CACHE"] = os.path.join(td36, "usage.json")
+        os.environ["DELEGATE_CACHE"] = write_meters_doc(os.path.join(td36, "usage.json"), [
+            meter("grok", weekly=0.9, pace=0.9), meter("codex", weekly=0.5, five_h=0.5, pace=1.0)])
+
+        def held_until(m):
+            return usage.read(None, usage.CACHED).readout(m, None).held_until
+
         try:
             limited = {"status": "blocked", "reason": "relay status failed",
                        "deliverable": "blocked: You've reached your free Grok Build usage limit for now"}
             delegate.note_usage_limit("grok", "grok", limited)
-            held = "grok" in usage.read_limits()
+            held = held_until("grok") is not None
             delegate.note_usage_limit("grok", "grok", {"status": "blocked", "reason": "timeout after 10m",
                                                        "deliverable": "blocked: timeout"})
-            still = "grok" in usage.read_limits()
+            still = held_until("grok") is not None
             delegate.note_usage_limit("grok", "grok", {"status": "done"})
-            released = usage.read_limits() == {}
+            released = held_until("grok") is None
             delegate.note_usage_limit("codex", "codex", limited)
-            other = usage.read_limits() == {}
+            other = held_until("codex") is None and held_until("grok") is None
         finally:
             if prev_cache is None:
                 os.environ.pop("DELEGATE_CACHE", None)

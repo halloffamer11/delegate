@@ -593,8 +593,9 @@ def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, p
 
 def note_usage_limit(harness, meter, mapped):
     """Hold the Meter empty when its harness refused the run for its usage
-    limit, and release it when a run on it finishes (ticket 43). Never raises:
-    the run's own result stands either way."""
+    limit, and release it when a run on it finishes (ticket 43). The hold goes
+    beside the usage cache every reader reads (`usage.hold`, `usage.release`).
+    Never raises: the run's own result stands either way."""
     if not meter:
         return
     try:
@@ -602,11 +603,11 @@ def note_usage_limit(harness, meter, mapped):
             text = "\n".join(str(x) for x in (mapped.get("reason"), mapped.get("deliverable")) if x)
             line = harnesses.get(harness).usage_limit(text)
             if line:
-                until = usage.mark_limited(meter, line)
+                until = usage.hold(meter, line)
                 stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
                 print(f"delegate: {meter} meter held at 0% left until {stamp}: {line}", file=sys.stderr)
         elif mapped["status"] in ("done", "partial"):
-            usage.clear_limited(meter)
+            usage.release(meter)
     except Exception:
         pass
 

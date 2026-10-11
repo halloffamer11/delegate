@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """State model for the delegate dashboard.
 
-The model resolves one Git project during construction, reads only cached Meter
-observations, and never runs a vendor probe or acquires Meter data.  Eligibility
+The model resolves one Git project during construction, reads the Meter snapshot
+as cached (``usage.read(None, usage.CACHED, path=...)``), and never runs a vendor
+probe or acquires Meter data.  Eligibility
 and leader decisions go to ``rank.tier_leaders``.  Gate, Margin, and Project-order
 saves go through ``catalog_edit.edit_catalog`` with ``scope='project'``, cached meters,
 and the construction-time harness set.  ``move_lane_tier`` is the same path for a
@@ -42,6 +43,7 @@ import catalog
 import harnesses
 import catalog_edit
 import rank
+import usage
 
 
 TIER_COLORS = {
@@ -168,10 +170,13 @@ class DashboardModel:
     """Public, JSON-safe dashboard state pinned to one resolved Git project.
 
     ``state`` is replaced after every successful refresh. ``refresh_if_changed``
-    watches the pinned project's routing document, both global policy documents,
-    and the Meter cache by bytes.
+    watches the pinned project's routing document, both global policy documents
+    and the project Lanes document by bytes, and the Meter snapshot by its
+    ``signature``, so a usage-limit hold written or lifted beside the cache
+    reloads the view.
     A bad policy reload leaves the last valid rows visible with ``state['error']``;
-    a missing or malformed Meter cache is rebuilt as explicit unknown data.
+    a missing or malformed Meter cache reads as unknown Meters, with the
+    snapshot's ``status`` and ``detail``.
     """
 
     def __init__(
@@ -198,17 +203,9 @@ class DashboardModel:
         )
         self.global_lanes_path = global_dir / "lanes.json"
         self.global_routing_path = global_dir / "routing.json"
-        if meters_path is None:
-            import os
-
-            cache = (
-                os.environ.get("DELEGATE_CACHE")
-                or os.environ.get("CONSULT_CACHE")
-                or "~/.cache/delegate/usage.json"
-            )
-            self.meters_path = Path(cache).expanduser().resolve()
-        else:
-            self.meters_path = Path(meters_path).expanduser().resolve()
+        self.meters_path = Path(
+            usage.cache_path(None if meters_path is None else str(meters_path))
+        ).resolve()
         self.project_policy_path = self.project_root / ".delegate" / "routing.json"
         # Ticket 32's project Lanes document; `move_lane_tier` is its only writer.
         self.project_lanes_path = self.project_root / ".delegate" / "lanes.json"
@@ -222,7 +219,7 @@ class DashboardModel:
         )
         self.state: dict[str, Any] = {}
         self._revision = 0
-        self._watch_signatures: tuple[tuple[str, str], ...] | None = None
+        self._watch_signatures: tuple[tuple[Any, ...], ...] | None = None
         self._loaded_policy_bytes: bytes | None = None
         self._project_doc: dict[str, Any] = {}
         self._global_lanes_doc: dict[str, Any] = {}
@@ -260,11 +257,13 @@ class DashboardModel:
             return f"{self.project_lanes_path}: the project Lanes path resolves to {hit}"
         return None
 
-    def _signatures(self) -> tuple[tuple[str, str], ...]:
+    def _signatures(self) -> tuple[tuple[Any, ...], ...]:
+        # The Meter snapshot's signature, not the cache's bytes: a usage-limit
+        # hold written or lifted beside the cache changes what ranks.
         return (
             _file_signature(self.project_policy_path),
             _file_signature(self.project_lanes_path),
-            _file_signature(self.meters_path),
+            self._read_meters().signature,
             _file_signature(self.global_lanes_path),
             _file_signature(self.global_routing_path),
         )
@@ -327,43 +326,9 @@ class DashboardModel:
             "project_lanes": str(self.project_lanes_path),
         }
 
-    def _load_meters(
-        self,
-    ) -> tuple[dict[str, Any], str, str | None, tuple[str, str]]:
-        try:
-            raw = self.meters_path.read_bytes()
-        except FileNotFoundError:
-            return (
-                {},
-                "missing",
-                "Meter cache is missing; observations are unknown.",
-                _bytes_signature(None),
-            )
-        except OSError as exc:
-            return (
-                {},
-                "unreadable",
-                f"Meter cache cannot be read; observations are unknown: {exc}",
-                _file_signature(self.meters_path),
-            )
-        signature = _bytes_signature(raw)
-        try:
-            doc = _strict_json(raw)
-        except (UnicodeError, ValueError):
-            return (
-                {},
-                "malformed",
-                "Meter cache is malformed; observations are unknown.",
-                signature,
-            )
-        if rank.meter_observations(doc) is None:
-            return (
-                {},
-                "malformed",
-                "Meter cache has invalid observations; values are unknown.",
-                signature,
-            )
-        return doc, "ok", None, signature
+    def _read_meters(self) -> usage.Snapshot:
+        """The Meter snapshot at the pinned cache, as it is: never a probe."""
+        return usage.read(None, usage.CACHED, path=str(self.meters_path))
 
     def _staged_plan(
         self,
@@ -509,7 +474,7 @@ class DashboardModel:
         except catalog.CatalogError as exc:
             raise DashboardError(str(exc)) from exc
 
-        meters, meter_status, meter_detail, meter_signature = self._load_meters()
+        meters = self._read_meters()
         previews = rank.tier_leaders(effective, meters, self.present)
         sources = effective["sources"]
         # Ticket 32: the Lanes whose Tier this project moved, and where from.
@@ -585,9 +550,9 @@ class DashboardModel:
             "usage": {
                 "label": "Global subscription usage",
                 "path": str(self.meters_path),
-                "status": meter_status,
-                "detail": meter_detail,
-                "probed_at": meters.get("probed_at") if "lanes" in meters else None,
+                "status": meters.status,
+                "detail": meters.detail,
+                "probed_at": meters.taken_at,
             },
             "tiers": tiers,
             # the registry's order, which gives each harness its colour
@@ -609,7 +574,7 @@ class DashboardModel:
             "signatures": (
                 _bytes_signature(project_raw),
                 _bytes_signature(project_lanes_raw),
-                meter_signature,
+                meters.signature,
                 _bytes_signature(global_lanes_raw),
                 _bytes_signature(global_routing_raw),
             ),
@@ -670,18 +635,13 @@ class DashboardModel:
             return "project routing path resolves to a global delegate policy file"
         return None
 
-    def _cached_meters_doc(self) -> dict[str, Any]:
-        """Return the pinned Meter cache without probing vendors."""
-        meters, _status, _detail, _signature = self._load_meters()
-        return meters
-
     def _catalog_edit_kwargs(self) -> dict[str, Any]:
         return {
             "scope": "project",
             "cwd": str(self.project_root),
             "config_dir": str(self.config_dir) if self.config_dir is not None else None,
             "present": self.present,
-            "meters": self._cached_meters_doc(),
+            "meters": self._read_meters(),
         }
 
     def _validate_project_proposal(self, proposal: dict[str, Any]) -> str | None:
@@ -1308,7 +1268,7 @@ class DashboardModel:
             cwd=str(self.project_root),
             config_dir=str(self.config_dir) if self.config_dir is not None else None,
         )
-        previews = rank.tier_leaders(effective, self._cached_meters_doc(), self.present)
+        previews = rank.tier_leaders(effective, self._read_meters(), self.present)
         for preview in previews:
             if preview["tier"] != tier_number:
                 continue

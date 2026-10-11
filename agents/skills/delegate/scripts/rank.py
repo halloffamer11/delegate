@@ -10,7 +10,8 @@ The selection rule:
   1. Filter eligible lanes in the supplied Tier range:
        enabled is True (defaults to True if absent),
        floor <= tier <= ceiling,
-       meter gate passed: meter r is None (unknown) or r >= routing.gate,
+       meter gate passed: the Meter snapshot's Readout is not `gated`
+         (Remaining unknown, or Remaining >= routing.gate, or routing.meters off),
        harness CLI is present (found in PATH or specified via --harnesses).
      Vetoed lanes fail one or more conditions (reported in precedence order:
      disabled, floor, ceiling, gate, cli).
@@ -82,7 +83,7 @@ from catalog import CatalogError, CLASSES, load_catalog
 import usage
 
 
-# Compatibility export for dashboard callers. Validity lives in usage.
+# Compatibility export until ticket 18 retires it. Validity lives in usage.
 meter_observations = usage.observations
 
 
@@ -155,8 +156,13 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     allowing another caller to describe the same range in its own terms.
 
     cat: dict from catalog.load_catalog
-    meters: usage document dict (or {})
+    meters: a usage.Snapshot; a plain usage document (or {}) is read through
+        usage.Snapshot.of until ticket 18 hands every caller a Snapshot
     present: set of harness names
+
+    Every Meter fact a row carries comes from the Snapshot's Readout for this
+    catalog: Remaining, Pace, the Weekly figure, whether the Gate vetoes it
+    (`gated`, which honours routing.meters) and the plan price per week.
     """
     if floor is not None and ceiling is not None and floor > ceiling:
         raise ValueError(f"invalid tier range [{floor}, {ceiling}]")
@@ -170,7 +176,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     dollars = catalog.quota_unit(routing) == "plan_dollars"
     reason_label = reason_label or "tier"
 
-    meter_map = meter_observations(meters) or {}
+    snap = meters if isinstance(meters, usage.Snapshot) else usage.Snapshot.of(meters)
 
     present_set = set(present) if present else set()
     lanes = cat.get("lanes", {})
@@ -180,23 +186,16 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
 
     for lane_name, lane_def in lanes.items():
         meter_name = lane_def.get("meter")
-        rec = meter_map.get(meter_name) if meter_name else None
-        if rec and isinstance(rec, dict):
-            r = rec.get("r")
-            pace = rec.get("pace")
-            remaining_weekly = rec.get("remaining_weekly")
-            if r is None:
-                meter_status = "unknown"
-            elif metering and not usage.eligible(rec, gate):
-                meter_status = "unavailable"
-            else:
-                meter_status = "ok"
-        else:
-            r = None
-            pace = None
-            remaining_weekly = None
+        reading = snap.readout(meter_name, cat)
+        r = reading.remaining
+        pace = reading.pace
+        remaining_weekly = reading.weekly
+        if r is None:
             meter_status = "unknown"
-            rec = None
+        elif reading.gated:
+            meter_status = "unavailable"
+        else:
+            meter_status = "ok"
 
         lane_tier = lane_def.get("tier")
         harness = lane_def.get("harness")
@@ -219,7 +218,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         elif lane_tier is not None and ceiling is not None and lane_tier > ceiling:
             veto_kind = "ceiling"
             veto_reason = f"vetoed:ceiling, {lane_name} (tier {lane_tier}) > {reason_label} ceiling (tier {ceiling})"
-        elif metering and not usage.eligible(rec, gate):
+        elif reading.gated:
             veto_kind = "gate"
             r_pct = f"{int(round(r * 100)):d}%"
             gate_pct = f"{int(round(gate * 100)):d}%"
@@ -251,7 +250,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         }
         if dollars:
             # plan dollars per week; Pace times this is what ranks (ticket 39)
-            row["weight"] = catalog.week_dollars((cat.get("meters") or {}).get(meter_name))
+            row["weight"] = reading.week_dollars
 
         if veto_reason is None:
             eligible_rows.append(row)
@@ -323,7 +322,7 @@ def rank(cls, cat, meters, present, tier=None):
     """Rank catalog lanes for a given class.
 
     cat: dict from catalog.load_catalog
-    meters: usage document dict (or {})
+    meters: a usage.Snapshot, or a plain usage document (see rank_range)
     present: set of harness names
     tier: optional floor override (must be between class floor and ceiling)
 

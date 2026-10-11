@@ -28,13 +28,20 @@ names the Lanes in effect for `show` and the rank header, and `edit_catalog(op="
 field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
 preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
 use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
-`usage.load_cached()` / `rank.load_cached_usage()` read observations without a vendor
-probe or meter event. `usage.acquire()` is the refresh path. `usage.observations()`
-owns cache validity (`rank.meter_observations()` re-exports it): valid envelope and
-legacy map formats keep their behavior; any malformed observation makes the whole
-document unknown. Envelope observations require a finite timestamp; raw Window/reset fields are
-validated before display. `usage.eligible(observation, gate)` is the Gate predicate
-(unknown Remaining never vetoes; Remaining equal to Gate is eligible). Every Meter
+`usage.read(routing, usage.CACHED, path=...)` returns the Meter snapshot without a
+vendor probe or a write, with the usage-limit holds in `limits.json` beside the document
+it read (`usage.hold`, `usage.release`); `Snapshot.of(document)` reads an in-memory
+document, which carries no hold. `Snapshot.readout(meter, cat)` joins one Meter with a
+catalog: Remaining, Pace, the Weekly figure, `gated` (the Gate predicate: unknown
+Remaining never vetoes, Remaining equal to Gate passes, and nothing is gated with
+`routing.meters` off), `week_dollars` and `held_until`. `rank_range` reads every Meter
+fact through it, wrapping a plain document with `Snapshot.of` until ticket 18; the
+dashboard and `catalog_edit` hand it a snapshot (ticket 16). `usage.load_cached()` /
+`rank.load_cached_usage()` and `usage.acquire()` remain the legacy readers until
+ticket 18. One validity rule serves both (`rank.meter_observations()` re-exports the
+legacy view): valid envelope and legacy map formats keep their behavior; any malformed
+observation makes the whole document unknown. Envelope observations require a finite
+timestamp; raw Window/reset fields are validated before display. Every Meter
 derives its combined figures through one arithmetic, `usage.combined()`: Remaining is
 the lower Window fraction and Pace comes from the weekly Window. agy runs through it
 like the Claude Meters, and its note says the combined figure is the lower Window, an

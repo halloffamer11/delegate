@@ -32,6 +32,7 @@ import catalog
 import catalog_edit
 import harnesses
 import rank
+import usage
 
 
 def write_json(path, value):
@@ -205,6 +206,30 @@ class DashboardModelTest(ProjectFixture):
         self.assertEqual(tier["leader"], "sol-high@codex")
         leader = next(row for row in tier["rows"] if row["lane"] == tier["leader"])
         self.assertEqual(leader["reason"], "stolen by pace: 0.8 >= 0.5 + 0.2")
+
+    def test_a_held_meter_is_vetoed_and_its_release_reloads(self):
+        # Ticket 16: the dashboard reads the Meter snapshot, so a usage-limit
+        # hold beside its cache vetoes the Lane, and the watch follows the hold.
+        def grok_tier(state):
+            tier = state["tiers"][3]
+            return tier["leader"], next(row for row in tier["rows"] if row["lane"] == "grok46-high@grok")
+
+        dashboard = self.make_model()
+        self.assertEqual(grok_tier(dashboard.state)[0], "grok46-high@grok")
+        usage.hold("grok", "You've reached your free Grok Build usage limit", path=str(self.meters))
+        self.assertTrue(dashboard.refresh_if_changed())
+        for state in (dashboard.state, self.make_model().state):
+            leader, grok = grok_tier(state)
+            self.assertIsNone(leader)
+            self.assertEqual(grok["remaining"], 0.0)
+            self.assertTrue(grok["reason"].startswith("vetoed:gate"), grok["reason"])
+
+        usage.release("grok", path=str(self.meters))
+        self.assertTrue(dashboard.refresh_if_changed())
+        leader, grok = grok_tier(dashboard.state)
+        self.assertEqual(leader, "grok46-high@grok")
+        self.assertEqual(grok["remaining"], 0.9)
+        self.assertFalse(dashboard.refresh_if_changed())
 
     def test_project_policy_byte_change_hot_reloads_gate_and_source(self):
         self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.6)
