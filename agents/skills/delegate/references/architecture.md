@@ -84,9 +84,25 @@ replaces partial use of invalid documents.
   one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes
   nothing. `edit_catalog()` plans its one edit through it, and so does the dashboard's staged view,
   so there is no second planner to drift.
+- `scripts/catalog_draft.py`: the Draft (deepening F). `CatalogDraft(lanes_doc, routing_doc,
+  whole=)` holds the catalog setup started from and every decision made since: verbs `carry`,
+  `place` (with `at` a place, clamped, or `"end"`), `apply` (tier lines with `unnamed="off"`, the
+  tier proposal with `"keep"`), `set_routing` and `settle`; answers `is_settled`, `lane`,
+  `tier_lanes`, `documents()` and `changes()`. `documents()` is `{"lanes", "routing"}`, keyed by
+  `catalog_commit.DOCUMENTS` names, so `catalog_commit.commit(read, draft.documents())` takes it
+  whole; `changes()` is its field diff against the documents as given. It owns the rules for placing
+  a Lane in its Tier: a Tier as given is numbered by `catalog.carried_in_tier` (Order, a Lane
+  without one after every Lane with one, then lane name, the one tie-break that `catalog set`,
+  `catalog order` and Project order also use); a Lane joining another Tier goes to its end; a Lane
+  returning to its start Tier takes back its starting place, so undo is exact. It owns both save
+  scopes: `whole=True` numbers every carried Lane 1 to n and writes `enabled: false` only on off
+  Lanes; `whole=False` writes only changed fields and numbers a Tier only when its sequence changed
+  or lines or a proposal set it. It owns the meters-on rule too (no key where the catalog had none).
+  It never mutates what it is given and validates nothing; the commit does. A draft compares by
+  value and is never hashed. `setup.py --plain` decides on one with `whole=False`.
 - `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
   edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
-  `scripts/tier_lines.py`: bulk Tier lines for the wizard.
+  `scripts/tier_lines.py`: the parser and summary line for bulk Tier lines; the Draft applies them.
 - `scripts/published_names.py`: the mapping from a benchmark source's printed model name to a
   lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the
   member of an agy slug family); `bench.py`, `tier_proposal.py` and the setup pre-screen read it.
@@ -272,14 +288,15 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `tier_lines.parse_tier_lines` and one summary line
   (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it
   (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines'
-  order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives
-  each meter its harness colour, and a second meter on one harness (`claude-fable`) a shade of it
-  (`--h-<harness>-1`); the panel counts per meter. Under the plots a sensitivity table gives, per
-  placed lane, the tier each board alone would give it at the page's tier proportions, with the
-  composite shown and never counted; a lane another carried lane beats on score for no more cost on
-  a board shown says "beaten by" in its tooltip and panel line. Both are display aids computed in
-  the script (`sensitivity`, `beatenByLane`); the carry rule is unchanged. `--effort-rows` may be
-  repeated to put several sources on one page.
+  order inside a tier is the `order` written, and a prompt that moves a carried lane to another tier
+  puts it at that tier's end and numbers the tiers it left and joined (the Draft). Colour is the
+  meter: `bench_page.meter_shades` gives each meter its harness colour, and a second meter on one
+  harness (`claude-fable`) a shade of it (`--h-<harness>-1`); the panel counts per meter. Under the
+  plots a sensitivity table gives, per placed lane, the tier each board alone would give it at the
+  page's tier proportions, with the composite shown and never counted; a lane another carried lane
+  beats on score for no more cost on a board shown says "beaten by" in its tooltip and panel line.
+  Both are display aids computed in the script (`sensitivity`, `beatenByLane`); the carry rule is
+  unchanged. `--effort-rows` may be repeated to put several sources on one page.
 The tier pages propose a Tier for each carried Lane with a score (ticket 17,
 `scripts/tier_proposal.py`): the rule is `routing.json`'s `tier_proposal` (source, benchmark,
 thresholds for Tiers 2-4, diversity; the sample catalog's when a catalog has none,
@@ -333,10 +350,10 @@ writes the other as the screen showed it, so the catalog is never half written. 
 full `start` wizard and `--plain` commit both documents through the Catalog read taken
 at launch (`catalog_commit`). On every screen a document changed since launch, by
 `catalog set` or by the scan's Model swap, stops the save, which names it, writes
-nothing and exits 1. Catalog owns the bulk tier-line parser/application/order helpers;
-`setup_tui` keeps aliases. The routing screen exposes metering with `[x]`/`[ ]`,
-space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark moves
-down one Tier; Tier 1 requires Carry to switch off.
+nothing and exits 1. `tier_lines` owns the bulk tier-line parser and summary, and
+the Draft applies the lines; `setup_tui` keeps aliases. The routing screen exposes
+metering with `[x]`/`[ ]`, space/x or +/-. Legacy absence stays absent on a no-op.
+Focused Tier unmark moves down one Tier; Tier 1 requires Carry to switch off.
 
 - `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their
   efforts, each from the adapter's `models()`. Efforts come from

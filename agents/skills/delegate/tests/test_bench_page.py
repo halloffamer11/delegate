@@ -40,6 +40,7 @@ import catalog
 import harnesses
 import setup_tui
 import tier_lines  # noqa: E402
+from catalog_draft import CatalogDraft  # noqa: E402
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
 NODE = shutil.which("node")
@@ -1269,8 +1270,9 @@ try:
                out["banded"] == {"opus-high@claude": 2},
                repr(out["banded"]))
 
-        # The page's own text, through the wizard's parser and application: the
-        # lane the catalog does not carry ends up carried at the tier picked.
+        # The page's own text, through the wizard's parser and the Draft's
+        # application: the lane the catalog does not carry ends up carried at
+        # the tier picked.
         doc = {"lanes": {
             "opus-high@claude": {"harness": "claude", "model": "claude-opus-5", "effort": "high", "tier": 3},
             "opus55-medium@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": "medium",
@@ -1278,17 +1280,17 @@ try:
             "dry@x": {"harness": "codex", "model": "dry", "effort": "high", "tier": 1},
         }}
         parsed = tier_lines.parse_tier_lines(out["text"], doc)
-        dropped = tier_lines.unnamed_carried(parsed, [n for n, l in doc["lanes"].items()
-                                                     if l.get("enabled") is not False])
-        tier_lines.apply_tier_lines_to_doc(doc, parsed)
+        draft = CatalogDraft(doc, {}, whole=False)
+        dropped = draft.apply(parsed["decided"], "off")
+        written = draft.documents()["lanes"]["lanes"]
         record("35.4 pasted into the wizard, the page's line carries that lane at that tier",
                out["text"].splitlines() == ["opus-high@claude 4", "opus55-medium@claude 3"]
                and parsed["decided"] == {"opus-high@claude": 4, "opus55-medium@claude": 3}
                and not any(parsed[k] for k in ("unknown", "bad", "repeated", "refused"))
-               and doc["lanes"]["opus55-medium@claude"]["tier"] == 3
-               and "enabled" not in doc["lanes"]["opus55-medium@claude"]
+               and written["opus55-medium@claude"]["tier"] == 3
+               and "enabled" not in written["opus55-medium@claude"]
                and dropped == ["dry@x"],
-               repr((out["text"], doc["lanes"]["opus55-medium@claude"], dropped)),
+               repr((out["text"], written["opus55-medium@claude"], dropped)),
        )
 except Exception as e:
     record("35 the page places a lane the catalog does not carry", False, repr(e))

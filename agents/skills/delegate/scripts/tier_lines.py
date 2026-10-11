@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """tier_lines.py — bulk Tier lines: the benchmark page's decisions, pasted into
-the wizard (ticket 27 of the redesign). The wizard (`setup_tui`) is the one
-caller. Split out of catalog.py (ticket 26).
+the wizard (ticket 27 of the redesign). The parser and the summary line, for
+the wizard (`setup_tui`) and `setup.py --plain --tiers-from`; applying the
+lines is the Draft's (`catalog_draft.CatalogDraft.apply`, deepening F). Split
+out of catalog.py (ticket 26).
 """
 
 TIER_LINE_VALUES = {"1": 1, "2": 2, "3": 3, "4": 4, "off": "off"}
@@ -75,40 +77,3 @@ def tier_lines_summary(parsed, dropped=()):
     if parsed["bad"]:
         parts.append("not <lane> <1-4|off>, ignored: line " + ", ".join(str(n) for n in parsed["bad"]))
     return "Lines: " + "; ".join(parts) + "."
-
-
-def apply_tier_lines_to_doc(lanes_doc, parsed):
-    """The prompt-driven interface's form of the same lines: a tier line sets
-    the lane's tier and carries it, an off line records it off, and a carried
-    lane no line names is recorded off (ticket 28). Returns those lanes."""
-    carried = [name for name, lane in lanes_doc["lanes"].items() if lane.get("enabled", True)]
-    dropped = unnamed_carried(parsed, carried)
-    for name in dropped:
-        lanes_doc["lanes"][name]["enabled"] = False
-    for name, value in parsed["decided"].items():
-        lane = lanes_doc["lanes"][name]
-        if value == "off":
-            lane["enabled"] = False
-        else:
-            lane["tier"] = value
-            lane.pop("enabled", None)
-    return dropped
-
-
-def write_order_from_lines(lanes_doc, parsed):
-    """`--plain` has no review page, so the lines' order inside each tier is the
-    order written: each carried lane a line named gets `order`, its place in its
-    tier from 1, counted on the tier it holds after the prompts. A lane not
-    carried loses any `order` it had. Lines that name no lane change nothing."""
-    if not parsed["decided"]:
-        return
-    placed = {}
-    for name in parsed["decided"]:
-        lane = lanes_doc["lanes"][name]
-        if not lane.get("enabled", True):
-            continue
-        placed[lane["tier"]] = placed.get(lane["tier"], 0) + 1
-        lane["order"] = placed[lane["tier"]]
-    for lane in lanes_doc["lanes"].values():
-        if not lane.get("enabled", True):
-            lane.pop("order", None)

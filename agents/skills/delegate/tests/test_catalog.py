@@ -2010,7 +2010,7 @@ with tempfile.TemporaryDirectory() as td:
         apply=True, expect=preview["revision"])
     after = catalog.load_json(path)["lanes"]
     record("10.11 Tier move follows unordered destination Lanes",
-          catalog_edit._carried_in_tier(after, dest)[-1] == moving, preview)
+          catalog.carried_in_tier(after, dest)[-1] == moving, preview)
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _ = make_edit_fixture(td)
@@ -3227,5 +3227,26 @@ with tempfile.TemporaryDirectory() as td:
     record("21.5 the rank preview picks for every Class the catalog defines",
            list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
            repr(picks))
+
+# 22. Deepening F.1: one tie-break places the carried Lanes of a Tier. Order
+# first, a Lane without one after every Lane with one, ties by lane name.
+try:
+    tie_lanes = {
+        "zed@codex": {"tier": 2},
+        "mid@codex": {"tier": 2, "order": 7},
+        "abe@codex": {"tier": 2},
+        "top@codex": {"tier": 2, "order": 1},
+        "off@codex": {"tier": 2, "order": 2, "enabled": False},
+        "low@codex": {"tier": 1, "order": 1},
+        "two@codex": {"tier": 2, "order": 7, "enabled": True},
+    }
+    record("22.1 carried_in_tier orders by Order, then lane name, and skips off Lanes",
+           catalog.carried_in_tier(tie_lanes, 2)
+           == ["top@codex", "mid@codex", "two@codex", "abe@codex", "zed@codex"]
+           and catalog.carried_in_tier(tie_lanes, 1) == ["low@codex"]
+           and catalog.carried_in_tier(tie_lanes, 3) == [],
+           repr(catalog.carried_in_tier(tie_lanes, 2)))
+except Exception as e:
+    record("22.1 carried_in_tier orders by Order, then lane name, and skips off Lanes", False, repr(e))
 
 sys.exit(1 if fails else 0)

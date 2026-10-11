@@ -29,6 +29,7 @@ import catalog
 import harnesses
 import catalog_edit
 import catalog_commit  # noqa: E402
+import catalog_draft  # noqa: E402
 
 fails = 0
 lanes_sample = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
@@ -550,7 +551,8 @@ def case_plain_collects_bench_in_process():
     real_print = builtins.print
     builtins.print = capture
     try:
-        setup.show_bench(Args(), sample_proposal(harnesses.NAMES), routing_sample)
+        setup.show_bench(Args(), catalog_draft.CatalogDraft(sample_proposal(harnesses.NAMES),
+                                                            routing_sample, whole=False))
     finally:
         builtins.print = real_print
     text = "\n".join(buf)
@@ -1308,7 +1310,40 @@ def case_a_focused_save_on_a_first_run_writes_the_whole_catalog():
                     f"err={err[-200:]!r} again_err={again_err[-200:]!r}")
 
 
+# --- deepening F1: the plain wizard writes the Order it prints ---------------
+
+def case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier():
+    """On a catalog whose every carried Lane is numbered in its Tier, a --plain
+    prompt that moves terra from Tier 2 to Tier 3 puts it at the end of Tier 3,
+    after sol, and closes the gap it left in Tier 2; the confirm listing prints
+    the Order written (deepening F, bug 1)."""
+    numbered = {"fable-xhigh@claude": 1, "sol-high@codex": 1, "terra-high@codex": 1,
+                "grok46-high@grok": 2, "luna-low@codex": 1, "flash-high@agy": 2}
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        lanes_path = os.path.join(cfg, "lanes.json")
+        doc = catalog.load_json(lanes_path)
+        for name, order in numbered.items():
+            doc["lanes"][name]["order"] = order
+        catalog.write_json(lanes_path, doc)
+        # the prompts come in catalog order: fable, sol, terra, grok, luna, flash
+        answers = io.StringIO("\n\n3\n\n\n\n" + "\n" + "y\n")
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench", "--plain"], stdin=answers)
+        lanes = catalog.load_json(lanes_path)["lanes"]
+        placed = {name: (lane["tier"], lane.get("order")) for name, lane in lanes.items()}
+        ok = (code == 0
+              and placed == {"fable-xhigh@claude": (4, 1), "sol-high@codex": (3, 1),
+                             "terra-high@codex": (3, 2), "grok46-high@grok": (2, 1),
+                             "luna-low@codex": (1, 1), "flash-high@agy": (1, 2)}
+              and "terra-high@codex: tier 3, order 2" in out
+              and "terra-high@codex: tier 3, order 1" not in out)
+        return ok, f"code={code} placed={placed} out={out[-500:]!r} err={err[-300:]!r}"
+
+
 for name, case in (
+    ("a prompted tier change moves the lane to the end of its new tier",
+     case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier),
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
     ("tiers-from with an unreadable file writes nothing", case_tiers_from_unreadable_file_writes_nothing),

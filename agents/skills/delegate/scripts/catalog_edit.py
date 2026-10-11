@@ -169,19 +169,6 @@ def parse_set_field(field):
     )
 
 
-def _carried_in_tier(lanes, tier):
-    names = [
-        name for name, lane in lanes.items()
-        if lane.get("enabled", True) and lane.get("tier") == tier
-    ]
-    names.sort(key=lambda name: (
-        lanes[name].get("order") is None,
-        lanes[name].get("order") or 0,
-        name,
-    ))
-    return names
-
-
 def _move_in_sequence(names, lane, position):
     if lane not in names:
         raise catalog.CatalogError(
@@ -200,7 +187,7 @@ def _move_in_sequence(names, lane, position):
 
 def _append_order_in_tier(lanes, lane_name, new_tier):
     """Place a lane at the end of the destination Tier's existing Order."""
-    names = [name for name in _carried_in_tier(lanes, new_tier) if name != lane_name]
+    names = [name for name in catalog.carried_in_tier(lanes, new_tier) if name != lane_name]
     # Materialize the existing effective Order before appending. An unordered
     # Lane sorts after every numbered Lane, so max(order)+1 is not sufficient.
     for order, name in enumerate(names, 1):
@@ -419,7 +406,7 @@ def _plan_order(lane, position, scope, lanes_doc, routing_doc, project_doc, file
     proposed_project = copy.deepcopy(project_doc)
     proposed_project_lanes = copy.deepcopy(project_lanes_doc)
     if scope == "global":
-        current = _carried_in_tier(proposed_lanes["lanes"], tier)
+        current = catalog.carried_in_tier(proposed_lanes["lanes"], tier)
         new_seq = _move_in_sequence(current, lane, position)
         for order, name in enumerate(new_seq, 1):
             proposed_lanes["lanes"][name]["order"] = order
@@ -439,7 +426,7 @@ def _plan_order(lane, position, scope, lanes_doc, routing_doc, project_doc, file
     # Project Order works inside the effective Tier, which a project Tier may
     # have moved the Lane into (ticket 32).
     tier = before_cat["lanes"][lane]["tier"]
-    current = _carried_in_tier(before_cat["lanes"], tier)
+    current = catalog.carried_in_tier(before_cat["lanes"], tier)
     new_seq = _move_in_sequence(current, lane, position)
     existing = list((project_doc or {}).get("project_order", []))
     # A save drops what the load ignored: a lane the catalog lost (ticket 33) and

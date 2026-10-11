@@ -1009,6 +1009,19 @@ def effective_routing(cwd=None, config_dir=None, lanes_doc=None, lanes_source=No
     return routing, sources
 
 
+def carried_in_tier(lanes, tier):
+    """The carried Lanes at `tier`, by Order; a Lane without one comes after every
+    Lane with one, and ties go by lane name. This is the order rank tries them in
+    with Meters off. `lanes` is {lane name: record}. The one tie-break: the setup
+    draft, `catalog set` and `catalog order`, and Project order all number a Tier
+    with it (deepening F.1)."""
+    names = [name for name, lane in lanes.items()
+             if lane.get("enabled", True) and lane.get("tier") == tier]
+    names.sort(key=lambda name: (lanes[name].get("order") is None,
+                                 lanes[name].get("order") or 0, name))
+    return names
+
+
 def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
                      project_lanes_source=None):
     """Return lane records with the project Tier and the Project order projection.
@@ -1048,20 +1061,8 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
         named_in_tier = [
             name for name in project_order if effective[name]["tier"] == tier
         ]
-        unnamed = sorted(
-            (
-                (name, lane)
-                for name, lane in effective.items()
-                if lane["tier"] == tier
-                and lane.get("enabled", True)
-                and name not in named
-            ),
-            key=lambda item: (
-                item[1].get("order") is None,
-                item[1].get("order", 0),
-                item[0],
-            ),
-        )
+        unnamed = [(name, effective[name]) for name in carried_in_tier(effective, tier)
+                   if name not in named]
         ordered_names = _place_by_global_order(named_in_tier, unnamed, effective)
         for order, lane_name in enumerate(ordered_names, 1):
             effective[lane_name]["order"] = order

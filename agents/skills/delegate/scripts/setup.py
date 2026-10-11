@@ -13,6 +13,7 @@ import bench
 import bench_page
 import catalog
 import catalog_commit
+import catalog_draft
 import tier_lines as tier_line_rules
 import discover
 import effort
@@ -175,9 +176,11 @@ def note_undiscovered_lanes(lanes_doc, discovery_data):
             print(f"{name}: {lane['harness']} discovery error ({err}); the lane stays")
 
 
-def show_bench(args, lanes_doc, routing_doc, rows=None):
-    """`rows` is the `(rows, message)` pair `load_effort_rows` gives, already
-    read from the refreshed list; without one this reads the list on `args`."""
+def show_bench(args, draft, rows=None):
+    """The benchmark report on the Lanes as `draft`, a `CatalogDraft`, holds
+    them. `rows` is the `(rows, message)` pair `load_effort_rows` gives,
+    already read from the refreshed list; without one this reads the list on
+    `args`."""
     if args.no_bench:
         return
     if args.bench_report:
@@ -194,7 +197,7 @@ def show_bench(args, lanes_doc, routing_doc, rows=None):
         return
     try:
         data = bench.collect(
-            lanes_doc,
+            draft.documents()["lanes"],
             epoch_csv=args.epoch_csv,
             effort_rows=effort_rows,
         )
@@ -241,7 +244,11 @@ def ask_fraction(label, current):
         print(rule)
 
 
-def ask_lanes(lanes_doc):
+def ask_lanes(lanes_doc, draft):
+    """One Tier prompt per Lane of `lanes_doc`, the documents `draft` was
+    built from, its default the Tier the draft holds. Each answer places the
+    Lane in the draft: a carried Lane that changes Tier goes to the end of its
+    new one, and an off Lane takes only the Tier (deepening F)."""
     for name, lane in lanes_doc["lanes"].items():
         print(name)
         print(f"  harness: {lane['harness']}")
@@ -249,7 +256,7 @@ def ask_lanes(lanes_doc):
         print(f"  effort: {lane['effort']}")
         print(f"  meter: {lane['meter']}")
         print(f"  basis: {lane['basis']}")
-        lane["tier"] = ask_int("tier", lane["tier"], 1, 4)
+        draft.place(name, ask_int("tier", draft.lane(name).tier, 1, 4))
 
 
 def show_routing(routing_doc):
@@ -261,7 +268,10 @@ def show_routing(routing_doc):
     print(f"meters: {'on' if catalog.meters_enabled(routing_doc) else 'off'}")
 
 
-def ask_routing(routing_doc):
+def ask_routing(draft):
+    """The routing prompts; each answer is set on `draft`, whose rule for
+    meters on (no key where the catalog had none) is the only one."""
+    routing_doc = draft.documents()["routing"]
     show_routing(routing_doc)
     if read_answer("keep routing as shown? [Y/n] ").strip().lower() != "n":
         return
@@ -269,19 +279,16 @@ def ask_routing(routing_doc):
         cls_info = routing_doc["classes"][name]
         f = ask_int(f"{name} floor", cls_info["floor"], 1, 4)
         c = ask_int(f"{name} ceiling", max(f, cls_info["ceiling"]), f, 4)
-        cls_info["floor"] = f
-        cls_info["ceiling"] = c
-    routing_doc["margin"] = ask_fraction("margin", routing_doc["margin"])
-    routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
+        draft.set_routing("floor", f, name)
+        draft.set_routing("ceiling", c, name)
+    draft.set_routing("margin", ask_fraction("margin", routing_doc["margin"]))
+    draft.set_routing("gate", ask_fraction("gate", routing_doc["gate"]))
     current = "on" if catalog.meters_enabled(routing_doc) else "off"
     answer = read_answer(f"meters [{current}]: ").strip().lower()
     if answer in ("off", "false", "n", "no"):
-        routing_doc["meters"] = False
+        draft.set_routing("meters", False)
     elif answer in ("on", "true", "y", "yes"):
-        if "meters" not in routing_doc:
-            pass
-        else:
-            routing_doc["meters"] = True
+        draft.set_routing("meters", True)
 
 
 def aa_rows_path(paths):
@@ -472,13 +479,15 @@ def report_commit(done):
         sys.stderr.write(f"{line}\n")
 
 
-def confirm_and_write(snap, lanes_doc, routing_doc):
-    """The --plain confirm: list what the save writes, then commit both
-    documents through the launch read `snap`, which also keeps the Agent
-    files in step and forgets the Model queue entries the start facts named."""
-    print(snap.files["lanes"])
-    print(snap.files["routing"])
-    for name, lane in lanes_doc["lanes"].items():
+def confirm_and_write(draft, read):
+    """The --plain confirm: list each Lane as `draft` writes it, then commit
+    the draft's documents through the launch read `read`, which also keeps the
+    Agent files in step and forgets the Model queue entries the start facts
+    named."""
+    documents = draft.documents()
+    print(read.files["lanes"])
+    print(read.files["routing"])
+    for name, lane in documents["lanes"]["lanes"].items():
         order = f", order {lane['order']}" if "order" in lane else ""
         off = ", off" if lane.get("enabled") is False else ""
         print(f"{name}: tier {lane['tier']}{order}{off}")
@@ -486,7 +495,7 @@ def confirm_and_write(snap, lanes_doc, routing_doc):
     if answer not in ("y", "yes"):
         print("nothing written")
         return
-    report_commit(catalog_commit.commit(snap, {"lanes": lanes_doc, "routing": routing_doc}))
+    report_commit(catalog_commit.commit(read, documents))
 
 
 def main(argv=None):
@@ -559,6 +568,10 @@ def main(argv=None):
         # failure becomes the reason string the start facts print. Both
         # interfaces print the same facts.
         if plain:
+            # Every prompt decides on one draft of the catalog as read (with
+            # the generation refresh), and the save writes only the fields
+            # those decisions changed (deepening F.3).
+            draft = catalog_draft.CatalogDraft(lanes_doc, routing_doc, whole=False)
             # the prompt-driven interface writes no benchmark page; it prints
             # the report instead, so the page line says (not written)
             for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
@@ -568,9 +581,11 @@ def main(argv=None):
                 print(line)
             if tier_lines is not None:
                 # the same parser and summary as the review page's `v`; the
-                # tiers become the prompts' defaults, and an off line is written off
+                # tiers become the prompts' defaults, an off line is written
+                # off, and with no review page here the lines' order inside
+                # each tier is the order written (ticket 28)
                 parsed = tier_line_rules.parse_tier_lines(tier_lines, lanes_doc)
-                dropped = tier_line_rules.apply_tier_lines_to_doc(lanes_doc, parsed)
+                dropped = draft.apply(parsed["decided"], "off")
                 print(tier_line_rules.tier_lines_summary(parsed, dropped))
             if effort_row_paths:
                 # The pre-screen is a selectable screen; there is no prompt-driven
@@ -580,14 +595,10 @@ def main(argv=None):
                 print("note: --effort-rows drives the pre-screen, which the prompt-driven "
                       "interface does not have; no lane will be proposed off. Run on a "
                       "terminal without --plain to use it.")
-            show_bench(args, lanes_doc, routing_doc, rows=rows)
-            ask_lanes(lanes_doc)
-            if tier_lines is not None:
-                # no review page here: the lines' order inside each tier is the
-                # order written (ticket 28)
-                tier_line_rules.write_order_from_lines(lanes_doc, parsed)
-            ask_routing(routing_doc)
-            confirm_and_write(snap, lanes_doc, routing_doc)
+            show_bench(args, draft, rows=rows)
+            ask_lanes(lanes_doc, draft)
+            ask_routing(draft)
+            confirm_and_write(draft, snap)
         else:
             if args.bench_report:
                 print("note: --bench-report is ignored in TUI mode")

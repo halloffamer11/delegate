@@ -67,7 +67,7 @@ A capability level from 1 (lowest) to 4 (frontier) that the user gives each lane
 The Tier a project sets for a lane in `.delegate/lanes.json`, for jobs in that project only. It is the one lane field a project may set; every other field, `enabled` and Order included, stays global. A lane the project moves has no place in its new tier until Project order gives it one.
 
 **Order**:
-A lane's place inside its tier, from 1, that the user sets on the setup wizard's review page. Ranking sorts by tier, then order, then pace, then lane name; a lane without an order comes after every lane with one. Where setup numbers lanes that have no order, it numbers them by lane name, and a lane that joins a tier goes to its end.
+A lane's place inside its tier, from 1, that the user sets on the setup wizard's review page. Ranking sorts by tier, then order, then pace, then lane name; a lane without an order comes after every lane with one. Setup's Draft, `catalog set` and `catalog order` number lanes that have no order after every lane with one, by lane name, and put a lane that joins a tier at its end.
 _Avoid_: priority, rank (when you mean the order)
 
 **Project order**:
@@ -125,7 +125,7 @@ A change to a catalog document between a session's Catalog read and its Catalog 
 _Avoid_: conflict (alone), race, stale write
 
 **Draft**:
-The catalog as setup holds it before the confirm page's `y`: the catalog the pages started from, plus the carry, Tier and Order decisions made since. Every page reads it, the confirm page lists it, and save writes it and nothing else.
+The catalog as setup holds it before the confirm page's `y`: the catalog the pages started from, plus the carry, Tier, Order and routing decisions made since. Every page reads it, the confirm page lists it, and save writes it and nothing else.
 _Avoid_: working copy, session state, pending catalog, result
 
 **Agent file**:

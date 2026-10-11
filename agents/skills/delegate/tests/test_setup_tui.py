@@ -33,7 +33,6 @@ import carry
 import catalog
 import published_names
 import harnesses
-import catalog_edit
 import tier_lines
 import discover
 import effort
@@ -2275,7 +2274,7 @@ try:
     result = w.result()[0]
     record("61 focused Tier unmark demotes one Tier and appends at its end",
            result["lanes"][name]["tier"] == 2
-           and catalog_edit._carried_in_tier(result["lanes"], 2)[-1] == name, result)
+           and catalog.carried_in_tier(result["lanes"], 2)[-1] == name, result)
     record("61 untouched Tiers keep their original records",
            all(result["lanes"][n] == lane for n, lane in LANES["lanes"].items()
                if lane["tier"] not in (2, 3)))
