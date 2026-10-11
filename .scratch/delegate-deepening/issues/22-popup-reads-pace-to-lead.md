@@ -18,12 +18,12 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decisions E.1 a
 
 **Blocked by:** 21 The deck's aid marks the Pace rank says each Meter needs to lead
 
-**Status:** landed 2026-10-11. The popup reads each Tier's `pace_to_lead` and each row's `cause` from `tier_leaders`, scales its Pace axis from Meter Paces and Paces to lead, and prints a Pace to lead past the axis as its value; ranked rows carry `cause` and no `veto`. test_report's popup checks "with plan dollars gives a rival past the Meters' axis its Pace to lead", "scales its axis to reach the Paces to lead" and "shows a Pace to lead past the axis as its value, its mark at the edge", and test_rank case 12, verify it. One box stays open for ticket 23 (agent): `report.py` still imports `eligible_order`, for `report.handover` alone, which ticket 23 deletes.
+**Status:** landed 2026-10-11. The popup reads each Tier's `pace_to_lead` and each row's `cause` from `tier_leaders`, scales its Pace axis from Meter Paces and Paces to lead, and prints a Pace to lead past the axis as its value; ranked rows carry `cause` and no `veto`. test_report's popup checks "with plan dollars gives a rival past the Meters' axis its Pace to lead", "scales its axis to reach the Paces to lead" and "shows a Pace to lead past the axis as its value, its mark at the edge", and test_rank case 12, verify it. Ticket 23 closed its last box when it deleted `report.handover` and the `eligible_order` import.
 
 - [x] A new test_report popup check (copy of the samples with `quota_unit` plan_dollars and sol-high@codex at Tier 4, existing `pp_cache`) fails before this ticket with "cannot lead on Pace" on the Tier 4 codex row and passes with `needs {v:.2f}`, where v is `tier_leaders(...)[3]['pace_to_lead']['codex']` and lies above the axis top.
 - [x] The existing popup checks "needs 0.96 (+0.26)" and "→ luna-low@codex leads after agy drops 18.5 pts" pass unchanged.
 - [x] `report.py statusline`, `statusline --popup` and `statusline toggle` still exit 0 with output.
-- [ ] `report.py` defines no `pace_to_lead` and imports no `eligible_order`; the two test_report `pace_to_lead` unit checks are deleted (case 31 covers them).
+- [x] `report.py` defines no `pace_to_lead` and imports no `eligible_order`; the two test_report `pace_to_lead` unit checks are deleted (case 31 covers them).
 - [x] No ranked row carries `veto`; the case 12 key set has `cause` and not `veto`; `gate_only_stop` reads `cause`; test_rank cases 23, 26k, 26l, 26m, 26o and 27 and test_evals assert on `cause`.
 - [x] `make test` is green on Python 3.9 and 3.13.
 

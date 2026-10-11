@@ -63,7 +63,14 @@ maps each other meter with an eligible lane in the tier to the lowest pace, in
 steps of 0.01, at which a lane on it would lead, every other meter as it reads
 now; null when no pace a meter can read (up to 50) would. With metering off the
 value is null and the map is empty. The usage popup prints each pace to lead
-as it is, even past the end of its pace axis.
+as it is, even past the end of its pace axis. `handover` is `{points, to}`:
+how far the leader's meter can fall, in quota points of its week on a grid of
+0.005, before another lane leads the tier or the meter falls under the gate,
+and that lane, or null when no other lane is eligible. It is never a time.
+`handover` is null with no leader, with metering off, when the leader's meter
+has no weekly figure or reset to read a spent pace from, or when the leader
+still leads with its whole week spent (a gate of 0). The usage popup prints it
+beside each tier's leader.
 
 ## Plan dollars
 
@@ -74,7 +81,7 @@ compares Pace times the meter's plan price per week
 for more. The margin then becomes a fraction: a lane steals when its value is
 at least the pick's times `1 + margin`. A plan change needs only its meter's
 `price_month` changed. `--json` rows carry the weekly price as `weight`, and
-the usage popup's handover points follow the same rule.
+each tier's `handover` follows the same rule.
 
     delegate catalog set routing.quota_unit '"plan_dollars"' --scope global
 

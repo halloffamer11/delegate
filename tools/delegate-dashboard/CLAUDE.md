@@ -100,7 +100,8 @@ applies: the deck's Remaining colour and the aid's "under the Gate" read it, so 
 metering off neither draws a veto (ticket 17). Each row's `cause` is rank's: the model drops
 `disabled` rows on it, and `deck.reason_code` maps it to the row's code through
 `CAUSE_CODES`, VETO for a cause the table lacks. Nothing reads the `reason` text, which is
-display only (ticket 20). Each tier copies rank's `steal_threshold` and `pace_to_lead`;
+display only (ticket 20). Each tier copies rank's `steal_threshold`, `pace_to_lead` and
+`handover` (ticket 23);
 the aid's verdict says a Meter holds the Pick in the first Tier whose leader runs on it,
 or needs its lowest Pace to lead, and draws that Pace as its mark (ticket 21). A
 project Tier drops the Lane's global Order, so such a

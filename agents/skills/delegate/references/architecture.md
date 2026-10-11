@@ -59,6 +59,11 @@ unit) and `pace_to_lead` (`{meter: pace or None}`): it reruns the core with one 
 Pace replaced (`dataclasses.replace`) at 0 and at the first two 0.01 steps at or above
 each value where that Meter's Lanes cross a rival in the sort or a steal, up to
 `usage.MAX_PACE`, and the deck's aid and the usage popup draw those (tickets 21 and 22).
+Each Tier also carries its `handover` (`{points, to}` or None): rank reruns the core with
+the leader's Readout replaced by `snapshot.readout(meter, cat, spend=x)` in half-point
+steps, at most 200, until another Lane leads or the Meter falls under the Gate, and
+reports quota points, never a time; the popup only renders it (ticket 23). Rank's sort
+key, steal test and choice are private, so nothing outside rank replays its Pick.
 The statusline, the popup's Meter rows, `report.py limits` and the deck's Gate draw each
 Meter's Readout, so every display shows one Weekly figure and one Gate per Meter (ticket 17).
 One validity rule serves every reader: valid envelope and legacy map formats keep their

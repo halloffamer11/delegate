@@ -195,6 +195,24 @@ class DashboardModelTest(ProjectFixture):
         ])
         self.assertEqual(state["tiers"][2]["leader"], "opus-high@claude")
 
+    def test_each_tier_carries_the_handover_rank_gives(self):
+        # Ticket 23: rank's Tier preview says how far the leader's Meter can
+        # fall, in quota points, before another Lane leads; the state copies
+        # it. Rank spends a Meter over its share of the week left, so only
+        # the codex rows carry one here.
+        write_json(self.meters, {"probed_at": 100, "lanes": [
+            dict(meter("codex-a", 0.5, 1.0), cycle_left=0.5),
+            dict(meter("codex-b", 0.45, 0.9), cycle_left=0.5),
+            meter("claude", 0.8, 0.7),
+            meter("grok", 0.9, 0.8),
+        ]})
+        tiers = self.make_model().state["tiers"]
+        self.assertEqual(tiers[1]["leader"], "terra-high@codex")
+        self.assertEqual(tiers[1]["handover"]["to"], "sol-high@codex")
+        self.assertAlmostEqual(tiers[1]["handover"]["points"], 0.15, delta=0.006)
+        self.assertEqual(tiers[0]["handover"]["to"], None)
+        self.assertIsNone(tiers[2]["handover"])
+
     def test_meter_byte_change_hot_reloads_leader_and_reason(self):
         dashboard = self.make_model()
         before = dashboard.state["revision"]

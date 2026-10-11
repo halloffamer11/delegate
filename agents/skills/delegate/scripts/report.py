@@ -29,12 +29,10 @@ try:
 except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
-# `eligible_order` and `choose` serve `handover` alone, which ticket 23 moves
-# into rank's Tier preview.
 try:
-    from rank import rank, tier_leaders, eligible_order, choose
+    from rank import rank, tier_leaders
 except ImportError:
-    from .rank import rank, tier_leaders, eligible_order, choose
+    from .rank import rank, tier_leaders
 
 try:
     import usage
@@ -752,18 +750,16 @@ def lane_lines(catalog, meters, present, picks, c):
 # ------------------------------------------------------------- popup
 # The Herdr popup (ticket 40, layout D): each Meter's weekly Pace as its
 # calculation, then each Tier's Lanes on the same Pace axis with the Pace each
-# other Meter needs to lead it, as rank's Tier preview gives it (ticket 22), and
-# how far the leader's Meter can fall before the Tier hands over. Everything
-# reads the cached Meters at the moment of display: no usage history and no burn
-# rate (ADR 0001), so a distance is in quota points at today's readings, never a
-# time.
+# other Meter needs to lead it and the Handover, both as rank's Tier preview
+# gives them (tickets 22 and 23). Everything reads the cached Meters at the
+# moment of display: no usage history and no burn rate (ADR 0001), so a
+# Handover is in quota points at today's readings, never a time.
 POPUP_LEGEND = ("Pace = weekly figure ÷ share of the week left: 1 on track, above 1 spend it"
                 " · ┊ = the Pace that Meter needs to lead the Tier")
 POPUP_NUM_HEAD = "Pace = left ÷ time  5h      resets"
 POPUP_NUM_W = 36
 POPUP_LANE_W = 16
 POPUP_METER_W = 7
-HANDOVER_STEP = 0.005
 
 
 def clip(s, w):
@@ -803,37 +799,6 @@ def popup_meters(catalog, meters, won_by_meter):
                     "won": won_by_meter.get(key, set())})
     out.sort(key=lambda m: (0 if m["won"] else 1, min(m["won"] or {99}), order.index(m["key"])))
     return out
-
-
-def handover(preview, meter, margin, gate):
-    """How far the Tier leader's Meter can fall before another Lane leads.
-
-    Replays rank's choice (`rank.choose`) with only the leader's Meter
-    spending: its weekly Remaining drops in small steps, the Pace of every Lane
-    on it follows, and the first step where the Pick changes, or the Meter
-    falls under the Gate, is the answer. Returns (points, new leader or None),
-    or None when the leader's Meter has no weekly figure to spend.
-    """
-    rows = [r for r in preview["rows"] if r["eligible"]]
-    lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
-    if lead is None or not meter or meter["weekly"] is None or not meter["left"]:
-        return None
-    others = [r for r in rows if r["meter"] != lead["meter"]]
-    five = meter["f5"]
-    spent = 0.0
-    while True:
-        spent += HANDOVER_STEP
-        weekly = meter["weekly"] - spent
-        remaining = weekly if five is None else min(five, weekly)
-        if remaining < gate:
-            # the leader's Meter is vetoed, so the rest of the Tier decides
-            pool = sorted(others, key=lambda r: eligible_order(r, True))
-            return min(spent, meter["weekly"]), (choose(pool, margin, True)[0]["lane"] if pool else None)
-        trial = [dict(r, pace=weekly / meter["left"]) if r["meter"] == lead["meter"] else r for r in rows]
-        trial.sort(key=lambda r: eligible_order(r, True))
-        pick = choose(trial, margin, True)[0]["lane"]
-        if pick != lead["lane"]:
-            return spent, pick
 
 
 def pace_axis(paces, width):
@@ -905,15 +870,15 @@ def popup_lines(catalog, snapshot, present, picks, won_by_meter, c, width, now):
                      f"{c['DIM']}{when_short(m['reset'])}{c['R']}")
     lines.append("")
     for p in previews:
-        lines += tier_block(p, by_key, margin, gate, c, top, x, axis_w)
+        lines += tier_block(p, by_key, c, top, x, axis_w)
     lines.append(classes_line(picks, routing.get("classes", {}), c))
     return [clip(l, width).rstrip() for l in lines]
 
 
-def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
-    """A Tier's header (its leader and what changes next), then one row per
-    Meter with Lanes in the Tier: the leader's Meter first, then by Pace. Each
-    other Meter's row says the Pace to lead the preview gives it."""
+def tier_block(preview, by_key, c, top, x, axis_w):
+    """A Tier's header (its leader and the Handover the preview gives), then
+    one row per Meter with Lanes in the Tier: the leader's Meter first, then
+    by Pace. Each other Meter's row says the Pace to lead the preview gives it."""
     t = preview["tier"]
     tc = c["TIER_COL"][t]
     head = f"{tc}{c['BOLD']}{TIER_GLYPH[t]} Tier {t}{c['R']}  "
@@ -923,7 +888,7 @@ def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
     lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
     paces = preview["pace_to_lead"]
     out = [head + f"{c['DIM']}leader{c['R']} {tc}{c['BOLD']}{preview['leader'] or 'none'}{c['R']}  "
-           f"{c['DIM']}{handover_note(preview, lead, by_key, margin, gate)}{c['R']}"]
+           f"{c['DIM']}{handover_note(preview, lead, by_key)}{c['R']}"]
     groups = {}
     for r in rows:
         groups.setdefault(r["meter"], []).append(r)
@@ -959,18 +924,18 @@ def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
     return out
 
 
-def handover_note(preview, lead, by_key, margin, gate):
-    if lead is None:
+def handover_note(preview, lead, by_key):
+    """The preview's Handover in words, in quota points: who leads once the
+    leader's Meter drops that far, or how far it is above the Gate."""
+    handover = preview.get("handover")
+    if lead is None or handover is None:
         return ""
     meter = by_key.get(lead["meter"])
-    found = handover(preview, meter, margin, gate)
-    if found is None:
-        return ""
-    points, new = found
-    label = meter["label"]
-    if new is None:
-        return f"only lane · {label} is {points * 100:.0f} pts above the Gate"
-    return f"→ {new} leads after {label} drops {points * 100:.1f} pts"
+    label = meter["label"] if meter else str(lead["meter"])
+    points = handover["points"] * 100
+    if handover["to"] is None:
+        return f"only lane · {label} is {points:.0f} pts above the Gate"
+    return f"→ {handover['to']} leads after {label} drops {points:.1f} pts"
 
 
 def classes_line(picks, classes, c):

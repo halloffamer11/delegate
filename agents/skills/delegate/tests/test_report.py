@@ -717,34 +717,5 @@ with tempfile.TemporaryDirectory() as tmp:
           rc == 0 and "| codex" in out_off_el.split("**Plan consumption this cycle:**")[0],
           out_off_el)
 
-# The popup replays rank's choice to find the handover point (ticket 40). The
-# Pace to lead comes from rank's Tier preview (test_rank case 33).
-import report  # noqa: E402
-
-
-def lane_row(lane, meter, pace, order=None):
-    return {"lane": lane, "meter": meter, "pace": pace, "tier": 2, "order": order,
-            "eligible": True, "cause": "eligible"}
-
-
-ordered = {"tier": 2, "leader": "a@x", "rows": [lane_row("a@x", "mx", 1.0, order=1),
-                                                lane_row("b@y", "my", 0.9, order=2)]}
-meter = {"key": "mx", "label": "x", "weekly": 0.5, "left": 0.5, "f5": None}
-found = report.handover(ordered, meter, 0.2, 0.05)
-check("popup: the leader hands over once its Pace falls a Margin under the rival's",
-      found is not None and found[1] == "b@y" and abs(found[0] - 0.15) < 0.006, repr(found))
-alone = {"tier": 2, "leader": "a@x", "rows": [lane_row("a@x", "mx", 1.0)]}
-found = report.handover(alone, meter, 0.2, 0.05)
-check("popup: a lone leader runs down to the Gate", found is not None and found[1] is None
-      and abs(found[0] - 0.45) < 0.006, repr(found))
-
-# With plan dollars (ticket 39) the rows carry a weight, and the same replay
-# rescales the value with the Pace it tries.
-dollars = {"tier": 2, "leader": "a@x", "rows": [dict(lane_row("a@x", "mx", 1.0, order=1), weight=20.0),
-                                                dict(lane_row("b@y", "my", 0.9, order=2), weight=10.0)]}
-found = report.handover(dollars, meter, 0.2, 0.05)
-check("popup: with plan dollars the leader hands over at 20 x Pace = 9 / 1.2",
-      found is not None and found[1] == "b@y" and abs(found[0] - 0.3125) < 0.006, repr(found))
-
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {', '.join(fails)}"))
 sys.exit(1 if fails else 0)

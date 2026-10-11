@@ -38,7 +38,7 @@ The selection rule:
      lower in the user's order runs when its meter is well ahead of the pick's.
      That is the load balance (ticket 28).
   With routing.quota_unit "plan_dollars" (ticket 39) steps 2 and 4 compare
-  Pace times the Meter's plan dollars per week (`score`), and a steal needs
+  Pace times the Meter's plan dollars per week (`_score`), and a steal needs
   value(L) >= value(pick) * (1 + routing.margin).
   5. Overflow (ticket 29, Class ranking only). If nothing is eligible and only
      subscription usage stands in the way — at least one carried lane in the
@@ -82,9 +82,12 @@ Reason text, one per cause:
   - cli: vetoed:cli, <lane>: <harness> not on PATH
 
 Tier preview (``tier_leaders``, and ``rank.py tiers --json``): each exact
-Tier's rows and leader, the Steal threshold in routing's quota unit, and each
+Tier's rows and leader, the Steal threshold in routing's quota unit, each
 other Meter's Pace to lead, which rank finds by rerunning its ranking core with
-that Meter's Readout at a trial Pace (ticket 21).
+that Meter's Readout at a trial Pace (ticket 21), and the Handover, which it
+finds by rerunning the core with the leader's Meter spent in half-point steps
+(ticket 23). Only rank replays its own Pick: the popup and the deck draw the
+preview.
 
 CLI forms:
   rank.py <class> [--tier N] [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
@@ -123,11 +126,10 @@ def restrict_to_harness(cat, harness):
     return out
 
 
-def score(item):
+def _score(item):
     """What ranking compares: the Pace, or with `quota_unit` plan_dollars
     (ticket 39) the Pace times the row's `weight`, its plan dollars per week.
-    None when either is unknown. A caller that changes `pace` on a row (the
-    usage popup's trials) gets the value rescaled with it."""
+    None when either is unknown."""
     pace = item.get("pace")
     if pace is None or "weight" not in item:
         return pace
@@ -135,24 +137,24 @@ def score(item):
     return None if weight is None else pace * weight
 
 
-def eligible_order(item, metering):
+def _eligible_order(item, metering):
     """The order eligible Lanes are tried in: Tier, then Order, then (with
-    Meters on) the higher value (`score`), a Lane with an unknown one last."""
+    Meters on) the higher value (`_score`), a Lane with an unknown one last."""
     t = item["tier"] if item["tier"] is not None else 99
     unordered = 1 if item["order"] is None else 0
     o = item["order"] if item["order"] is not None else 0
     if not metering:
         return (t, unordered, o, item["lane"])
-    v = score(item)
+    v = _score(item)
     unknown = 1 if v is None else 0
     return (unknown, t, unordered, o, -(v if v is not None else 0.0), item["lane"])
 
 
-def steals(row, pick_row, margin):
+def _steals(row, pick_row, margin):
     """True when `row` takes the job from `pick_row` by the Margin: Pace ahead
     by the Margin, or with plan dollars a value ahead by the Margin's fraction
     of the Pick's (a fixed amount of dollars would mean nothing across plans)."""
-    v, p = score(row), score(pick_row)
+    v, p = _score(row), _score(pick_row)
     if v is None or p is None:
         return False
     if "weight" in pick_row:
@@ -160,17 +162,16 @@ def steals(row, pick_row, margin):
     return v >= p + margin
 
 
-def choose(eligible_rows, margin, metering):
+def _choose(eligible_rows, margin, metering):
     """(the Pick, the value it stole from or None) among rows already in
-    `eligible_order`: the first row, unless a later one's value reaches the
-    current Pick's by the Margin. The usage popup replays this rule to say
-    when a Tier hands over (ticket 40), so it lives in one place."""
+    `_eligible_order`: the first row, unless a later one's value reaches the
+    current Pick's by the Margin."""
     pick_row = eligible_rows[0]
     beaten = None
     if metering:
         for r in eligible_rows[1:]:
-            if steals(r, pick_row, margin):
-                beaten = score(pick_row)
+            if _steals(r, pick_row, margin):
+                beaten = _score(pick_row)
                 pick_row = r
     return pick_row, beaten
 
@@ -305,15 +306,15 @@ def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
         else:
             vetoed_rows.append(row)
 
-    eligible_rows.sort(key=lambda item: eligible_order(item, metering))
+    eligible_rows.sort(key=lambda item: _eligible_order(item, metering))
 
     if eligible_rows:
-        pick_row, beaten_pace = choose(eligible_rows, margin, metering)
+        pick_row, beaten_pace = _choose(eligible_rows, margin, metering)
 
         for r in eligible_rows:
             if r is pick_row:
                 r["cause"] = "pick" if beaten_pace is None else "steal"
-            elif metering and score(r) is None:
+            elif metering and _score(r) is None:
                 r["cause"] = "unknown"
             else:
                 r["cause"] = "eligible"
@@ -321,7 +322,7 @@ def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
             r["pick"] = r["cause"] in _PICK_CAUSES
             # the display text for the cause; nothing parses it
             if r["cause"] == "steal" and dollars:
-                r["reason"] = (f"stolen by plan dollars: {score(r):.2f} >= "
+                r["reason"] = (f"stolen by plan dollars: {_score(r):.2f} >= "
                                f"{beaten_pace:.2f} x (1 + {margin})")
             elif r["cause"] == "steal":
                 r["reason"] = f"stolen by pace: {r['pace']} >= {beaten_pace} + {margin}"
@@ -453,6 +454,7 @@ def tier_leaders(cat, meters, present):
       rows             the Tier's rows, Pick first, each with "cause"
       steal_threshold  {"unit": "pace" | "plan_dollars", "value": float | None}
       pace_to_lead     {meter: float | None}
+      handover         {"points": float, "to": lane name | None} | None
 
     Each Tier is ranked by the selection rule with equal floor and ceiling,
     and rows from other Tiers are dropped. A leader is the exact-Tier
@@ -470,8 +472,17 @@ def tier_leaders(cat, meters, present):
     now, or None when no Pace a Meter can read (up to usage.MAX_PACE) does.
     Empty with Meters off.
 
+    `handover` is the smallest spend of the leader's Meter, on a grid of half
+    a quota point of its week, at which another Lane leads the Tier or the
+    Meter falls under the Gate; `to` is that Lane, or None when no other Lane
+    is eligible. `points` is quota points as a fraction of the week, never a
+    time (ADR 0001). None with no leader, Meters off, or a leader's Meter with
+    no Weekly figure, Pace or share of the week left, and None when the
+    leader still leads with its whole week spent (a Gate of 0).
+
     The Snapshot is read once: every what-if replaces one Readout in that
-    map and reranks it. The preview does no I/O and is JSON-safe.
+    map and reranks it, a spent one through `meters.readout(spend=)`. The
+    preview does no I/O and is JSON-safe.
     """
     readouts = _readouts(cat, meters)
     routing = cat.get("routing", {})
@@ -479,12 +490,18 @@ def tier_leaders(cat, meters, present):
     for tier in range(1, 5):
         rows = _tier_rows(cat, readouts, present, tier)
         leader = next((row for row in rows if row["pick"]), None)
+        # Every Lane has a Tier (catalog validation), so the Tier's rows are
+        # its Lanes, and a what-if ranks those alone.
+        names = {row["lane"] for row in rows}
+        tier_cat = dict(cat, lanes={name: lane for name, lane in (cat.get("lanes") or {}).items()
+                                    if name in names})
         previews.append({
             "tier": tier,
             "leader": leader["lane"] if leader else None,
             "rows": rows,
             "steal_threshold": _steal_threshold(routing, leader),
-            "pace_to_lead": _paces_to_lead(cat, readouts, present, tier, rows, leader),
+            "pace_to_lead": _paces_to_lead(tier_cat, readouts, present, tier, rows, leader),
+            "handover": _handover(tier_cat, meters, readouts, present, tier, leader),
         })
     return previews
 
@@ -499,22 +516,18 @@ def _steal_threshold(routing, leader):
     """The value a Lane after `leader` must reach to take its Tier, in
     routing's quota unit."""
     unit = catalog.quota_unit(routing)
-    value = score(leader) if leader is not None and catalog.meters_enabled(routing) else None
+    value = _score(leader) if leader is not None and catalog.meters_enabled(routing) else None
     if value is not None:
         margin = routing["margin"]
         value = value * (1 + margin) if unit == "plan_dollars" else value + margin
     return {"unit": unit, "value": value}
 
 
-def _paces_to_lead(cat, readouts, present, tier, rows, leader):
-    """Meter to its Pace to lead the Tier (see tier_leaders)."""
-    if leader is None or not catalog.meters_enabled(cat.get("routing", {})):
+def _paces_to_lead(tier_cat, readouts, present, tier, rows, leader):
+    """Meter to its Pace to lead the Tier (see tier_leaders); `tier_cat`
+    holds the Tier's Lanes only."""
+    if leader is None or not catalog.meters_enabled(tier_cat.get("routing", {})):
         return {}
-    # Every Lane has a Tier (catalog validation), so the Tier's rows are its
-    # Lanes, and a replay ranks those alone.
-    names = {row["lane"] for row in rows}
-    tier_cat = dict(cat, lanes={name: lane for name, lane in (cat.get("lanes") or {}).items()
-                                if name in names})
     out = {}
     for row in rows:
         meter = row["meter"]
@@ -543,7 +556,7 @@ def _pace_to_lead(cat, readouts, present, tier, rows, meter):
     crossings = [0.0]
     if weight:
         for row in rows:
-            value = score(row)
+            value = _score(row)
             if not row["eligible"] or row["meter"] == meter or value is None:
                 continue
             if dollars:
@@ -562,6 +575,38 @@ def _pace_to_lead(cat, readouts, present, tier, rows, meter):
         pick = next((r for r in _tier_rows(cat, trial, present, tier) if r["pick"]), None)
         if pick is not None and pick["meter"] == meter:
             return step / 100
+    return None
+
+
+# The Handover's grid: half a quota point of the leader's week per step, so
+# at most 200 steps spend a whole week.
+_HANDOVER_STEPS = 200
+
+
+def _handover(tier_cat, meters, readouts, present, tier, leader):
+    """The Handover of `tier` (see tier_leaders); `tier_cat` holds the Tier's
+    Lanes only.
+
+    Only the leader's Meter spends, read through `meters.readout(spend=)`:
+    its Weekly figure falls, its Pace and its Gate follow, and the core
+    reranks the Tier at each step until another Lane leads or none does,
+    which is the Meter falling under the Gate with nothing else eligible.
+    """
+    if leader is None or not catalog.meters_enabled(tier_cat.get("routing", {})):
+        return None
+    meter = leader["meter"]
+    reading = readouts[meter]
+    if reading.weekly is None or reading.pace is None or not reading.week_left:
+        return None
+    for step in range(1, _HANDOVER_STEPS + 1):
+        spend = step / _HANDOVER_STEPS
+        trial = dict(readouts)
+        trial[meter] = meters.readout(meter, tier_cat, spend=spend)
+        pick = next((r for r in _tier_rows(tier_cat, trial, present, tier) if r["pick"]), None)
+        if pick is None or pick["lane"] != leader["lane"]:
+            return {"points": min(spend, reading.weekly), "to": pick["lane"] if pick else None}
+        if spend >= reading.weekly:
+            break
     return None
 
 

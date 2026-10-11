@@ -1437,12 +1437,49 @@ record(
     and rows29c[0]["reason"].endswith("x (1 + 0.2)"),
     rows29c[0]["reason"],
 )
-pick29 = {"lane": "a", "pace": 1.0, "weight": 10.0}
+
+
+def pair_cat(price_x=20, price_y=20, *, dollars=True, margin=0.2, gate=0.1, lone=False):
+    """The sample routing over two Tier 2 Lanes of its own: a@x on Meter mx at
+    order 1 and b@y on Meter my at order 2, each Meter at its plan price per
+    month (None for no price). `lone` keeps a@x alone."""
+    out = catalog.load_catalog(config_dir=_samples28)
+    out["routing"].update(margin=margin, gate=gate,
+                          quota_unit="plan_dollars" if dollars else "pace")
+    out["meters"] = {}
+    out["lanes"] = {}
+    for name, meter_name, price, order in (("a@x", "mx", price_x, 1), ("b@y", "my", price_y, 2)):
+        if lone and name == "b@y":
+            continue
+        harness = name.split("@")[1]
+        out["meters"][meter_name] = {"harness": harness, "plan": meter_name}
+        if price is not None:
+            out["meters"][meter_name]["price_month"] = price
+        out["lanes"][name] = {"harness": harness, "model": name.split("@")[0], "effort": "high",
+                              "meter": meter_name, "tier": 2, "order": order}
+    return out
+
+
+PAIR_HARNESSES = {"x", "y"}
+
+
+def pair_pick(cat_, pace_y):
+    """The Pick rank() gives impl with a@x at Pace 1.0 and b@y at `pace_y`."""
+    doc = {"probed_at": 1700000000, "lanes": [meter("mx", weekly=0.5, pace=1.0),
+                                              meter("my", weekly=0.5, pace=pace_y)]}
+    rows = rank.rank("impl", cat_, usage.Snapshot.of(doc), PAIR_HARNESSES)
+    return rows[0]["lane"] if rows and rows[0]["pick"] else None
+
+
+# case 29c (ticket 23 replaced a check of rank.steals): through rank(), on
+# equally priced Meters a value 20% ahead steals at Margin 0.2, 19% ahead does
+# not, and a Meter with no plan price never steals.
+picks29c = (pair_pick(pair_cat(), 1.2), pair_pick(pair_cat(), 1.19),
+            pair_pick(pair_cat(price_y=None), 9.0))
 record(
-    "case 29c a value 20% ahead steals at Margin 0.2, 19% ahead does not",
-    rank.steals({"lane": "b", "pace": 1.2, "weight": 10.0}, pick29, 0.2)
-    and not rank.steals({"lane": "b", "pace": 1.19, "weight": 10.0}, pick29, 0.2)
-    and not rank.steals({"lane": "b", "pace": 9.0, "weight": None}, pick29, 0.2),
+    "case 29c a value 20% ahead steals at Margin 0.2, 19% ahead does not, an unpriced Meter never",
+    picks29c == ("b@y", "a@x", "a@x"),
+    picks29c,
 )
 for bad29 in ("dollars", 1, None):
     try:
@@ -1772,5 +1809,96 @@ record("case 33g previews pass json.dumps(allow_nan=False) and rank tiers --json
        and all("steal_threshold" in t and "pace_to_lead" in t for t in tiers33)
        and near33(facts33(tiers33[1]), facts33(a33[1])),
        (json33, res33.stdout[-400:], res33.stderr))
+
+# case 34 (ticket 23): each Tier preview carries the Handover: how far the
+# leader's Meter can fall, in quota points on a half-point grid, before another
+# Lane leads the Tier or the Meter falls under the Gate, and who leads then.
+# Rank spends the Meter through Snapshot.readout(spend=), so the rows carry
+# `cycle_left`, the share of the week left that a spent Pace divides by. The
+# spec's case 32; 32 and 33 were taken on this branch.
+doc34 = {"probed_at": 1700000000, "lanes": [
+    dict(meter("mx", weekly=0.5, pace=1.0), cycle_left=0.5),
+    dict(meter("my", weekly=0.45, pace=0.9), cycle_left=0.5),
+]}
+
+
+def handover34(cat_, doc=doc34):
+    """Tier 2's Handover through tier_leaders, and its leader."""
+    preview = rank.tier_leaders(cat_, usage.Snapshot.of(doc), PAIR_HARNESSES)[1]
+    return preview["leader"], preview.get("handover", "missing")
+
+
+def near34(found, points, to):
+    """A Handover of about `points` (within a grid step and a bit) to `to`."""
+    return (isinstance(found, dict) and set(found) == {"points", "to"}
+            and found["to"] == to and abs(found["points"] - points) < 0.006)
+
+
+lead34, pair34 = handover34(pair_cat(dollars=False, gate=0.05))
+record("case 34a a@x hands Tier 2 to b@y once its Pace falls a Margin under b@y's: about 0.15",
+       lead34 == "a@x" and near34(pair34, 0.15, "b@y"), (lead34, pair34))
+lead34, alone34 = handover34(pair_cat(dollars=False, gate=0.05, lone=True))
+record("case 34b a lone leader runs down to the Gate: about 0.45, to no Lane",
+       lead34 == "a@x" and near34(alone34, 0.45, None), (lead34, alone34))
+# plan dollars, weights 20 and 10: 20 x Pace falls to 9 / 1.2 at Pace 0.375,
+# a Weekly figure of 0.1875, so 0.3125 spent
+lead34, dollars34 = handover34(pair_cat(20 / WEEK33, 10 / WEEK33, dollars=True, gate=0.05))
+record("case 34c with plan dollars at weights 20 and 10 the Handover is about 0.3125 to b@y",
+       lead34 == "a@x" and near34(dollars34, 0.3125, "b@y"), (lead34, dollars34))
+off_cat34 = pair_cat(dollars=False, gate=0.05)
+off_cat34["routing"]["meters"] = False
+lead34, off34 = handover34(off_cat34)
+record("case 34d Meters off: no Handover", lead34 == "a@x" and off34 is None, (lead34, off34))
+
+# None too with no leader, and when the leader's Meter has no Weekly figure or
+# no share of the week left to read a spent Pace from.
+none34 = rank.tier_leaders(pair_cat(dollars=False, gate=0.05), usage.Snapshot.of(doc34), set())[1]
+no_week34 = copy.deepcopy(doc34)
+no_week34["lanes"][0].update(remaining_weekly=None)
+no_left34 = copy.deepcopy(doc34)
+no_left34["lanes"][0].update(cycle_left=None)
+got34 = (none34["leader"], none34.get("handover", "missing"),
+         handover34(pair_cat(dollars=False, gate=0.05), no_week34),
+         handover34(pair_cat(dollars=False, gate=0.05), no_left34))
+record("case 34e no Handover with no leader, no Weekly figure or no share of the week left",
+       got34 == (None, None, ("a@x", None), ("a@x", None)), got34)
+
+# Rank spends only the leader's Meter, and only through readout(spend=): one
+# plain read per Meter, then spend reads of mx alone, on the 0.005 grid.
+reads34 = []
+
+
+class Counted34(usage.Snapshot):
+    def readout(self, meter, cat, **kw):
+        reads34.append((meter, kw.get("spend", 0.0)))
+        return usage.Snapshot.readout(self, meter, cat, **kw)
+
+
+snap34 = usage.Snapshot.of(doc34)
+counted34 = Counted34(path=None, status=snap34.status, detail=None, taken_at=snap34.taken_at,
+                      signature=snap34.signature, _rows=snap34._rows, _held=snap34._held)
+spent34 = rank.tier_leaders(pair_cat(dollars=False, gate=0.05), counted34, PAIR_HARNESSES)[1]
+plain34 = sorted(m for m, s in reads34 if not s)
+spends34 = [(m, s) for m, s in reads34 if s]
+record("case 34f the Handover spends the leader's Meter only through Snapshot.readout(spend=)",
+       plain34 == ["mx", "my"] and spends34 and len(spends34) <= 200
+       and all(m == "mx" and abs(s * 200 - round(s * 200)) < 1e-9 for m, s in spends34)
+       and near34(spent34.get("handover"), 0.15, "b@y"),
+       (plain34, spends34[:3], len(spends34)))
+
+# JSON-safe, and `rank tiers --json` carries the Handover on every Tier.
+try:
+    json.dumps([pair34, alone34, dollars34, off34], allow_nan=False)
+    json34 = True
+except ValueError as e:
+    json34 = str(e)
+record("case 34g Handovers pass json.dumps(allow_nan=False) and rank tiers --json carries them",
+       json34 is True and len(tiers33) == 4 and all("handover" in t for t in tiers33),
+       (json34, [sorted(t) for t in tiers33]))
+
+# The selection rule's pieces are rank's own: nothing outside it replays them.
+public34 = [name for name in ("score", "eligible_order", "steals", "choose") if hasattr(rank, name)]
+record("case 34h rank exposes no public score, eligible_order, steals or choose",
+       public34 == [], public34)
 
 sys.exit(1 if fails else 0)
