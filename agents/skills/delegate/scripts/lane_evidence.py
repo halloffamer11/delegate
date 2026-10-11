@@ -3,11 +3,11 @@
 
 The catalog keys on slugs; a leaderboard prints a slug or a display name. This
 is the one reconciliation of the two, used by `catalog.validate_lanes` (a
-`published_as` entry may not name another lane's model) and by the benchmark
-readers: `LaneEvidence` for carry, the Tier proposal, the wizard and the
-benchmark page, the resolvers for `bench`. Split out of catalog.py (ticket 26)
-as `published_names`. It imports only `harnesses`, which decides what one
-Model is and which efforts it runs, never the spelling.
+`published_as` entry may not name another lane's model) and by every
+benchmark reader through `LaneEvidence`: carry, the Tier proposal, the wizard,
+the report, model inspection and the benchmark page. Split out of catalog.py
+(ticket 26) as `published_names`. It imports only `harnesses`, which decides
+what one Model is and which efforts it runs, never the spelling.
 """
 from __future__ import annotations
 
@@ -62,90 +62,12 @@ def published_as_map(lanes_doc):
     return out
 
 
-def resolve_published_model(published, lanes_doc, effort=None):
-    """The lane model that a source's printed model name denotes, or None.
-
-    A `published_as` entry is consulted first: it is the human's own correction,
-    and it is the only way across a gap formatting cannot bridge
-    (`Fable 5.1` -> `claude-fable-5-1`). It cannot contradict the derived rule,
-    because `validate_lanes` refuses an entry that names a model another lane
-    runs — an entry that could redirect one lane's rows onto another lane is a
-    typo, never an intention.
-
-    Failing an entry, the name has to differ from a lane model by formatting
-    alone — case and the -_. separators — reaching past the effort suffix some
-    of our slugs carry (`gemini-3.8-flash-high`). Anything looser would be a
-    guess about which model a leaderboard meant, and a wrong guess switches a
-    working lane off. A name that two lane models could equally denote therefore
-    resolves to neither, and a name no lane runs resolves to None: the
-    leaderboards are full of models that are nobody's lane.
-
-    The one exception is a family of lane models that differ only by their
-    effort suffix, which is how agy names one model at several efforts
-    (`gemini-3.8-flash-high`, `gemini-3.8-flash-medium`). A row that states its
-    `effort` resolves to the one family member carrying that effort; without
-    an effort, or with an effort no member carries, it still resolves to
-    neither (ticket 19).
-    """
-    key = normalize_name(published)
-    if not key:
-        return None
-    explicit = published_as_map(lanes_doc)
-    if key in explicit:
-        return explicit[key]
-    candidates = set()
-    for lane in (lanes_doc.get("lanes") or {}).values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if not isinstance(model, str) or not model.strip():
-            continue
-        normalized = normalize_name(model)
-        base, _effort = strip_effort_suffix(normalized)
-        if key in (normalized, base):
-            candidates.add(model)
-    if len(candidates) == 1:
-        return candidates.pop()
-    if effort and len(candidates) > 1:
-        at_effort = {m for m in candidates
-                     if strip_effort_suffix(normalize_name(m))[1] == str(effort)}
-        if len(at_effort) == 1:
-            return at_effort.pop()
-    return None
-
-
-def resolve_published_models(published, lanes_doc, effort=None):
-    """Every lane model a source's printed name denotes: one per harness.
-
-    `resolve_published_model` answers for the catalog as one pool, so when two
-    harnesses run one model it can name only one of them: with Opus on agy
-    (`claude-opus-5-5-high`) beside Claude Code's (`claude-opus-5-5`), a row at
-    effort high resolves to the agy member and Claude Code's lanes lose it. A
-    published score is the model's, whichever harness runs it, so here the same
-    rule is applied inside each harness and every harness that runs the model
-    gets the row (any-harness ticket 31). An explicit `published_as` still
-    names one model.
-    """
-    key = normalize_name(published)
-    if not key:
-        return []
-    explicit = published_as_map(lanes_doc)
-    if key in explicit:
-        return [explicit[key]]
-    by_harness = {}
-    for name, lane in (lanes_doc.get("lanes") or {}).items():
-        if isinstance(lane, dict):
-            by_harness.setdefault(lane.get("harness"), {})[name] = lane
-    out = []
-    for lanes in by_harness.values():
-        model = resolve_published_model(published, {"lanes": lanes}, effort=effort)
-        if model is not None and model not in out:
-            out.append(model)
-    return out
-
-
 # A source that did not state an effort has not said which Lane it measured.
-UNSTATED_EFFORTS = (None, "", "unknown")
+# `unknown` is the key such a row's effort gets, so it is never dropped for
+# being unlabelled, and it matches no Lane, so it is never attributed for it.
+UNKNOWN_EFFORT = "unknown"
+UNSTATED_EFFORTS = (None, "", UNKNOWN_EFFORT)
+EMPTY_NAME, NO_MODEL, CONFLICT = "empty published name", "no catalog model", "conflicting identity"
 
 
 def _stated_effort(row):
@@ -161,6 +83,12 @@ def _model_identity(lane):
     is a Model of its own."""
     lane = lane or {}
     return normalize_name(harnesses.family(lane.get("harness"), lane.get("model") or "")[0])
+
+
+def _printed_names(row):
+    """A row's printed names, in the order they are read: its `model`, then
+    its `slug` when it has one (an Epoch row)."""
+    return [row.get("model"), row.get("slug")]
 
 
 class LaneEvidence:
@@ -179,25 +107,39 @@ class LaneEvidence:
                  if isinstance(lane, dict) and isinstance(lane.get("model"), str)
                  and lane["model"].strip()}
         model_of = {name: (lane.get("harness"), _model_identity(lane)) for name, lane in lanes.items()}
+        # Each Model's display name: a Lane's model string that is the Model's
+        # whole name (`claude-opus-5-5`, the exact spelling first), else the
+        # harness family base (`gemini-3.8-flash`). It never depends on a row's
+        # effort, so one Model draws as one sweep.
+        self._display, self._spellings = {}, {}
+        for name, lane in lanes.items():
+            model = model_of[name][1]
+            self._spellings.setdefault(model, set()).add(lane["model"])
+        for model in self._spellings:
+            members = [lanes[n] for n in lanes if model_of[n][1] == model]
+            whole = ([m["model"] for m in members if m["model"] == model]
+                     + [m["model"] for m in members if normalize_name(m["model"]) == model])
+            self._display[model] = whole[0] if whole else harnesses.family(
+                members[0].get("harness"), members[0]["model"])[0]
         # A printed name names a Model when, normalized, it is a `published_as`
         # entry (the Model of the Lane carrying it), a Lane's Model identity or
         # its model string. A name two Models answer to names neither.
-        names = {}
+        self._names = {}
         for name, lane in lanes.items():
             spellings = [model_of[name][1], lane["model"]] + [
                 entry for entry in lane.get("published_as") or () if isinstance(entry, str)]
             for key in filter(None, map(normalize_name, spellings)):
-                names.setdefault(key, set()).add(model_of[name][1])
-        claimed, self._unmatched = {}, []
+                self._names.setdefault(key, set()).add(model_of[name][1])
+        claimed, identified, self._unmatched = {}, [], []
         for row in rows or ():
             if not isinstance(row, dict):
                 continue
-            printed = row.get("model")
-            found = names.get(normalize_name(printed)) or set()
-            if len(found) == 1:
-                claimed.setdefault(next(iter(found)), []).append(row)
-            elif isinstance(printed, str) and printed.strip() and printed not in self._unmatched:
-                self._unmatched.append(printed)
+            ident = self._identify(_printed_names(row))
+            identified.append((row, ident))
+            if ident["model_key"] is not None:
+                claimed.setdefault(ident["model_key"], []).append(row)
+            elif ident["identity_reason"] != EMPTY_NAME and ident["published"] not in self._unmatched:
+                self._unmatched.append(ident["published"])
         self._model_rows, self._lane_rows, shared = {}, {}, {}
         for name, lane in lanes.items():
             if model_of[name] not in shared:
@@ -209,6 +151,18 @@ class LaneEvidence:
             effort = _stated_effort(lane)
             self._lane_rows[name] = [row for row in shared[model_of[name]]
                                      if effort is not None and _stated_effort(row) == effort]
+        model_lanes, lane_lanes = {}, {}
+        for name in sorted(lanes):
+            for row in self._model_rows[name]:
+                model_lanes.setdefault(id(row), set()).add(name)
+            for row in self._lane_rows[name]:
+                lane_lanes.setdefault(id(row), set()).add(name)
+        self._records = []
+        for row, ident in identified:
+            held = sorted(lane_lanes.get(id(row), ()))
+            self._records.append(dict(
+                ident, row=row, effort=_stated_effort(row) or UNKNOWN_EFFORT,
+                model_lanes=sorted(model_lanes.get(id(row), ())), lanes=held, attributed=bool(held)))
 
     def __eq__(self, other):
         """Equal rows attributed alike: the wizard compares its state by value."""
@@ -234,9 +188,54 @@ class LaneEvidence:
         `unknown`) is no Lane's."""
         return list(self._lane_rows.get(lane, ()))
 
+    def records(self) -> List[dict]:
+        """One record per dict row, in input order, for display: the row, the
+        identity its printed name gives it (`identify`), the effort it states
+        (`unknown` for none), `model_lanes` (the Lanes whose `model_rows` hold
+        it), `lanes` (exactly the Lanes whose `lane_rows` hold it) and
+        `attributed` (whether any Lane does)."""
+        return [dict(rec, candidates=list(rec["candidates"]), lane_models=list(rec["lane_models"]),
+                     model_lanes=list(rec["model_lanes"]), lanes=list(rec["lanes"]))
+                for rec in self._records]
+
+    def identify(self, name: Optional[str]) -> dict:
+        """The Model a printed name names: the identity part of the record a
+        row printing `name` would get. `published` and `key` (the name and its
+        normalized form), `identity` (`resolved` or `unresolved`),
+        `identity_reason` (None, `empty published name`, `no catalog model` or
+        `conflicting identity`), `candidates` (the display names it could
+        mean), `model_key` (the Model, the key it is grouped by), `lane_model`
+        (its display name) and `lane_models` (every Lane model string it is
+        run as)."""
+        return self._identify([name])
+
     def unmatched(self) -> List[str]:
         """The printed names no Model answers to, each once, first seen first."""
         return list(self._unmatched)
+
+    def _identify(self, printed):
+        """The first printed name that names one Model decides; failing that,
+        the first that names two says why, and else the first name at all."""
+        first = conflict = None
+        for name in printed:
+            key = normalize_name(name) if isinstance(name, str) else ""
+            if not key:
+                continue
+            found = self._names.get(key) or set()
+            if len(found) == 1:
+                model = next(iter(found))
+                return {"published": name, "key": key, "identity": "resolved",
+                        "identity_reason": None, "candidates": [self._display[model]],
+                        "model_key": model, "lane_model": self._display[model],
+                        "lane_models": sorted(self._spellings[model])}
+            first = first or (name, key, NO_MODEL, [])
+            if found and conflict is None:
+                conflict = (name, key, CONFLICT, sorted(self._display[m] for m in found))
+        name, key, reason, candidates = conflict or first or (
+            next((n for n in printed if n is not None), None), "", EMPTY_NAME, [])
+        return {"published": name, "key": key, "identity": "unresolved",
+                "identity_reason": reason, "candidates": candidates, "model_key": None,
+                "lane_model": None, "lane_models": []}
 
 
 def _runs(harness, models, effort):

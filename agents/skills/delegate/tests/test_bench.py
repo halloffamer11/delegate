@@ -18,6 +18,7 @@ os.chdir(_ISOLATED_CWD.name)
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 BENCH_PY = os.path.join(DELEGATE_DIR, "bench.py")
+EPOCH_FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench  # noqa: E402  (after sys.path, as the other test files do)
@@ -604,6 +605,38 @@ with tempfile.TemporaryDirectory() as td:
         str(data["notes"]),
     )
 
+# --- ticket 25: an Epoch row reaches the same Lane in every view --------------
+# Epoch prints a display name and a dated model_version. The scores table matched
+# the slug only, so the dated slug reached no Lane there, while model inspection
+# matched the display name and attributed the row.
+try:
+    with tempfile.TemporaryDirectory() as td:
+        seen = {}
+        for tag, published_as, display in (("display name", None, "Claude Fable 5.1"),
+                                           ("published_as", ["Fable 5.1"], "Fable 5.1")):
+            lane = {"harness": "claude", "model": "claude-fable-5-1", "effort": "high",
+                    "tier": 4, "meter": "claude"}
+            if published_as:
+                lane["published_as"] = published_as
+            doc = {"version": "delegate-lanes.v1", "lanes": {"fable-high@claude": lane}}
+            path = os.path.join(td, f"{len(seen)}.csv")
+            write_epoch_csv(path, [epoch_row("claude-fable-5-1-20260901", "high", "DeepSWE", "0.61",
+                                             "alpha", display)])
+            data = bench.collect(doc, epoch_csv=path)
+            view = bench.inspect_model("claude-fable-5-1", doc, epoch_csv=path)
+            cell = data["lanes"]["fable-high@claude"]["cells"].get("DeepSWE") or {}
+            seen[tag] = (cell.get("performance"),
+                         [r["score"] for v in view["lane_view"] if v["lane"] == "fable-high@claude"
+                          for r in v["records"]])
+    record(
+        "an Epoch row reaches a Lane in the scores table and in model inspection alike",
+        seen == {"display name": (0.61, [0.61]), "published_as": (0.61, [0.61])},
+        repr(seen),
+    )
+except Exception as e:
+    record("an Epoch row reaches a Lane in the scores table and in model inspection alike",
+           False, repr(e))
+
 record(
     "ultra never stands for a model, even when a lane carries it",
     bench.lane_effort_of({"lanes": ["a", "b"], "efforts": ["ultra", "high"]}) == "high"
@@ -888,29 +921,40 @@ try:
     # The benchmark page reads evidence records, not the carry rule's rows: a
     # record resolved against the catalog as one pool gave the agy member every
     # Opus row, and Claude Code's Opus lanes were drawn with none.
-    recs = bench.evidence_records(OPUS_ROWS, OPUS_TWO_HARNESSES)
+    recs = bench.evidence_records(LaneEvidence(OPUS_TWO_HARNESSES, OPUS_ROWS))
     by_effort = {r["effort"]: r for r in recs if r["benchmark"] == "b1"}
     record(
         "an evidence record names the lanes of every harness that runs the model",
         all(r["identity"] == "resolved" and r["lane_model"] == "claude-opus-5-5" for r in recs)
         and by_effort["high"]["lanes"] == ["opus55-high@agy", "opus55-high@claude"]
-        and by_effort["high"]["lane_models"] == ["claude-opus-5-5", "claude-opus-5-5-high"]
         and by_effort["xhigh"]["lanes"] == ["opus55-xhigh@claude"]
+        # agy runs no xhigh: the row is Claude Code's Model context only
+        and by_effort["xhigh"]["model_lanes"] == [f"opus55-{e}@claude"
+                                                  for e in ("high", "low", "medium", "xhigh")]
         and all(r["attributed"] for r in recs),
         repr([(r["effort"], r["lane_model"], r["lanes"]) for r in recs]),
     )
-    components = bench.aa_component_rows(OPUS_ROWS, OPUS_TWO_HARNESSES)
-    record(
-        "an Artificial Analysis component row reaches both harnesses' Opus",
-        sorted({(r["model"], r["effort"]) for r in components})
-        == [("claude-opus-5-5", "high"), ("claude-opus-5-5", "low"),
-            ("claude-opus-5-5", "medium"), ("claude-opus-5-5", "xhigh"),
-            ("claude-opus-5-5-high", "high"), ("claude-opus-5-5-low", "low"),
-            ("claude-opus-5-5-medium", "medium")],
-        repr(components),
-    )
 except Exception as e:
     record("an evidence record names the lanes of every harness that runs the model",
+           False, repr(e))
+
+try:
+    data = bench.collect(OPUS_TWO_HARNESSES, epoch_csv=EPOCH_FIXTURE, effort_rows=OPUS_ROWS)
+    cols = {name: (rec["aa"] or {}).get("cols") for name, rec in data["lanes"].items()}
+    agy_model = data["models"]["claude-opus-5-5-high"]["aa"]
+    record(
+        "an Artificial Analysis component row reaches both harnesses' Opus in collect's lane section",
+        cols["opus55-high@claude"] == cols["opus55-high@agy"] == {"b1": 0.70, "b2": 0.70}
+        and cols["opus55-low@agy"] == {"b1": 0.40, "b2": 0.40}
+        and cols["opus55-xhigh@claude"] == {"b1": 0.80, "b2": 0.80}
+        # a model figure names the Lanes that claim it
+        and agy_model["effort"] == "high"
+        and agy_model["lanes"] == ["opus55-high@agy", "opus55-high@claude"]
+        and data["models"]["claude-opus-5-5"]["aa"]["lanes"] == ["opus55-xhigh@claude"],
+        repr(cols),
+    )
+except Exception as e:
+    record("an Artificial Analysis component row reaches both harnesses' Opus in collect's lane section",
            False, repr(e))
 
 try:
@@ -934,21 +978,15 @@ try:
     with tempfile.TemporaryDirectory() as td:
         csv_path = os.path.join(td, "epoch.csv")
         write_epoch_csv(csv_path, [epoch_row("gpt-6-astra", "high", "DeepSWE", "0.58")])
-        items = bench.build_epoch_section(
-            bench.catalog_models(ATTRIB_LANES["lanes"]),
-            bench.match_epoch_rows(
-                bench.load_epoch(csv_path),
-                bench.catalog_models(ATTRIB_LANES["lanes"]),
-            ),
-        )
         data = bench.collect(ATTRIB_LANES, epoch_csv=csv_path)
         text = bench.format_collection(data)
     record(
         "collect does not build a discarded display table; markdown is rendered later",
-        isinstance(items, list) and items and "model" in items[0]
+        data["models"]["gpt-6-astra"]["epoch"]["cells"]["DeepSWE"]["high"]["performance"] == 0.58
+        and not any(isinstance(v, str) and "|" in v for v in data.values())
         and text.startswith("# Lane benchmark ranking")
         and "| Lane(s) |" in text,
-        f"type={type(items).__name__} head={text[:80]!r}",
+        f"keys={sorted(data)} head={text[:80]!r}",
     )
 except Exception as e:
     record("collect does not build a discarded display table; markdown is rendered later",
@@ -1082,19 +1120,18 @@ try:
         str(grok["family_view"][:1]),
     )
     flash = bench.inspect_model("Gemini 3.8 Flash", INSPECT_LANES, effort_rows=INSPECT_ROWS)
-    unresolved = flash["unresolved"]
     high_flash = [r for r in flash["family_view"] if r["effort"] == "high"]
     none_flash = [r for r in flash["family_view"] if r["effort"] == bench.UNKNOWN_EFFORT]
     record(
-        "conflicting family identity without an effort stays unresolved; effort selects one member",
-        none_flash and none_flash[0]["identity"] == "unresolved"
-        and "conflicting identity" in (none_flash[0]["identity_reason"] or "")
-        and high_flash and high_flash[0]["identity"] == "resolved"
-        and high_flash[0]["lane_model"] == "gemini-3.8-flash-high"
-        and high_flash[0]["attributed"] is True
-        and {m for m in flash["family"]["models"]}
-        == {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"},
-        str({"unresolved": unresolved, "high": high_flash, "none": none_flash}),
+        "a row without an effort names the agy Model and no Lane claims it",
+        none_flash and none_flash[0]["identity"] == "resolved"
+        and none_flash[0]["lane_model"] == "gemini-3.8-flash"
+        and none_flash[0]["lanes"] == [] and none_flash[0]["attributed"] is False
+        and high_flash and high_flash[0]["lane_model"] == "gemini-3.8-flash"
+        and high_flash[0]["lanes"] == ["flash-high@agy"] and high_flash[0]["attributed"] is True
+        and flash["unresolved"] == []
+        and set(flash["family"]["models"]) == {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"},
+        str({"unresolved": flash["unresolved"], "high": high_flash, "none": none_flash}),
     )
     empty = bench.inspect_model("gpt-5.6-sol", INSPECT_LANES)
     record(
@@ -1197,10 +1234,14 @@ except Exception as e:
            False, repr(e))
 
 try:
-    canonical = bench.inspect_model("gemini-3.8-flash-high", INSPECT_LANES, effort_rows=INSPECT_ROWS)
-    record("canonical Model query retains unresolved candidate evidence",
-           bool(canonical["unresolved"])
-           and all(not r["attributed"] for r in canonical["unresolved"]), canonical)
+    member = bench.inspect_model("gemini-3.8-flash-high", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    views = {v["lane"]: [r["effort"] for r in v["records"]] for v in member["lane_view"]}
+    record("a member slug's query shows its Model's unattributed rows",
+           member["query_identity"]["lane_model"] == "gemini-3.8-flash"
+           and sorted(r["effort"] for r in member["family_view"]) == ["high", "unknown"]
+           and [r["attributed"] for r in member["family_view"] if r["effort"] == "unknown"] == [False]
+           and views == {"flash-high@agy": ["high"], "flash-medium@agy": []},
+           repr({"family": [(r["effort"], r["lanes"]) for r in member["family_view"]], "lanes": views}))
     unmatched = bench.inspect_model("Grok 4.3", INSPECT_LANES, effort_rows=INSPECT_ROWS)
     human = bench.format_inspection(unmatched)
     record("unattributed human evidence exposes cost and uncertainty",

@@ -66,9 +66,12 @@ replaces partial use of invalid documents.
 - `scripts/lane_evidence.py` (once `published_names.py`): which benchmark rows belong to which
   Lane. `LaneEvidence(lanes_doc, rows)` attributes every row once, by the Model its printed name
   names (the lane field `published_as` names the Model, so it reaches every Harness that runs it)
-  and the effort it states; `lane_rows`, `model_rows`, `available` and `unmatched` are lookups.
-  The carry pre-screen, the Tier proposal, the wizard and the benchmark page read one; `bench.py`
-  still resolves names through `resolve_published_models`. It imports only `harnesses`.
+  and the effort it states; a row's printed names are its `model`, then its `slug` (an Epoch
+  row). `lane_rows`, `model_rows`, `available`, `unmatched`, `records` (one per row: its identity,
+  `model_key`, the Model's display name `lane_model`, `model_lanes` and exactly the `lanes` whose
+  `lane_rows` hold it) and `identify(name)` are lookups. The carry pre-screen, the Tier proposal,
+  the wizard, the report, model inspection and the benchmark page read one. It imports only
+  `harnesses`.
 - `catalog.single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
   Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
   neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
@@ -155,18 +158,22 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
   ticket 19): the AA columns are the component benchmarks some lane has a figure for, with cost per
   task beside them and the composite never a column. `collect()` returns two views of the same
-  figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes`
-  (only the figures measured at that lane's own effort, with `mean`/`n` over those).
-  `effort_attributes(measured, lane_effort)` is the report's attribution rule; the wizard, the
-  Tier proposal and the page's plots read the same equality through `LaneEvidence.lane_rows`.
+  figures, from one `LaneEvidence` for the Epoch rows and one for the accepted rows: `models` (the
+  records of each catalog model's `model_key`, its Model at any effort, for comparing against
+  models nobody runs; each figure names the Lanes that claim it) and `lanes` (each Lane's
+  `lane_rows`, with `mean`/`n` over those). Its signature stays
+  `collect(lanes_doc, epoch_csv=None, effort_rows=None)`.
   Display order lives beside `collect` (`group_lanes`,
   `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
   `scripts/carry.py` (ticket 27): `beats()` and `decisions(lanes_doc, evidence)`, which returns
   structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
   `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
-  reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares
-  identity, board/version standing, cost basis and uncertainty with HTML. Family evidence stays
-  separate from exact-effort Lane attribution; ambiguous candidates remain visible.
+  reads accepted rows and optional local Epoch CSV without fetching: the query names a Model as a
+  printed name does (`identify`), so a member slug shows the whole Model, and each of its Lanes
+  lists its `lane_rows`. `evidence_records(evidence)` and `epoch_records(evidence)` turn an
+  evidence's `records` into display records with board/version standing, cost basis and
+  uncertainty, shared with HTML. Model evidence at any effort stays separate from exact-effort
+  Lane attribution; a name no Model or two Models answer to stays visible as unresolved.
 - `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY,
   prompt-driven under `--plain` or pipes). Each page makes one decision per line: with the same
   `[x]`/`[ ]` box, the carry page selects a model at an effort and the four tier pages assign a
@@ -207,10 +214,13 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
-  opens, which reads its records and its lane order (`bench.lane_order`, `group_lanes`) from
-  `bench.py`, each point's Lanes from one `LaneEvidence`, and the wizard's own verdicts
+  opens, which reads its lane order (`bench.lane_order`, `group_lanes`) from `bench.py`, its
+  records (`bench.evidence_records`, read once per render and drawn by the plots, the boards and
+  the rows tables) and each point's Lanes from one `LaneEvidence`, and the wizard's own verdicts
   (`carry.decisions` on that evidence, asked once per render, never caught) rather than deciding
-  any of them again. Each Lane on a point carries its own verdict, a point is struck only when
+  any of them again. Points group by the Model's display name, so an agy Model's efforts are one
+  sweep; the scores table names the Lanes `collect` says claim each figure. Each Lane on a point
+  carries its own verdict, a point is struck only when
   every Lane on it is proposed off, and "beaten by" comes only from an off verdict on the board's
   own source. HTML carries kind/source/competitor; reason prose is display-only. It embeds its
   plot data as inline JSON; `assets/bench_page.js`, inlined beside it, draws one

@@ -213,36 +213,35 @@ def _cost_basis(source_meta):
 # --- annotating rows ---------------------------------------------------------
 
 def _annotate(effort_rows, lanes_doc, prescreen):
-    """Every row, with the lane model its printed name denotes, the kind of
-    point it makes, the Lanes it is evidence for, each with its own carry
-    verdict, whether its provenance is weak, and the effort an off verdict on
-    this row's own source names.
+    """Every row, with the Model its printed name names (by its display name),
+    the kind of point it makes, the Lanes it is evidence for, each with its own
+    carry verdict, whether its provenance is weak, and the effort an off
+    verdict on this row's own source names.
 
-    The Lanes are the evidence's (`LaneEvidence.lane_rows`), the rows carry
-    judged; identity, standing, cost basis and version come from
-    `bench.evidence_records`, so the HTML table is the same records model
-    inspection prints. A point is struck only when every Lane on it is
-    proposed off: a point two Harnesses share can carry two verdicts.
+    Identity, the Lanes (exactly those whose `LaneEvidence.lane_rows` hold the
+    row, the rows carry judged), standing, cost basis and version come from
+    `bench.evidence_records` on the pre-screen's own evidence, so the HTML
+    table is the same records model inspection prints. A point is struck only
+    when every Lane on it is proposed off: a point two Harnesses share can
+    carry two verdicts. `render` annotates once and every block reads it.
     """
     evidence, proposals = prescreen
-    lanes = _lanes(lanes_doc)
-    owners = defaultdict(list)
-    for name in sorted(lanes):
-        for row in evidence.lane_rows(name):
-            owners[id(row)].append(name)
     # The composite and uncertain rows inform no verdict, so no point of theirs
     # is "beaten by" anything.
     counted = {id(row) for row in carry.certain_effort_rows(effort_rows)}
     annotated = []
-    for rec in bench.evidence_records(effort_rows, lanes_doc):
-        row = rec.get("row") if isinstance(rec.get("row"), dict) else {}
+    for rec in bench.evidence_records(evidence):
+        row = rec["row"]
         item = dict(row)
         lane_model = rec.get("lane_model")
+        # the Model's display name: an agy Model is its family, so its
+        # efforts group and draw as one sweep
         item["_lane_model"] = lane_model
-        # every harness's lanes of the model, not only the grouping one's
+        # every harness's lanes of the Model, for the colour of a point no
+        # Lane of its own runs
         item["_model_lanes"] = sorted({name for model in rec.get("lane_models") or ()
                                        for name in _lanes_of_model(lanes_doc, model)})
-        item["_lanes"] = list(owners.get(id(rec.get("row")), ()))
+        item["_lanes"] = list(rec["lanes"])
         item["_weak"] = bool(row.get("uncertain")) or row.get("provenance") in WEAK_PROVENANCE
         item["_score"] = _num(row.get("score"))
         item["_cost"] = _num(row.get("cost_usd"))
@@ -270,7 +269,7 @@ def _annotate(effort_rows, lanes_doc, prescreen):
         item["_off_competitor"] = decision.get("competitor") if decision else None
         beaten = [item["_verdicts"][name].get("competitor") for name in item["_off_lanes"]
                   if item["_verdicts"][name].get("source") == row.get("source")]
-        item["_dominated_by"] = beaten[0] if beaten and id(rec.get("row")) in counted else None
+        item["_dominated_by"] = beaten[0] if beaten and id(row) in counted else None
         annotated.append(item)
     return annotated
 
@@ -572,8 +571,11 @@ def plot_data(effort_rows, lanes_doc, prescreen=None, bench=None):
     `_prescreen`'s (evidence, verdicts), built here when not given."""
     if prescreen is None:
         prescreen = _prescreen(lanes_doc, effort_rows)
-    _evidence, proposals = prescreen
-    items = _annotate(effort_rows, lanes_doc, prescreen)
+    return _plot_data(_annotate(effort_rows, lanes_doc, prescreen), lanes_doc, prescreen[1], bench)
+
+
+def _plot_data(items, lanes_doc, proposals, bench=None):
+    """`plot_data` on rows `_annotate` already read."""
     sources = _load_sources()
     described = _load_boards()
     lanes = _lanes(lanes_doc)
@@ -618,11 +620,11 @@ def _script():
     return text
 
 
-def _plots_section(effort_rows, lanes_doc, prescreen, bench=None):
+def _plots_section(effort_rows, items, lanes_doc, proposals, bench=None):
     out = ['<section class="plots">', "<h2>Score against cost</h2>"]
     if effort_rows is None:
         return out + [_missing("Per-effort"), "</section>"]
-    data = plot_data(effort_rows, lanes_doc, prescreen, bench)
+    data = _plot_data(items, lanes_doc, proposals, bench)
     if not data["boards"]:
         return out + ["<p>No per-effort rows.</p>", "</section>"]
     out += ['<p class="lede">Up is better and left is cheaper. The amber line is the best score '
@@ -815,10 +817,7 @@ def _details(summary, count, body):
             "</div>", "</details>"]
 
 
-def _boards_block(effort_rows, lanes_doc, prescreen):
-    if effort_rows is None:
-        return []
-    items = _annotate(effort_rows, lanes_doc, prescreen)
+def _boards_block(items):
     if not items:
         return []
     sources = _load_sources()
@@ -841,14 +840,12 @@ def _boards_block(effort_rows, lanes_doc, prescreen):
     return _details("Each board, model by model", f"{len(boards)} boards", body)
 
 
-def _rows_block(effort_rows, lanes_doc, prescreen):
-    if effort_rows is None:
-        return []
-    items = _annotate(effort_rows, lanes_doc, prescreen)
+def _rows_block(items):
     if not items:
         return []
-    items.sort(key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
-                              r["_lane_model"] is None, _model_key(r), _effort_desc(r.get("effort"))))
+    items = sorted(items, key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
+                                         r["_lane_model"] is None, _model_key(r),
+                                         _effort_desc(r.get("effort"))))
     head = ["source", "benchmark", "version", "published as", "lane model", "effort", "score",
             "cost", "cost basis", "standing", "observed", "provenance", "note"]
     body = ["<p>Where each number came from. A row that names no lane model is the "
@@ -945,16 +942,18 @@ def _effort_of(effort):
 
 
 def _cell_figures(cell):
-    """[(effort or None, value)] from one bench cell, in either shape it has
-    had: one dict carrying `performance` and `effort` (before the attribution
-    fix), or a dict keyed by measured effort with `unknown` a literal key
-    (after it, when a model can hold figures at several efforts on one
-    benchmark). The effort is part of each figure, never a column."""
+    """[(effort or None, value, the Lanes that claim it)] from one bench cell,
+    in either shape it has had: one dict carrying `performance` and `effort`
+    (before the attribution fix), or a dict keyed by measured effort with
+    `unknown` a literal key (after it, when a model can hold figures at several
+    efforts on one benchmark). The effort is part of each figure, never a
+    column, and the Lanes are collect's (`LaneEvidence.records`)."""
     if not isinstance(cell, dict):
         return []
     if "performance" in cell:
-        return [(_effort_of(cell.get("effort")), _num(cell.get("performance")))]
-    figures = [(_effort_of(effort), _num(fig.get("performance")))
+        return [(_effort_of(cell.get("effort")), _num(cell.get("performance")),
+                 list(cell.get("lanes") or ()))]
+    figures = [(_effort_of(effort), _num(fig.get("performance")), list(fig.get("lanes") or ()))
                for effort, fig in cell.items() if isinstance(fig, dict)]
     # most effort first, an unstated effort last
     return sorted(figures, key=lambda f: _effort_desc(f[0]) if f[0] else (2, 0, ""))
@@ -962,16 +961,15 @@ def _cell_figures(cell):
 
 def _figure_cell(entries, model_lanes, model, column_max):
     """One table cell holding every figure for a model on one column. Each
-    figure carries its effort and, when a lane runs the model at that effort,
-    that lane in the title and full ink; otherwise grey, with the reason read
+    figure carries its effort and, when Lanes claim it (collect names them),
+    those Lanes in the title and full ink; otherwise grey, with the reason read
     from the catalog. A bar under each number, scaled to the column's largest
     figure, is what lets two models be compared down a column without
     arithmetic now that the mean-rank columns are gone."""
     if not entries:
         return '<td class="num quiet">—</td>'
     parts = []
-    for effort, value, shown in entries:
-        owners = [n for n, e in model_lanes if bench.effort_attributes(effort, e)]
+    for effort, value, shown, owners in entries:
         width = 0.0 if value is None or not column_max else max(0.0, min(1.0, value / column_max)) * 100
         bar = f'<span class="track"><span class="bar" style="width:{width:.0f}%"></span></span>'
         if owners:
@@ -1020,20 +1018,21 @@ def _scores_block(bench, lanes_doc):
         row = {"model": model, "lanes": model_lanes, "cols": {}}
         for name in epoch_names:
             row["cols"][("epoch", name)] = [
-                (effort, value, f"{value * 100:.1f}" if value is not None else "—")
-                for effort, value in _cell_figures(epoch_cells.get(name))]
+                (effort, value, f"{value * 100:.1f}" if value is not None else "—", owners)
+                for effort, value, owners in _cell_figures(epoch_cells.get(name))]
         if aa_skipped is None:
             aa = rec.get("aa") or {}
             cols = aa.get("cols") or {}
             effort = _effort_of(aa.get("effort"))
+            owners = list(aa.get("lanes") or ())
             for name in aa_names:
                 v = _num(cols.get(name))
                 if v is None:
                     row["cols"][("aa", name)] = []
                     continue
-                row["cols"][("aa", name)] = [(effort, v, fmt_aa_value(v))]
+                row["cols"][("aa", name)] = [(effort, v, fmt_aa_value(v), owners)]
             cost = _num(aa.get("cost_usd"))
-            row["cols"][("aa", AA_COST_COLUMN)] = [] if cost is None else [(effort, cost, fmt_cost(cost))]
+            row["cols"][("aa", AA_COST_COLUMN)] = [] if cost is None else [(effort, cost, fmt_cost(cost), owners)]
         table.append(row)
     # cost per task sits beside the AA scores when the rows carry it
     aa_shown = list(aa_names)
@@ -1042,7 +1041,7 @@ def _scores_block(bench, lanes_doc):
     columns = [("epoch", n) for n in epoch_names] + ([("aa", n) for n in aa_shown] if aa_skipped is None else [])
     column_max = {}
     for key in columns:
-        values = [v for row in table for _e, v, _s in row["cols"].get(key, []) if v is not None]
+        values = [v for row in table for _e, v, _s, _o in row["cols"].get(key, []) if v is not None]
         column_max[key] = max(values) if values else None
 
     head = ["model", "lanes", *epoch_names] + (aa_shown if aa_skipped is None else [])
@@ -1389,6 +1388,9 @@ def render(bench, lanes_doc, effort_rows=None):
     """Return a self-contained HTML document. No network resources."""
     prescreen = _prescreen(lanes_doc, effort_rows)
     _evidence, proposals = prescreen
+    # one annotation of the rows, which the plots, the boards and the rows
+    # tables all draw
+    items = _annotate(effort_rows, lanes_doc, prescreen)
     chunks = [
         "<!DOCTYPE html>",
         '<html lang="en">',
@@ -1404,12 +1406,12 @@ def render(bench, lanes_doc, effort_rows=None):
         "<main>",
     ]
     chunks.extend(_header(lanes_doc, effort_rows, prescreen))
-    chunks.extend(_plots_section(effort_rows, lanes_doc, prescreen, bench))
+    chunks.extend(_plots_section(effort_rows, items, lanes_doc, proposals, bench))
     chunks.extend(_price_section(lanes_doc))
     chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
                "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
-    chunks.extend(_boards_block(effort_rows, lanes_doc, prescreen))
-    chunks.extend(_rows_block(effort_rows, lanes_doc, prescreen))
+    chunks.extend(_boards_block(items))
+    chunks.extend(_rows_block(items))
     chunks.extend(_catalog_block(lanes_doc, proposals))
     chunks.extend(_scores_block(bench, lanes_doc))
     chunks.append("</section>")

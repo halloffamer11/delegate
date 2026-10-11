@@ -675,44 +675,6 @@ record(
     check_catalog_error(catalog.validate_lanes, shared) is None,
 )
 
-# 7.5 resolution: what the pre-screen asks of the catalog
-resolve = lane_evidence.resolve_published_model
-astra = copy.deepcopy(lanes_sample)
-astra["lanes"]["astra-high@codex"] = copy.deepcopy(astra["lanes"]["sol-high@codex"])
-astra["lanes"]["astra-high@codex"]["model"] = "gpt-6-astra"
-astra["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1"]
-cases = (
-    ("GPT-6 Astra", "gpt-6-astra", "a display name differing only in case and separators"),
-    ("gpt-6-astra", "gpt-6-astra", "a slug already in catalog form"),
-    ("GPT-5.6 Sol", "gpt-5.6-sol", "a display name whose dot is a separator"),
-    ("Gemini 3.8 Flash", "gemini-3.8-flash-high", "a lane model carrying an effort suffix"),
-    ("Fable 5.1", "claude-fable-5-1", "a published_as entry"),
-    ("fable  5.1", "claude-fable-5-1", "a published_as entry, loosely typed"),
-    ("GLM-5.3", None, "a model that is nobody's lane"),
-    ("", None, "an empty name"),
-    (None, None, "no name at all"),
-)
-for name, want, tag in cases:
-    got = resolve(name, astra)
-    record(f"7.5 resolve {tag}", got == want, f"{name!r} -> {got!r}, wanted {want!r}")
-
-ambiguous = copy.deepcopy(lanes_sample)
-ambiguous["lanes"]["flash-medium@agy"] = copy.deepcopy(ambiguous["lanes"]["flash-high@agy"])
-ambiguous["lanes"]["flash-medium@agy"]["effort"] = "medium"
-ambiguous["lanes"]["flash-medium@agy"]["model"] = "gemini-3.8-flash-medium"
-record(
-    "7.6 a name two lane models could denote resolves to neither",
-    resolve("Gemini 3.8 Flash", ambiguous) is None,
-    repr(resolve("Gemini 3.8 Flash", ambiguous)),
-)
-record(
-    "7.6b an agy family name resolves by the row's effort, and to neither at an effort no member runs",
-    resolve("Gemini 3.8 Flash", ambiguous, effort="medium") == "gemini-3.8-flash-medium"
-    and resolve("Gemini 3.8 Flash", ambiguous, effort="high") == "gemini-3.8-flash-high"
-    and resolve("Gemini 3.8 Flash", ambiguous, effort="low") is None,
-    repr([resolve("Gemini 3.8 Flash", ambiguous, effort=e) for e in ("medium", "high", "low")]),
-)
-
 # 7.7 A published_as entry may not be pointed at a model another lane runs: the
 #     explicit map is consulted first, so such an entry would silently read that
 #     lane's rows as this one's — its own numbers would then switch it off as
@@ -741,15 +703,6 @@ record(
 )
 
 record(
-    "7.7 an entry the derived rule cannot reach still resolves",
-    resolve("Fable 5.1", {"lanes": {
-        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
-        "b@claude": {"model": "claude-fable-5-1", "effort": "xhigh",
-                     "published_as": ["Fable 5.1"]},
-    }}) == "claude-fable-5-1",
-)
-
-record(
     "7.8 every effort strips as a suffix, longest first",
     [lane_evidence.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]
     == [("m", e) for e in harnesses.EFFORTS]
@@ -758,73 +711,8 @@ record(
     str([lane_evidence.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]),
 )
 
-# The published name is reconciled against the lane's model, reaching past an
-# effort suffix the *catalog* carries (gemini-3.8-flash-high). A suffix on the
-# *published* side is left alone on purpose: a row states its effort in its own
-# field, and reading `gpt-6-astra-max` as plain `gpt-6-astra` would let a name
-# and a field disagree with nobody noticing. The row's own `effort` field is
-# what separates agy family members (7.6b).
-record(
-    "7.8 a suffix on the published side is not silently dropped",
-    resolve("gpt-6-astra-max", {"lanes": {
-        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
-    }}) is None
-    and resolve("Gemini 3.8 Flash", {"lanes": {
-        "a@agy": {"model": "gemini-3.8-flash-high", "effort": "high"},
-    }}) == "gemini-3.8-flash-high",
-)
-
-# 7.9 ticket 19: every Claude name an accepted rows file prints resolves to the
-#     lane model it denotes in a catalog, and a Claude model that is nobody's
-#     lane resolves to none. A new Claude name in the rows fails here until
-#     someone decides which it is. The catalog is machine-local (the user,
-#     2026-09-29), so the repo has none to read: these are its Claude lanes as
-#     they stood that day, one effort each.
-_data_dir = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "..", ".scratch", "delegate-redesign", "_data"))
-# Which model each printed name denotes. What it resolves to is that model while
-# a lane runs it, and nothing once no lane does, so this table follows the
-# catalog through a refresh instead of being rewritten after one (ticket 33).
-_denotes = {
-    "Claude Fable 5.1": "claude-fable-5-1", "Fable 5.1": "claude-fable-5-1",
-    "Claude Fable 5": "claude-fable-5", "Fable 5": "claude-fable-5",
-    "Claude Opus 5": "claude-opus-5", "Opus 5": "claude-opus-5",
-    "claude-opus-5": "claude-opus-5",
-    # "Opus 5.5", the short form, is deliberately absent: the opus55 lanes carry
-    # no `published_as` for it, so it resolves to nothing. No rows file prints it
-    # yet, and the `_seen` check below fails the day one does, which is when
-    # someone has to decide whether the catalog should claim it.
-    "Claude Opus 5.5": "claude-opus-5-5",
-    "Claude Opus 4.8": "claude-opus-4-8", "Opus 4.8": "claude-opus-4-8",
-    "Claude Sonnet 5": "claude-sonnet-5", "Sonnet 5": "claude-sonnet-5",
-    "claude-sonnet-5": "claude-sonnet-5",
-    "Claude Sonnet 4.6": "claude-sonnet-4-6",
-    "Claude 4.5 Haiku": "claude-haiku-4-5-20251001",
-}
-_claude_doc = {"lanes": {
-    "fable-high@claude": {"harness": "claude", "model": "claude-fable-5-1", "effort": "high",
-                          "published_as": ["Fable 5.1"]},
-    "haiku-high@claude": {"harness": "claude", "model": "claude-haiku-4-5-20251001",
-                          "effort": "high", "published_as": ["Claude 4.5 Haiku"]},
-    "sonnet55-high@claude": {"harness": "claude", "model": "claude-sonnet-5-5", "effort": "high"},
-    "opus55-high@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": "high"},
-}}
-_claude_models = {l["model"] for l in _claude_doc["lanes"].values()}
-_claude_names = {n: (m if m in _claude_models else None) for n, m in _denotes.items()}
-_seen = set()
-for _file in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json"):
-    _p = os.path.join(_data_dir, _file)
-    if os.path.isfile(_p):
-        with open(_p, encoding="utf-8") as _f:
-            _seen |= {r["model"] for r in json.load(_f)
-                      if any(w in r["model"].lower() for w in ("claude", "fable", "opus", "sonnet", "haiku"))}
-_wrong = {n: resolve(n, _claude_doc) for n in _claude_names
-          if resolve(n, _claude_doc) != _claude_names[n]}
-record(
-    "7.9 every Claude name in the accepted rows resolves to its lane model, and other versions to none",
-    _seen and _seen <= set(_claude_names) and not _wrong,
-    f"unaccounted={sorted(_seen - set(_claude_names))} wrong={_wrong}",
-)
+# 7.5, 7.6, the 7.7 resolve case, the 7.8 published-suffix case and 7.9 moved to
+# test_lane_evidence (ticket 25): a printed name is identified there.
 
 
 # 8. Ticket 04: Project order is a project-only overlay on global Order.

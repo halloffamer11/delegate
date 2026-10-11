@@ -1121,18 +1121,22 @@ try:
         _packet, AA_ROWS = effort.aa_extract(f.read(), observed="2026-09-11")
     doc = astra_lanes()
     lane_models = {lane["model"] for lane in doc["lanes"].values()}
-    resolved = {(r["model"], lane_evidence.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
-    unmatched = lane_evidence.LaneEvidence(doc, AA_ROWS).unmatched()
+    evidence = lane_evidence.LaneEvidence(doc, AA_ROWS)
+    # each printed name names a Model, and the Model's Lanes run it under every
+    # model string the catalog gives it (agy's `gemini-3.8-flash-high`)
+    named = {(r["model"], tuple(evidence.identify(r["model"])["lane_models"])) for r in AA_ROWS}
+    unmatched = evidence.unmatched()
     w = wizard(lanes=doc, effort_rows=AA_ROWS)
     w.handle("enter")
     w.handle("enter")
     v = w.view()
     off = {row["cells"][1]: why_of(row) for row in v["rows"] if carry_of(row) == "off"}
     record("30 every catalog variant on the AA page resolves; only the strangers go unmatched",
-           {lane for _name, lane in resolved if lane} == lane_models
+           {model for _name, models in named for model in models} == lane_models
            and sorted(unmatched) == ["GPT-5.5", "Grok 4.3"]
+           and sorted(name for name, models in named if not models) == ["GPT-5.5", "Grok 4.3"]
            and "2 benchmarked models have no lane" in v["legend"],
-           f"resolved={sorted(resolved, key=str)} unmatched={unmatched}")
+           f"named={sorted(named, key=str)} unmatched={unmatched}")
     record("30b the AA rows switch off one dominated effort, and the reason names the source",
            off == {"astra-xhigh@codex": "high wins on aa"},
            str(off))

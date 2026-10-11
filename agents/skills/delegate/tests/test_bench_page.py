@@ -372,6 +372,35 @@ try:
 except Exception as e:
     record("the page marks a dominated agy effort the way it marks a codex one", False, repr(e))
 
+try:
+    # agy names the effort in the slug, so the page used to draw each effort as
+    # a model of its own, and the finding lost the step it is about
+    board = board_named(bench_page.plot_data(AGY_SWEEP, AGY_LANES), "B")
+    record("an agy Model's efforts are one sweep, so its finding shows the arithmetic",
+           [p["model"] for p in board["points"]] == ["gemini-3.8-flash", "gemini-3.8-flash"]
+           and "high scores 0.1 less than medium and costs $1 more (+100%)" in board["finding"],
+           f"models={[p['model'] for p in board['points']]} finding={board['finding']!r}")
+except Exception as e:
+    record("an agy Model's efforts are one sweep, so its finding shows the arithmetic", False, repr(e))
+
+try:
+    # the plots, the boards and the rows tables draw one annotation of the rows
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    real_records, calls = bench.evidence_records, []
+
+    def counted(*args, **kwargs):
+        calls.append(args)
+        return real_records(*args, **kwargs)
+
+    bench.evidence_records = counted
+    try:
+        bench_page.render(collected, ASTRA, SWEEP)
+    finally:
+        bench.evidence_records = real_records
+    record("render reads the evidence records once", len(calls) == 1, f"calls={len(calls)}")
+except Exception as e:
+    record("render reads the evidence records once", False, repr(e))
+
 # any-harness ticket 31: Claude Code runs Opus at low to xhigh, agy at low to
 # high. A point both harnesses share is one Lane per harness, each with its own
 # verdict, and the page strikes it only when every Lane on it is off.
@@ -571,13 +600,17 @@ except Exception as e:
            False, repr(e))
 
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
-    doctored = copy.deepcopy(collected)
-    # the source stated no effort: `unknown` is the cell's key, not a value
-    cell = doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"]
-    doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"] = {
-        bench.UNKNOWN_EFFORT: dict(cell[next(iter(cell))])}
-    page = bench_page.render(doctored, LANES, None)
+    with tempfile.TemporaryDirectory() as td:
+        # the source stated no effort for sol on DeepSWE: its model_version has
+        # no `_high`, so `unknown` is the cell's key, and collect gives it no Lane
+        with open(FIXTURE, encoding="utf-8") as f:
+            text = f.read()
+        stated = "0.90,DeepSWE,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,"
+        unstated = os.path.join(td, "unstated.csv")
+        with open(unstated, "w", encoding="utf-8") as f:
+            f.write(text.replace(stated, stated.replace("_high", ""), 1))
+        collected = bench.collect(LANES, epoch_csv=unstated)
+    page = bench_page.render(collected, LANES, None)
     table = page[page.find('<table class="scores">'):]
     sol = table[table.find("gpt-5.6-sol"):table.find("</tr>", table.find("gpt-5.6-sol"))]
     record("an unstated effort is attributed to no lane and says so",
@@ -594,17 +627,20 @@ try:
     collected = bench.collect(LANES, epoch_csv=FIXTURE)
     future = copy.deepcopy(collected)
     sol = future["models"]["gpt-5.6-sol"]
+    # each figure names the Lanes that claim it, as collect gives them
     sol["epoch"]["cells"]["DeepSWE"] = {
-        "high": {"performance": 0.90, "source": "f", "duplicates": 0},
-        "max": {"performance": 0.95, "source": "f", "duplicates": 0},
-        "unknown": {"performance": 0.47, "source": "f", "duplicates": 0},
+        "high": {"performance": 0.90, "source": "f", "duplicates": 0, "lanes": ["sol-high@codex"]},
+        "max": {"performance": 0.95, "source": "f", "duplicates": 0, "lanes": []},
+        "unknown": {"performance": 0.47, "source": "f", "duplicates": 0, "lanes": []},
     }
-    sol["epoch"]["cells"]["FrontierCode"] = {"xhigh": {"performance": 0.5, "source": "f", "duplicates": 0}}
+    sol["epoch"]["cells"]["FrontierCode"] = {"xhigh": {"performance": 0.5, "source": "f", "duplicates": 0,
+                                                       "lanes": []}}
     future["aa_skipped"] = None
     future["aa_columns"] = ["Coding Index"]
     for model, rec in future["models"].items():
         rec["aa"] = {"cols": {"Coding Index": 50.0}, "mean": None, "mean_s": "", "effort": None}
-    sol["aa"] = {"cols": {"Coding Index": 61.0}, "mean": None, "mean_s": "", "effort": "high"}
+    sol["aa"] = {"cols": {"Coding Index": 61.0}, "mean": None, "mean_s": "", "effort": "high",
+                 "lanes": ["sol-high@codex"]}
     future["lanes"] = {"sol-high@codex": {"cells": {}, "mean": 1.0, "mean_s": "1.0 (n=1)", "n": 1}}
     page = bench_page.render(future, LANES, None)
     table = page[page.find('<table class="scores">'):]
@@ -1231,7 +1267,7 @@ try:
          "benchmark": "Nobody's board", "score": 9.0, "cost_usd": 1.0,
          "uncertain": False, "observed": "2026-09-11", "provenance": "unlabelled"},
     ]
-    records = bench.evidence_records(rows, LANES)
+    records = bench.evidence_records(LaneEvidence(LANES, rows))
     page = bench_page.render(None, LANES, rows)
     about = bench.board_about("aa", "AutomationBench")
     tb = bench.board_about("tbench", "Terminal-Bench 4.0")
