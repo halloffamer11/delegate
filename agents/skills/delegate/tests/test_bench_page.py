@@ -34,6 +34,7 @@ REAL_LANES = os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
+import bench_snapshot
 import carry
 import bench_page
 import catalog
@@ -55,6 +56,11 @@ def record(name, ok, detail=""):
     else:
         fails += 1
         print(f"FAIL {name}: {detail}")
+
+
+def epoch_rows_of(path):
+    """The Epoch rows of a CSV, read as the Benchmark snapshot reads a named file."""
+    return bench_snapshot.snapshot((), epoch=bench_snapshot.local(path)).epoch_rows
 
 
 def remote_resource(html):
@@ -152,7 +158,7 @@ SWEEP += [
 
 # --- the basics ------------------------------------------------------------------
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
+    collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
     html = bench_page.render(collected, LANES)
     record("page from epoch fixture",
            "claude-fable-5-1" in html and "DeepSWE" in html and "98.0" in html
@@ -177,7 +183,7 @@ except Exception as e:
     record("page with bench=None names missing data", False, repr(e))
 
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
+    collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
     html = bench_page.render(collected, LANES, EFFORT_ROWS)
     record("page with per-effort rows carries every number and its provenance",
            "unlabelled" in html and "SWE Refactor Bench" in html and "uncertain" in html
@@ -191,7 +197,7 @@ except Exception as e:
 try:
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "bench.html")
-        collected = bench.collect(LANES, epoch_csv=FIXTURE)
+        collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
         returned = bench_page.write(path, collected, LANES, EFFORT_ROWS)
         with open(path, encoding="utf-8") as f:
             text = f.read()
@@ -210,7 +216,7 @@ except Exception as e:
     record("light and dark are both defined, and the toggle wins both ways", False, repr(e))
 
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     page = bench_page.render(collected, ASTRA, SWEEP)
 
     def inside_details(index):
@@ -386,7 +392,7 @@ except Exception as e:
 
 try:
     # the plots, the boards and the rows tables draw one annotation of the rows
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     real_records, calls = bench.evidence_records, []
 
     def counted(*args, **kwargs):
@@ -614,7 +620,7 @@ except Exception as e:
 
 # --- the trap: a per-model score is never a lane's score by default --------------
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     # the fixture measures fable at max; the only fable lane runs xhigh
     page = bench_page.render(collected, ASTRA, SWEEP)
     table = page[page.find('<table class="scores">'):page.find("</table>", page.find('<table class="scores">'))]
@@ -652,7 +658,7 @@ try:
         unstated = os.path.join(td, "unstated.csv")
         with open(unstated, "w", encoding="utf-8") as f:
             f.write(text.replace(stated, stated.replace("_high", ""), 1))
-        collected = bench.collect(LANES, epoch_csv=unstated)
+        collected = bench.collect(LANES, epoch_rows=epoch_rows_of(unstated))
     page = bench_page.render(collected, LANES, None)
     table = page[page.find('<table class="scores">'):]
     sol = table[table.find("gpt-5.6-sol"):table.find("</tr>", table.find("gpt-5.6-sol"))]
@@ -667,7 +673,7 @@ try:
     # the shape after the attribution fix: a cell keyed by measured effort,
     # `unknown` a literal key, several figures on one benchmark, and the AA
     # effort carried through collect()
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
+    collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
     future = copy.deepcopy(collected)
     sol = future["models"]["gpt-5.6-sol"]
     # each figure names the Lanes that claim it, as collect gives them
@@ -912,7 +918,7 @@ except Exception as e:
 
 # --- ticket 26: the page is where tiers are drawn ------------------------------------
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     doc = copy.deepcopy(ASTRA)
     doc["lanes"]["astra-ultra@codex"] = dict(doc["lanes"]["astra-max@codex"], effort="ultra", enabled=False)
     page = bench_page.render(collected, doc, SWEEP)

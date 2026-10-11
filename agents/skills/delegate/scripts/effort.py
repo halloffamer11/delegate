@@ -1359,10 +1359,9 @@ def fetch_page(url):
 
 
 def run_aa(out_dir, url=None, html_file=None, quiet=False):
-    """Read one Artificial Analysis model page, write packet.txt and rows.json,
-    then check them. `html_file` reads a saved page instead of fetching; its
-    `url` is then only what the rows record. `quiet` leaves the lines to a
-    caller that prints its own, as the wizard's refresh does (ticket 33)."""
+    """`effort.py aa`: read one Artificial Analysis model page, from
+    `html_file` or fetched, and accept it into `out_dir` (`aa_accept`).
+    `html_file`'s `url` is then only what the rows record."""
     if html_file:
         try:
             with open(html_file, "rb") as f:
@@ -1372,6 +1371,15 @@ def run_aa(out_dir, url=None, html_file=None, quiet=False):
     else:
         url = url or source_url(AA_SOURCE)
         raw = fetch_page(url)
+    return aa_accept(raw, url, out_dir, quiet=quiet)
+
+
+def aa_accept(raw, url, out_dir, quiet=False):
+    """Extract one Artificial Analysis page's bytes, write packet.txt and
+    rows.json into `out_dir`, then check them into accepted.json and
+    rejected.json. Returns check's (checked, accepted, rejected). The
+    Benchmark snapshot's web adapter calls this on the page it fetched;
+    `quiet` leaves the lines to a caller that prints its own."""
     packet_text, rows = aa_extract(raw, url=url)
     os.makedirs(out_dir, exist_ok=True)
     packet_path = os.path.join(out_dir, "packet.txt")

@@ -312,30 +312,6 @@ def case_effort_rows_says_the_prompt_interface_has_no_prescreen():
                 f"said={said} wrote={wrote} untouched={untouched} stdout={result.stdout[:300]!r}")
 
 
-def case_effort_rows_from_several_files_combine():
-    """--effort-rows may be repeated, so two sources share one benchmark page.
-    Every file's rows arrive in order, and a bad file is named, not skipped."""
-    import setup
-    row = {"source": "t", "model": "gpt-5.6-luna", "effort": "low", "benchmark": "b",
-           "score": 4.0, "cost_usd": 1.7, "uncertain": False}
-    with tempfile.TemporaryDirectory() as td:
-        paths = []
-        for i, source in enumerate(("aa", "tbench")):
-            paths.append(os.path.join(td, f"rows{i}.json"))
-            with open(paths[-1], "w", encoding="utf-8") as f:
-                json.dump([dict(row, source=source)], f)
-        bad = os.path.join(td, "bad.json")
-        with open(bad, "w", encoding="utf-8") as f:
-            json.dump({"not": "a list"}, f)
-        rows, message = setup.load_effort_rows(paths)
-        one, _ = setup.load_effort_rows(paths[0])
-        refused, why = setup.load_effort_rows([paths[0], bad])
-    ok = ([r["source"] for r in rows] == ["aa", "tbench"] and message == ""
-          and [r["source"] for r in one] == ["aa"]
-          and refused is None and bad in why and "expected a JSON list" in why)
-    return ok, f"rows={rows} message={message!r} refused={refused} why={why!r}"
-
-
 def case_plain_prints_the_start_facts():
     """--plain prints what the TUI's start page shows, from the same function:
     both output paths, the benchmark page line, where the benchmark rows came
@@ -344,6 +320,7 @@ def case_plain_prints_the_start_facts():
     import discover
     import setup
     import setup_tui
+    from types import SimpleNamespace
     fixture_dir = os.path.join(HERE, "fixtures", "discover")
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
@@ -354,7 +331,9 @@ def case_plain_prints_the_start_facts():
         refreshed, refresh = discover.refresh_catalog(
             sample_proposal(harnesses.NAMES), saved
         )
-        _paths, rows_note = setup.refresh_effort_rows(None, fixture_dir=fixture_dir)
+        rows_note = setup.read_benchmarks(SimpleNamespace(
+            no_discover=False, fixture_dir=fixture_dir, epoch_csv=None, no_bench=True,
+            effort_rows=None)).note
         result = subprocess.run(
             [sys.executable, SETUP_PY, "--config-dir", cfg, "--discover-json", discover_path,
              "--fixture-dir", fixture_dir, "--no-bench", "--plain"],
@@ -368,6 +347,7 @@ def case_plain_prints_the_start_facts():
         ok = (result.returncode == 0 and len(facts) >= 4
               and all(0 <= p < first_prompt for p in positions)
               and "Benchmark page: (not written)" in result.stdout
+              and rows_note.startswith("Benchmark rows: AA skipped, Epoch skipped; ")
               and any(line.startswith(("Model discovery", "Models with no lane", "Lanes with retired", "Harness "))
                       for line in facts)
               and "Tier is capability" not in result.stdout)
@@ -531,6 +511,7 @@ def case_harness_error_keeps_existing_lanes():
 
 def case_plain_collects_bench_in_process():
     """Plain setup renders collect() in process; it does not spawn bench.py."""
+    import bench_snapshot
     import setup
     fixture = os.path.join(HERE, "fixture", "bench-epoch.csv")
     spawned = []
@@ -551,7 +532,8 @@ def case_plain_collects_bench_in_process():
     real_print = builtins.print
     builtins.print = capture
     try:
-        setup.show_bench(Args(), sample_proposal(harnesses.NAMES), routing_sample)
+        setup.show_bench(Args(), sample_proposal(harnesses.NAMES), routing_sample,
+                         bench_snapshot.snapshot((), epoch=bench_snapshot.local(fixture)))
     finally:
         builtins.print = real_print
     text = "\n".join(buf)
@@ -639,127 +621,13 @@ def refresh_fixture():
     return frozen, refreshed, plan
 
 
-def write_rows(path, source, model):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump([{"source": source, "model": model, "benchmark": "b", "score": 1}], f)
-    return path
-
-
-def case_a_fresh_fetch_is_not_fetched_again():
-    """A fetch from the last 24 hours stands in for a new one, and the rows it
-    holds replace the repo's Artificial Analysis rows (ticket 33)."""
-    import setup
-    with tempfile.TemporaryDirectory() as td:
-        cache = os.path.join(td, "aa")
-        os.makedirs(cache)
-        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.7")
-        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
-        tbench = write_rows(os.path.join(td, "repo-tbench.json"), "tbench", "Grok 4.6")
-        calls = []
-        paths, note = setup.refresh_effort_rows(
-            [repo_aa, tbench], cache_dir=cache, fetch=lambda *a, **k: calls.append(a)
-        )
-        ok = paths == [accepted, tbench] and calls == [] and "0h ago" in note
-        return ok, f"paths={paths} calls={calls} note={note!r}"
-
-
-def case_a_stale_fetch_is_fetched_again():
-    """A cache older than 24 hours is fetched again, into the same directory."""
-    import setup
-    with tempfile.TemporaryDirectory() as td:
-        cache = os.path.join(td, "aa")
-        os.makedirs(cache)
-        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.6")
-        old = time.time() - 48 * 60 * 60
-        os.utime(accepted, (old, old))
-        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
-        calls = []
-
-        def fetch(out_dir, **kwargs):
-            calls.append(out_dir)
-            write_rows(os.path.join(out_dir, "accepted.json"), "aa", "Grok 4.7")
-
-        paths, note = setup.refresh_effort_rows([repo_aa], cache_dir=cache, fetch=fetch)
-        rows, _message = setup.load_effort_rows(paths)
-        ok = (calls == [cache] and paths == [accepted]
-              and rows == [{"source": "aa", "model": "Grok 4.7", "benchmark": "b", "score": 1}]
-              and "fetched just now" in note)
-        return ok, f"paths={paths} calls={calls} note={note!r}"
-
-
-def case_a_failed_fetch_keeps_the_repo_rows():
-    """A leaderboard that is down never stops a catalog edit: the repo's rows
-    stand, and the start page carries the reason."""
-    import setup
-    with tempfile.TemporaryDirectory() as td:
-        cache = os.path.join(td, "aa")
-        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
-
-        def fetch(out_dir, **kwargs):
-            raise RuntimeError("the page could not be read")
-
-        paths, note = setup.refresh_effort_rows([repo_aa], cache_dir=cache, fetch=fetch)
-        ok = (paths == [repo_aa] and "repo rows" in note
-              and "the page could not be read" in note)
-        return ok, f"paths={paths} note={note!r}"
-
-
-def case_a_forced_fetch_passes_a_fresh_cache():
-    """The harnesses page's `r` asks for the rows as they are now: `force`
-    fetches even when the cache is under 24 hours old, into the same
-    directory, and the note says so."""
-    import setup
-    with tempfile.TemporaryDirectory() as td:
-        cache = os.path.join(td, "aa")
-        os.makedirs(cache)
-        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.6")
-        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
-        calls = []
-
-        def fetch(out_dir, **kwargs):
-            calls.append(out_dir)
-            write_rows(os.path.join(out_dir, "accepted.json"), "aa", "Grok 4.7")
-
-        paths, note = setup.refresh_effort_rows([repo_aa], cache_dir=cache, fetch=fetch, force=True)
-        rows, _message = setup.load_effort_rows(paths)
-        ok = (calls == [cache] and paths == [accepted]
-              and rows == [{"source": "aa", "model": "Grok 4.7", "benchmark": "b", "score": 1}]
-              and "fetched just now" in note)
-        return ok, f"paths={paths} calls={calls} note={note!r}"
-
-
-def case_a_failed_forced_fetch_keeps_the_launch_rows():
-    """The harnesses page's `r` passes the paths launch used: a forced fetch
-    that fails keeps those rows, the cache launch read, and not the repo's
-    older ones, and the note says so (wizard-design 01)."""
-    import setup
-    with tempfile.TemporaryDirectory() as td:
-        cache = os.path.join(td, "aa")
-        os.makedirs(cache)
-        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.7")
-        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
-        tbench = write_rows(os.path.join(td, "repo-tbench.json"), "tbench", "Grok 4.6")
-        launch, _note = setup.refresh_effort_rows([repo_aa, tbench], cache_dir=cache)
-
-        def fetch(out_dir, **kwargs):
-            raise RuntimeError("the page could not be read")
-
-        paths, note = setup.refresh_effort_rows([repo_aa, tbench], cache_dir=cache, fetch=fetch,
-                                                force=True, fallback=launch)
-        rows, _message = setup.load_effort_rows(paths)
-        ok = (launch == [accepted, tbench] and paths == launch
-              and rows[0]["model"] == "Grok 4.7"
-              and "rows launch used" in note and "the page could not be read" in note
-              and "repo rows" not in note)
-        return ok, f"paths={paths} note={note!r}"
-
-
 def case_the_save_after_a_rescan_uses_the_rescans_plan():
     """The TUI save writes and removes the agent files from the plan the
     wizard holds, which `r` replaced: launch here found no models, so its
     plan was none, and the rescan's plan adds the opus55 lanes and
     supersedes the opus ones (wizard-design 01)."""
     import io
+    import bench_snapshot
     import setup
     import setup_tui
     real_scan, real_run, real_agents = setup.scan, setup_tui.run_curses, setup.native_targets
@@ -768,11 +636,11 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
     aa = os.path.join(REFRESH_DIR, "aa-accepted.json")
     seen = []
 
-    def scan(args, lanes_doc, force=False, fallback=None):
-        seen.append((force, fallback))
+    def scan(args, lanes_doc, force=False):
+        seen.append(force)
         if not force:
-            return (set(harnesses.NAMES), "probe failed", setup.load_effort_rows([aa]), "", [aa])
-        return real_scan(args, lanes_doc, force=force, fallback=fallback)
+            return set(harnesses.NAMES), "probe failed", bench_snapshot.snapshot([aa])
+        return real_scan(args, lanes_doc, force=force)
 
     def run_curses(wizard):
         wizard.handle("enter")
@@ -812,7 +680,7 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
             catalog.CONFIG_DIR = real_config
             sys.stdin, sys.stdout = real_in, real_out
         written = sorted(os.listdir(agents))
-        ok = (code == 0 and seen[0] == (False, None) and seen[1] == (True, [aa])
+        ok = (code == 0 and seen[0] is False and seen[1] is True
               and str(seen[2]).startswith("Rescanned at ")
               and written == sorted(f"lane-opus55-{e}.md"
                                     for e in ("low", "medium", "high", "xhigh", "max")))
@@ -831,19 +699,19 @@ def case_scan_and_propose_are_the_launch_steps():
     args = SimpleNamespace(discover_json=None, no_discover=False, fixture_dir=REFRESH_DIR,
                            effort_rows=[os.path.join(REFRESH_DIR, "aa-accepted.json")],
                            no_bench=True, epoch_csv=None)
-    discovered, data, rows, note, paths = setup.scan(args, copy.deepcopy(frozen), force=True)
-    doc, plan_again, mapped = setup.propose_generation(copy.deepcopy(frozen), data, rows)
-    skipped = setup.propose_generation(copy.deepcopy(frozen), "probe failed", rows)
+    discovered, data, snap = setup.scan(args, copy.deepcopy(frozen), force=True)
+    doc, plan_again, mapped = setup.propose_generation(copy.deepcopy(frozen), data, snap.effort_rows)
+    skipped = setup.propose_generation(copy.deepcopy(frozen), "probe failed", snap.effort_rows)
     # the refresh fixture predates Kiro, so its machine has no Kiro listing
     ok = (discovered == set(harnesses.NAMES) - {"kiro"} and isinstance(data, dict)
-          and note.startswith("Benchmark rows: Artificial Analysis from ")
-          and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
-          and rows[1] == "" and len(rows[0]) > 0
+          and snap.note.startswith("Benchmark rows: AA read from aa-accepted.json")
+          and snap.origins["aa"].path == os.path.join(REFRESH_DIR, "aa-accepted.json")
+          and snap.errors == () and len(snap.effort_rows) > 0
           and doc == refreshed and plan_again.pop("queued") == [] and plan_again.pop("applied") == [] and plan_again == plan
           and mapped == discover.map_lanes(data, doc)
           and skipped == (frozen, None, "probe failed")
-          and setup.collect_bench(args, doc, rows[0]) == (None, ""))
-    return ok, f"note={note!r} new={len(plan_again['new'])} removed={len(plan_again['removed'])}"
+          and setup.collect_bench(args, doc, snap) is None)
+    return ok, f"note={snap.note!r} new={len(plan_again['new'])} removed={len(plan_again['removed'])}"
 
 
 def case_native_agent_files_follow_the_claude_lanes():
@@ -980,9 +848,8 @@ def case_the_refreshed_rows_reach_the_new_lanes():
     import bench
     _frozen, refreshed, _plan = refresh_fixture()
     rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
-    # the Epoch fixture, so the case never reaches the web (until H1's epoch_rows)
-    data = bench.collect(refreshed, epoch_csv=os.path.join(HERE, "fixture", "bench-epoch.csv"),
-                         effort_rows=rows)
+    # no Epoch rows: collect acquires nothing, so the case never reaches the web
+    data = bench.collect(refreshed, epoch_rows=None, effort_rows=rows)
     lanes = data["lanes"]
 
     def columns(name):
@@ -996,6 +863,138 @@ def case_the_refreshed_rows_reach_the_new_lanes():
           and not columns("sol6-high@codex") and not columns("pro31-high@agy")
           and not columns("grok47fast-high@grok"))
     return ok, f"opus55={columns('opus55-high@claude')} grok47={columns('grok47-high@grok')}"
+
+
+EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
+# Every proxy variable at a closed local port: a run that reaches the web fails.
+OFFLINE = {name: "http://127.0.0.1:9" for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")}
+OFFLINE.update(no_proxy="127.0.0.1,localhost", NO_PROXY="127.0.0.1,localhost")
+
+# Runs setup.main in a fresh process (so HOME is the temp one before any
+# import), with urlopen serving the saved Artificial Analysis page and Epoch
+# CSV and logging each URL, and a terminal that presses enter, then r, then
+# quits. Prints {"code", "opened"} on its last line.
+RESCAN_DRIVER = r'''
+import io, json, sys, urllib.request
+scripts, page, epoch_csv, epoch_url = sys.argv[1:5]
+sys.path.insert(0, scripts)
+served = {"page": open(page, "rb").read(), "epoch": open(epoch_csv, "rb").read()}
+opened = []
+
+
+class Response(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def urlopen(request, *args, **kwargs):
+    url = getattr(request, "full_url", request)
+    opened.append(url)
+    return Response(served["epoch"] if url == epoch_url else served["page"])
+
+
+urllib.request.urlopen = urlopen
+import setup
+import setup_tui
+
+
+def run_curses(wizard):
+    wizard.handle("enter")
+    wizard.handle("r")
+    return None
+
+
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+setup_tui.run_curses = run_curses
+real_out = sys.stdout
+sys.stdin, sys.stdout = Terminal(), Terminal()
+code = setup.main(sys.argv[5:])
+sys.stdout = real_out
+print(json.dumps({"code": code, "opened": opened}))
+'''
+
+
+def case_a_rescan_opens_the_epoch_url_once():
+    """`r` renews the Artificial Analysis rows and reads Epoch from the cache
+    launch wrote: the Epoch URL is opened once, at launch, and the AA URL
+    twice (H1). Every `r` used to fetch Epoch live, on the main thread."""
+    import discover
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+    with tempfile.TemporaryDirectory() as td:
+        home, cfg = os.path.join(td, "home"), os.path.join(td, "config")
+        os.makedirs(home)
+        os.makedirs(cfg)
+        shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(cfg, "lanes.json"))
+        catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
+        saved = os.path.join(td, "discovery.json")
+        catalog.write_json(saved, discover.discover(frozen, fixture_dir=REFRESH_DIR))
+        result = subprocess.run(
+            [sys.executable, "-c", RESCAN_DRIVER, DELEGATE_DIR,
+             os.path.join(HERE, "fixtures", "real_aa_model_page_sample.html"),
+             os.path.join(HERE, "fixture", "bench-epoch.csv"), EPOCH_URL,
+             "--config-dir", cfg, "--discover-json", saved,
+             "--effort-rows", os.path.join(REFRESH_DIR, "aa-accepted.json")],
+            capture_output=True, text=True, env=dict(os.environ, HOME=home, **OFFLINE))
+        try:
+            report = json.loads(result.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            report = {}
+        opened = report.get("opened") or []
+        others = [url for url in opened if url != EPOCH_URL]
+        ok = (result.returncode == 0 and report.get("code") == 0
+              and opened.count(EPOCH_URL) == 1 and opened[:2].count(EPOCH_URL) == 1
+              and len(others) == 2 and len(set(others)) == 1)
+        return ok, f"opened={opened} code={report.get('code')} stderr={result.stderr[-600:]!r}"
+
+
+def case_a_fixture_run_reaches_no_url():
+    """`--fixture-dir` and `--no-discover` both promise no network. Under a
+    closed proxy, each plain run renders the Artificial Analysis table from
+    the named rows, says Epoch is skipped, and the start facts say why (H1).
+    Both used to fetch Epoch, and an unreadable Epoch threw the AA table away."""
+    import discover
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+    aa = os.path.join(REFRESH_DIR, "aa-accepted.json")
+    runs = {}
+    with tempfile.TemporaryDirectory() as td:
+        home = os.path.join(td, "home")
+        os.makedirs(home)
+        saved = os.path.join(td, "discovery.json")
+        catalog.write_json(saved, discover.discover(frozen, fixture_dir=REFRESH_DIR))
+        for label, flags in (("fixture", ["--fixture-dir", REFRESH_DIR]),
+                             ("no-discover", ["--no-discover", "--discover-json", saved])):
+            cfg = os.path.join(td, label)
+            os.makedirs(cfg)
+            shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(cfg, "lanes.json"))
+            catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
+            runs[label] = subprocess.run(
+                [sys.executable, SETUP_PY, "--config-dir", cfg, *flags,
+                 "--effort-rows", aa, "--plain"],
+                # a blank line keeps each default, and the last one declines the write
+                input="\n" * 400, capture_output=True, text=True, cwd=DELEGATE_DIR,
+                env=dict(os.environ, HOME=home, **OFFLINE))
+        cache_touched = os.listdir(home)
+    problems = []
+    for label, result in runs.items():
+        out = result.stdout
+        start = out[:out.find("tier [")]
+        rows_line = next((line for line in start.splitlines() if line.startswith("Benchmark rows:")), "")
+        aa_section = out[out.find("## Artificial Analysis"):] if "## Artificial Analysis" in out else ""
+        if not (result.returncode == 0
+                and "bench: cannot read Epoch CSV" not in out
+                and "| Lane(s) | Model | Effort |" in aa_section
+                and "Epoch AI: skipped" in out
+                and "Epoch skipped; Epoch: " in rows_line):
+            problems.append(f"{label}: code={result.returncode} rows_line={rows_line!r} "
+                            f"stdout={out[:900]!r} stderr={result.stderr[-300:]!r}")
+    return not problems and cache_touched == [], f"{problems} home={cache_touched}"
 
 
 def case_no_discover_fetches_no_rows():
@@ -1056,11 +1055,6 @@ for name, case in (
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
     ("tiers-from with an unreadable file writes nothing", case_tiers_from_unreadable_file_writes_nothing),
     ("plain prints the start facts", case_plain_prints_the_start_facts),
-    ("a fresh fetch is not fetched again", case_a_fresh_fetch_is_not_fetched_again),
-    ("a stale fetch is fetched again", case_a_stale_fetch_is_fetched_again),
-    ("a failed fetch keeps the repo rows", case_a_failed_fetch_keeps_the_repo_rows),
-    ("a forced fetch passes a fresh cache", case_a_forced_fetch_passes_a_fresh_cache),
-    ("a failed forced fetch keeps the launch rows", case_a_failed_forced_fetch_keeps_the_launch_rows),
     ("the save after a rescan uses the rescan's plan",
      case_the_save_after_a_rescan_uses_the_rescans_plan),
     ("scan and propose are the launch steps", case_scan_and_propose_are_the_launch_steps),
@@ -1071,9 +1065,10 @@ for name, case in (
     ("the real layout saves the agent files", case_the_real_layout_saves_the_agent_files),
     ("a template change reaches the placed lanes", case_a_template_change_reaches_the_placed_lanes),
     ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
+    ("a rescan opens the Epoch URL once", case_a_rescan_opens_the_epoch_url_once),
+    ("a fixture run reaches no URL", case_a_fixture_run_reaches_no_url),
     ("no-discover fetches no rows", case_no_discover_fetches_no_rows),
     ("plain prints the refresh change lines", case_plain_prints_the_refresh_change_lines),
-    ("effort rows from several files combine", case_effort_rows_from_several_files_combine),
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),
     ("subset filters lanes and meters", case_subset_filters_lanes_and_meters),
     ("existing values are prompt defaults", case_existing_values_are_prompt_defaults),

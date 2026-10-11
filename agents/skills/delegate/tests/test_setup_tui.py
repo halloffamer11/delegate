@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pty
+import shutil
 import struct
 import subprocess
 import sys
@@ -29,6 +30,7 @@ FIXTURES_DISCOVER = os.path.join(FIXTURES, "discover")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
+import bench_snapshot
 import carry
 import catalog
 import lane_evidence
@@ -55,8 +57,13 @@ def record(name, ok, detail=""):
         print(f"FAIL {name}: {detail}")
 
 
+def epoch_rows_of(path):
+    """The Epoch rows of a CSV, read as the Benchmark snapshot reads a named file."""
+    return bench_snapshot.snapshot((), epoch=bench_snapshot.local(path)).epoch_rows
+
+
 def data():
-    return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE)
+    return bench.collect(copy.deepcopy(LANES), epoch_rows=epoch_rows_of(FIXTURE))
 
 
 def wizard(bench_data=True, message="", effort_rows=None, lanes=None, discovery=None,
@@ -158,7 +165,7 @@ try:
     collected = data()
     record("collect returns documented keys",
            set(collected) == {"models", "lanes", "epoch_benchmarks", "aa_columns",
-                              "aa_skipped", "notes"}, str(sorted(collected)))
+                              "aa_skipped", "epoch_skipped", "notes"}, str(sorted(collected)))
 except Exception as e:
     record("collect returns documented keys", False, repr(e))
 
@@ -2367,6 +2374,50 @@ try:
            repr(body))
 except Exception as e:
     record("63 the start page states the refresh", False, repr(e))
+
+
+try:
+    # H1: the rows line is the Benchmark snapshot's, and names both sources on
+    # one line. At 80 columns both stay in sight even when a fetch failed: the
+    # sources come first and the reasons after them.
+    with tempfile.TemporaryDirectory() as td:
+        def seeded(age):
+            cache = os.path.join(td, str(age))
+            os.makedirs(os.path.join(cache, "aa"))
+            os.makedirs(os.path.join(cache, "epoch"))
+            with open(os.path.join(cache, "aa", "accepted.json"), "w", encoding="utf-8") as f:
+                json.dump([{"source": "aa", "model": "Grok 4.6", "benchmark": "b", "score": 1}], f)
+            shutil.copy(FIXTURE, os.path.join(cache, "epoch", "eci_benchmarks.csv"))
+            then = time.time() - age * 3600
+            for name in ("aa/accepted.json", "epoch/eci_benchmarks.csv"):
+                os.utime(os.path.join(cache, name), (then, then))
+            return cache
+
+        def refused(url):
+            raise OSError(f"{url}: cannot fetch: <urlopen error [Errno 111] Connection refused>")
+
+        def start_body(cache, renew=False):
+            source = bench_snapshot.web(cache_dir=cache, get=refused)
+            snap = bench_snapshot.snapshot((), aa=source, epoch=source, renew=renew)
+            w = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, DISCOVERED,
+                       "/tmp/lanes.json", "/tmp/routing.json", "", rows_note=snap.note)
+            return w.view(80)["body"]
+
+        fresh = start_body(seeded(3))
+        stale = start_body(seeded(30))
+        bare = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, DISCOVERED,
+                      "/tmp/lanes.json", "/tmp/routing.json", "").view(80)["body"]
+        rows_lines = [line for line in fresh + stale if line.startswith("Benchmark rows:")]
+    record("63e the start page names both benchmark sources on one rows line, at 80 columns",
+           "Benchmark rows: AA fetched 3h ago, Epoch fetched 3h ago" in fresh
+           and any(line.startswith("Benchmark rows: AA fetched 30h ago, "
+                                   "Epoch fetched 30h ago; ") for line in stale)
+           and len(rows_lines) == 2 and all(len(line) < 80 for line in rows_lines)
+           and len(fresh) == len(stale) == len(bare) + 1,
+           repr((fresh, stale)))
+except Exception as e:
+    record("63e the start page names both benchmark sources on one rows line, at 80 columns",
+           False, repr(e))
 
 
 try:

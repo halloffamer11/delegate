@@ -166,8 +166,25 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   figures, from one `LaneEvidence` for the Epoch rows and one for the accepted rows: `models` (the
   records of each catalog model's `model_key`, its Model at any effort, for comparing against
   models nobody runs; each figure names the Lanes that claim it) and `lanes` (each Lane's
-  `lane_rows`, with `mean`/`n` over those). Its signature stays
-  `collect(lanes_doc, epoch_csv=None, effort_rows=None)`.
+  `lane_rows`, with `mean`/`n` over those). `collect(lanes_doc, epoch_rows=None, effort_rows=None)`
+  takes rows and acquires nothing; with no Epoch rows it keeps every AA column and reports Epoch
+  skipped (`epoch_skipped`). The report still reads Epoch from `--epoch-csv` or a fetch on every run
+  (`load_epoch`, through the snapshot's parser).
+- `scripts/bench_snapshot.py`: the Benchmark snapshot, the one place benchmark rows are acquired.
+  `snapshot(row_files, aa=, epoch=, renew=)` takes one adapter per source: `web()` (the web through
+  the cache), `fixture(dir)` (`aa-accepted.json` and `epoch.csv`) or `local(path)` (one named file).
+  It returns the accepted rows, with the AA adapter's rows in place of the named AA rows, the Epoch
+  rows (each keeping `model` and `slug` for `LaneEvidence`), each source's `Origin` (fetched, cache,
+  file, rows or none, with its age and why it is not fresh), `errors` (one line per named input that
+  could not be read; a bad accepted-rows input refuses every accepted row) and `note`, the start
+  page's rows line. It never raises for a source, and `load_effort_rows` is the one accepted-rows
+  reader. The cache is `~/.cache/delegate/bench/`: `aa/` exactly as `effort.py aa` writes it and
+  `epoch/eci_benchmarks.csv` as served. Each artifact is fresh for 24 hours after its mtime; a fetch
+  writes into a temporary directory beside the source's and moves the artifact in last, only after
+  it parsed (`effort.aa_accept` extracted and checked it, or the CSV's header matched); a failed
+  fetch keeps the newest copy on hand, whatever its age, before the named rows. `renew` (the `r`
+  key) refetches AA only. `fixture` and `local` open no URL and never touch the cache. It imports
+  `effort` and nothing that routes; `effort.fetch_page` is still the one function that opens a URL.
   Display order lives beside `collect` (`group_lanes`,
   `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
   `scripts/carry.py` (ticket 27): `beats()` and `decisions(lanes_doc, evidence)`, which returns
@@ -213,7 +230,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   shows what the launch scrub found — per harness its status, models listed, and the Lanes the
   refresh adds and removes — with the rows note, and `r` runs the scrub again through `setup.scan`,
   `setup.propose_generation` and `setup.collect_bench` (the callback `main` passes as `rescan`,
-  forcing the rows fetch past the 24 h cache), after which `Wizard._load` derives every later page
+  renewing the Artificial Analysis rows past the 24 h cache and reading Epoch from it), after which `Wizard._load` derives every later page
   again and the `--tiers-from` lines are applied again; it is offered on that page only, before any
   decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
@@ -287,13 +304,17 @@ review order; nothing is written before the confirm page's `y`. Switching the be
 `routing.json` edit.
 
 At start the wizard refreshes itself, so one command is one command (ticket 33).
-`setup.refresh_effort_rows` fetches the Artificial Analysis rows in process through
-`effort.run_aa` into `~/.cache/delegate/bench/aa/`, reuses a fetch under 24 hours
-old, and on a failure keeps the repo's rows with the reason in the line it returns;
-the fetched file replaces the AA file in the `--effort-rows` list, Terminal-Bench
-stays on the repo's rows, and `--fixture-dir` reads `aa-accepted.json` beside the
-harness fixtures instead, so a test touches no network and no cache. The fetch runs
-in a thread beside the harness probes. `discover.refresh_catalog` then proposes the
+`setup.scan` reads one Benchmark snapshot (`setup.read_benchmarks`) on a thread beside the harness
+probes and returns `(discovered, discovery_data, snapshot)`; launch, the `r` rescan, the plain
+report (`show_bench`), `collect_bench` and `propose_generation` read it. A live run reads both
+sources through the cache (`web()`); `--fixture-dir` reads `aa-accepted.json` and `epoch.csv`
+beside the harness fixtures; `--no-discover` reads only named files; `--epoch-csv` names Epoch's
+file, and `--no-bench` reads no Epoch. The fetched AA rows replace only the named AA rows, so
+Terminal-Bench stays on the repo's rows. `r` renews AA and reads Epoch from the cache launch
+wrote, and a renew that fails keeps the rows launch read. The start page's rows line is the
+snapshot's `note`: both sources on one line, where each came from, then why either is not
+fresh; its `errors` join the TUI's first message, and `--plain` prints them.
+`discover.refresh_catalog` then proposes the
 current generation in memory and `setup_tui.refresh_lines` states it on the start
 page, one line per model. The save writes the agent file of each new native lane, for every profile
 that
@@ -381,7 +402,8 @@ down one Tier; Tier 1 requires Carry to switch off.
   otherwise auto-reject the approval an MCP tool call raises.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out
   of the relay's final message.
-- `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in
+- `tests/`: one test file per script, stdlib only, no network (`make test` points every proxy
+  variable at a closed local port, so a test that reaches the web fails); `tests/fake-ads/relay.mjs` stands in
   for the relays. Each script first moves to a fresh temporary directory with no Git root above it,
   so the invoking checkout's own `.delegate/routing.json` never reaches a test.
 - `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate

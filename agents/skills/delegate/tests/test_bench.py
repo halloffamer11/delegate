@@ -22,6 +22,7 @@ EPOCH_FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench  # noqa: E402  (after sys.path, as the other test files do)
+import bench_snapshot  # noqa: E402
 from lane_evidence import LaneEvidence  # noqa: E402
 import carry  # noqa: E402
 import harnesses  # noqa: E402
@@ -43,6 +44,11 @@ def record(name, ok, detail=""):
     else:
         fails += 1
         print(f"FAIL {name}: {detail}")
+
+
+def epoch_rows_of(path):
+    """The Epoch rows of a CSV, read as the Benchmark snapshot reads a named file."""
+    return bench_snapshot.snapshot((), epoch=bench_snapshot.local(path)).epoch_rows
 
 
 def write_epoch_csv(path, rows):
@@ -478,7 +484,7 @@ with tempfile.TemporaryDirectory() as td:
         epoch_row("gpt-6-astra", "max", "FrontierCode", "0.66", "alpha", "GPT-6 Astra"),
         epoch_row("gpt-5.6-sol", "high", "DeepSWE", "0.90", "alpha", "GPT-5.6 Sol"),
     ])
-    data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv)
+    data = bench.collect(ATTRIB_LANES, epoch_rows=epoch_rows_of(attrib_csv))
     cell = data["models"]["gpt-6-astra"]["epoch"]["cells"]["DeepSWE"]
     lanes = data["lanes"]
 
@@ -538,7 +544,7 @@ with tempfile.TemporaryDirectory() as td:
         aa_row("GPT-6 Astra", "high", "Terminal-Bench 2.1", 0.88, 2.20),
         aa_row("GPT-5.6 Sol", None, "Terminal-Bench 2.1", 0.80, 0.81),
     ]
-    aa_data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, effort_rows=attrib_rows)
+    aa_data = bench.collect(ATTRIB_LANES, epoch_rows=epoch_rows_of(attrib_csv), effort_rows=attrib_rows)
     aa_lanes = aa_data["lanes"]
 
     record(
@@ -570,7 +576,7 @@ with tempfile.TemporaryDirectory() as td:
     )
 
     # a column no lane has a figure for is not a column
-    shown = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, effort_rows=[
+    shown = bench.collect(ATTRIB_LANES, epoch_rows=epoch_rows_of(attrib_csv), effort_rows=[
         aa_row("GPT-6 Astra", "max", "Terminal-Bench 2.1", 0.92, 3.10),
         aa_row("GPT-6 Astra", "xhigh", "IFBench", 0.70, 2.90),
     ])
@@ -587,7 +593,7 @@ with tempfile.TemporaryDirectory() as td:
         "flash-medium@agy": {"harness": "agy", "model": "gemini-3.8-flash-medium", "effort": "medium",
                              "tier": 1, "meter": "agy-gemini"},
     }}
-    agy_data = bench.collect(agy_lanes, epoch_csv=attrib_csv, effort_rows=[
+    agy_data = bench.collect(agy_lanes, epoch_rows=epoch_rows_of(attrib_csv), effort_rows=[
         aa_row("Gemini 3.8 Flash", "high", "Terminal-Bench 2.1", 0.60, 0.30),
         aa_row("Gemini 3.8 Flash", "medium", "Terminal-Bench 2.1", 0.50, 0.20),
     ])
@@ -622,7 +628,7 @@ try:
             path = os.path.join(td, f"{len(seen)}.csv")
             write_epoch_csv(path, [epoch_row("claude-fable-5-1-20260901", "high", "DeepSWE", "0.61",
                                              "alpha", display)])
-            data = bench.collect(doc, epoch_csv=path)
+            data = bench.collect(doc, epoch_rows=epoch_rows_of(path))
             view = bench.inspect_model("claude-fable-5-1", doc, epoch_csv=path)
             cell = data["lanes"]["fable-high@claude"]["cells"].get("DeepSWE") or {}
             seen[tag] = (cell.get("performance"),
@@ -939,7 +945,7 @@ except Exception as e:
            False, repr(e))
 
 try:
-    data = bench.collect(OPUS_TWO_HARNESSES, epoch_csv=EPOCH_FIXTURE, effort_rows=OPUS_ROWS)
+    data = bench.collect(OPUS_TWO_HARNESSES, epoch_rows=epoch_rows_of(EPOCH_FIXTURE), effort_rows=OPUS_ROWS)
     cols = {name: (rec["aa"] or {}).get("cols") for name, rec in data["lanes"].items()}
     agy_model = data["models"]["claude-opus-5-5-high"]["aa"]
     record(
@@ -978,7 +984,7 @@ try:
     with tempfile.TemporaryDirectory() as td:
         csv_path = os.path.join(td, "epoch.csv")
         write_epoch_csv(csv_path, [epoch_row("gpt-6-astra", "high", "DeepSWE", "0.58")])
-        data = bench.collect(ATTRIB_LANES, epoch_csv=csv_path)
+        data = bench.collect(ATTRIB_LANES, epoch_rows=epoch_rows_of(csv_path))
         text = bench.format_collection(data)
     record(
         "collect does not build a discarded display table; markdown is rendered later",
