@@ -16,6 +16,8 @@ SKILL = os.path.dirname(HERE)
 REPORT = os.path.abspath(os.path.join(SKILL, "scripts", "report.py"))
 SAMPLES = os.path.abspath(os.path.join(SKILL, "assets", "samples"))
 sys.path.insert(0, os.path.join(SKILL, "scripts"))
+import catalog  # noqa: E402
+import rank  # noqa: E402
 import usage  # noqa: E402
 fails = []
 
@@ -494,6 +496,57 @@ with tempfile.TemporaryDirectory() as tmp:
           any("luna-low" in l and "needs 0.96 (+0.26)" in l for l in pp), out_pp)
     check("statusline --popup names every Class once",
           all(" ".join(pp).split().count(k) == 1 for k in ("scout", "mechanical", "impl")), out_pp)
+    # With plan dollars and sol beside fable in Tier 4, codex leads Tier 4 only
+    # at a Pace past 3, where the axis the Meters' own Paces (all under 1) give
+    # ends. The popup prints the Pace to lead rank's preview gives, never
+    # "cannot lead on Pace" for a Pace a Meter can read (ticket 22).
+    pd_cfg = os.path.join(tmp, "pd-config")
+    shutil.copytree(SAMPLES, pd_cfg)
+    pd_routing = json.load(open(os.path.join(pd_cfg, "routing.json")))
+    pd_routing["quota_unit"] = "plan_dollars"
+    with open(os.path.join(pd_cfg, "routing.json"), "w") as f:
+        json.dump(pd_routing, f, indent=2)
+    pd_lanes = json.load(open(os.path.join(pd_cfg, "lanes.json")))
+    pd_lanes["lanes"]["sol-high@codex"]["tier"] = 4
+    with open(os.path.join(pd_cfg, "lanes.json"), "w") as f:
+        json.dump(pd_lanes, f, indent=2)
+
+    def tier4_sol(cache_path):
+        """The popup's Tier 4 sol row, its axis top, and codex's Pace to lead
+        in Tier 4 by rank's preview over the same cache."""
+        rc, out, err = run(["statusline", "--no-color", "--popup", "--width", "118",
+                            "--config-dir", pd_cfg], dict(pp_env, DELEGATE_CACHE=cache_path))
+        lines = out.splitlines()
+        start = next((i for i, l in enumerate(lines) if l.startswith("④ Tier 4")), len(lines))
+        row = next((l for l in lines[start + 1:] if "sol-high" in l), "")
+        head = next((l for l in lines if l.startswith("Meter")), "")
+        top = max([int(n) for n in re.findall(r"\d+", head.split("Pace =")[0])] or [0])
+        previews = rank.tier_leaders(catalog.load_catalog(config_dir=pd_cfg),
+                                     usage.read(None, usage.CACHED, path=cache_path),
+                                     {"claude", "codex", "agy", "grok"})
+        return rc, out + err, row, top, previews[3]["pace_to_lead"].get("codex")
+
+    rc, out_pd, row_pd, top_pd, need_pd = tier4_sol(pp_cache)
+    check("statusline --popup with plan dollars gives a rival past the Meters' axis its Pace to lead",
+          rc == 0 and need_pd is not None and need_pd > 3 and f"needs {need_pd:.2f}" in row_pd
+          and "cannot lead on Pace" not in row_pd, f"{need_pd} {row_pd!r}\n{out_pd}")
+    check("statusline --popup scales its axis to reach the Paces to lead",
+          need_pd is not None and top_pd >= need_pd, f"axis top {top_pd}, Pace to lead {need_pd}\n{out_pd}")
+    # Past the axis's cap a Pace to lead is still printed as its value, and its
+    # ┊ mark sits on the axis's last cell.
+    far_cache = os.path.join(tmp, "pp_far_usage.json")
+    far_doc = json.load(open(pp_cache))
+    far_doc["lanes"] = [pp_row("claude-fable", 0.58, 0.9, sl_now + 2 * 3600, sl_now + 3 * 86400,
+                               remaining_weekly_model=0.9) if r["lane"] == "claude-fable" else r
+                        for r in far_doc["lanes"]]
+    with open(far_cache, "w") as f:
+        json.dump(far_doc, f)
+    rc, out_far, row_far, top_far, need_far = tier4_sol(far_cache)
+    track_far = max(re.findall(r"[─┼│┊●✗]+", row_far) or [""], key=len)
+    check("statusline --popup shows a Pace to lead past the axis as its value, its mark at the edge",
+          rc == 0 and need_far is not None and need_far > top_far > 0
+          and f"needs {need_far:.2f}" in row_far and track_far.endswith("┊"),
+          f"axis top {top_far}, Pace to lead {need_far}, {row_far!r}\n{out_far}")
     # The statusline and the popup read one Readout per Meter, so the weekly
     # cell and the popup's "= W ÷ L" numerator are one figure (ticket 17).
     rc, out_ppsl, err_ppsl = run(["statusline", "--no-color", "--no-running"] + cfg,
@@ -664,20 +717,18 @@ with tempfile.TemporaryDirectory() as tmp:
           rc == 0 and "| codex" in out_off_el.split("**Plan consumption this cycle:**")[0],
           out_off_el)
 
-# The popup replays rank's choice: across Order a rival needs the leader's Pace
-# plus the Margin, and the handover point follows from it (ticket 40).
+# The popup replays rank's choice to find the handover point (ticket 40). The
+# Pace to lead comes from rank's Tier preview (test_rank case 33).
 import report  # noqa: E402
 
 
 def lane_row(lane, meter, pace, order=None):
     return {"lane": lane, "meter": meter, "pace": pace, "tier": 2, "order": order,
-            "eligible": True, "veto": None}
+            "eligible": True, "cause": "eligible"}
 
 
 ordered = {"tier": 2, "leader": "a@x", "rows": [lane_row("a@x", "mx", 1.0, order=1),
                                                 lane_row("b@y", "my", 0.9, order=2)]}
-check("popup: across Order a rival needs the leader's Pace plus the Margin",
-      report.pace_to_lead(dict(ordered, margin=0.2), "my", 3.0) == 1.2)
 meter = {"key": "mx", "label": "x", "weekly": 0.5, "left": 0.5, "f5": None}
 found = report.handover(ordered, meter, 0.2, 0.05)
 check("popup: the leader hands over once its Pace falls a Margin under the rival's",
@@ -688,11 +739,9 @@ check("popup: a lone leader runs down to the Gate", found is not None and found[
       and abs(found[0] - 0.45) < 0.006, repr(found))
 
 # With plan dollars (ticket 39) the rows carry a weight, and the same replay
-# rescales the value with the Pace it tries: 10 x Pace must reach 20 x 1.2.
+# rescales the value with the Pace it tries.
 dollars = {"tier": 2, "leader": "a@x", "rows": [dict(lane_row("a@x", "mx", 1.0, order=1), weight=20.0),
                                                 dict(lane_row("b@y", "my", 0.9, order=2), weight=10.0)]}
-check("popup: with plan dollars a rival needs the leader's value times (1 + Margin)",
-      report.pace_to_lead(dict(dollars, margin=0.2), "my", 3.0) == 2.4)
 found = report.handover(dollars, meter, 0.2, 0.05)
 check("popup: with plan dollars the leader hands over at 20 x Pace = 9 / 1.2",
       found is not None and found[1] == "b@y" and abs(found[0] - 0.3125) < 0.006, repr(found))

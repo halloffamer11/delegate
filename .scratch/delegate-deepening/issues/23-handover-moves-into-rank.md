@@ -8,7 +8,8 @@ spend=x)`, substituted into B3's Readout map, until another Lane leads or the Me
 under the Gate, and reports the result in quota points, never time. `report.handover_note`
 only renders the preview's `handover`.
 
-Delete `report.handover`, its Window arithmetic, `HANDOVER_STEP` and the `choose` import.
+Delete `report.handover`, its Window arithmetic, `HANDOVER_STEP` and the `eligible_order`
+and `choose` imports (ticket 22 left `eligible_order` for the handover).
 Make rank's `score`, `eligible_order`, `steals` and `choose` private, and drop `score`'s
 popup invariant. Replace test_rank case 29c, which called `rank.steals` directly, with a
 test through `rank()`, and delete the three test_report handover unit checks. Case 32's
@@ -24,7 +25,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview)
 
 - [ ] test_rank case 32: with a@x on mx (weekly 0.5, `cycle_left` 0.5, order 1), b@y on my (Pace 0.9, order 2), Margin 0.2 and Gate 0.05, handover is points ≈ 0.15 to b@y; a lone leader gives ≈ 0.45 to None; plan dollars with weights 20 and 10 gives ≈ 0.3125 to b@y; Meters off gives None (tolerance 0.006).
 - [ ] The popup CLI checks in test_report pass unchanged, including "→ luna-low@codex leads after agy drops 18.5 pts".
-- [ ] `report.py` has no handover function, no `HANDOVER_STEP`, no `choose` import and no Window arithmetic for the handover; rank reads the leader's Meter after a spend only through `Snapshot.readout(spend=)`.
+- [ ] `report.py` has no handover function, no `HANDOVER_STEP`, no `eligible_order` or `choose` import and no Window arithmetic for the handover; rank reads the leader's Meter after a spend only through `Snapshot.readout(spend=)`.
 - [ ] `rank.py` exposes no public `score`, `eligible_order`, `steals` or `choose` (grep in `scripts/` and `tools/` finds no caller).
 - [ ] The replacement for case 29c passes through `rank()`: on equally priced Meters, 1.2 against 1.0 steals at Margin 0.2, 1.19 does not, and an unpriced Meter never steals.
 - [ ] The three test_report handover unit checks are deleted.

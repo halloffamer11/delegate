@@ -52,7 +52,7 @@ Each `--json` row carries a `cause`, why that lane holds its place: `pick`,
 (no meter value to rank by, so it sorts last), or the veto that stopped it:
 `disabled`, `floor`, `ceiling`, `gate` or `cli`. `eligible` is true for the
 first four, and `pick` for `pick` and `steal`. Read `cause`; the `reason`
-text only displays it.
+text only displays it. Rows carry no `veto` field: `cause` replaced it.
 
 `delegate rank tiers --json` previews each tier on its own. Beside its
 `leader` and `rows`, each tier carries what would change the leader.
@@ -62,7 +62,8 @@ margin, or with plan dollars its value times `1 + margin`). `pace_to_lead`
 maps each other meter with an eligible lane in the tier to the lowest pace, in
 steps of 0.01, at which a lane on it would lead, every other meter as it reads
 now; null when no pace a meter can read (up to 50) would. With metering off the
-value is null and the map is empty.
+value is null and the map is empty. The usage popup prints each pace to lead
+as it is, even past the end of its pace axis.
 
 ## Plan dollars
 

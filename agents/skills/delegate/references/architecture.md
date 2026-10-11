@@ -58,9 +58,9 @@ the snapshot once and gives each Tier its `steal_threshold` (`{unit, value}` in 
 unit) and `pace_to_lead` (`{meter: pace or None}`): it reruns the core with one Readout's
 Pace replaced (`dataclasses.replace`) at 0 and at the first two 0.01 steps at or above
 each value where that Meter's Lanes cross a rival in the sort or a steal, up to
-`usage.MAX_PACE`, and the deck's aid draws those (ticket 21). The statusline, the
-popup's Meter rows, `report.py limits` and the deck's Gate draw each Meter's Readout,
-so every display shows one Weekly figure and one Gate per Meter (ticket 17).
+`usage.MAX_PACE`, and the deck's aid and the usage popup draw those (tickets 21 and 22).
+The statusline, the popup's Meter rows, `report.py limits` and the deck's Gate draw each
+Meter's Readout, so every display shows one Weekly figure and one Gate per Meter (ticket 17).
 One validity rule serves every reader: valid envelope and legacy map formats keep their
 behavior; any malformed observation makes the whole document unknown. Envelope observations require a finite
 timestamp; raw Window/reset fields are validated before display. Every Meter

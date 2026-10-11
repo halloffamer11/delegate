@@ -112,7 +112,7 @@ def test_gate_veto_is_named():
     rows = rank.rank("impl", cat, usage.Snapshot.of(meters(codex=(0.05, 2.0), grok=(0.5, 0.5))), EVERY)
     terra = next(r for r in rows if r["lane"] == "terra-high@codex")
     record("Gate: the vetoed Lane says it is under the Gate",
-           terra["veto"] == "gate" and "5% left < gate 10%" in terra["reason"], terra["reason"])
+           terra["cause"] == "gate" and "5% left < gate 10%" in terra["reason"], terra["reason"])
 
 
 def run_eval(name):

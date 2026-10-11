@@ -484,7 +484,7 @@ with tempfile.TemporaryDirectory() as td:
     data12 = json.loads(res12.stdout)
     required_row_keys = {
         "lane", "harness", "model", "effort", "tier", "order", "meter",
-        "pace", "r", "remaining_weekly", "meter_status", "eligible", "veto",
+        "pace", "r", "remaining_weekly", "meter_status", "eligible",
         "cause", "pick", "overflow", "reason"
     }
     top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "overflow", "pick", "rows"))
@@ -965,7 +965,7 @@ with tempfile.TemporaryDirectory() as td:
     rows23_gate = rank.rank("impl", agy_cat, usage.Snapshot.of(write_meters_doc(meters_path, m23_gate)), ALL_HARNESSES)
     flash23_gate = next(r for r in rows23_gate if r["lane"] == "flash-high@agy")
     record("case 23b an agy Lane under the Gate is vetoed gate",
-           flash23_gate["veto"] == "gate" and flash23_gate["eligible"] is False
+           flash23_gate["cause"] == "gate" and flash23_gate["eligible"] is False
            and flash23_gate["reason"] == "vetoed:gate, flash-high@agy: agy-gemini meter 2% left < gate 10%",
            flash23_gate["reason"])
 
@@ -1232,7 +1232,7 @@ with tempfile.TemporaryDirectory() as td:
         rows26k[0]["lane"] == "fable-xhigh@claude"
         and rows26k[0].get("overflow") == {
             "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
-        and grok26k["veto"] == "disabled",
+        and grok26k["cause"] == "disabled",
         repr(rows26k[0].get("overflow")),
     )
 
@@ -1244,8 +1244,8 @@ with tempfile.TemporaryDirectory() as td:
         "case 26l all in-Range Lanes cli-absent and none gated stops, and never overflows",
         rows26l[0]["pick"] is False
         and all(r.get("overflow") is None for r in rows26l)
-        and all(r["veto"] == "cli" for r in rows26l
-                if r["tier"] in (1, 2) and r["veto"] != "disabled"),
+        and all(r["cause"] == "cli" for r in rows26l
+                if r["tier"] in (1, 2) and r["cause"] != "disabled"),
         rows26l[0]["reason"],
     )
 
@@ -1261,7 +1261,7 @@ with tempfile.TemporaryDirectory() as td:
         rows26m[0]["lane"] == "fable-xhigh@claude"
         and rows26m[0].get("overflow") == {
             "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
-        and flash26m["veto"] == "floor" and flash26m["pick"] is False,
+        and flash26m["cause"] == "floor" and flash26m["pick"] is False,
         flash26m["reason"],
     )
 
@@ -1296,7 +1296,7 @@ with tempfile.TemporaryDirectory() as td:
         "case 26o with meters off a stop stays a stop and never overflows",
         rows26o[0]["pick"] is False
         and all(r.get("overflow") is None for r in rows26o)
-        and all(r["veto"] != "gate" for r in rows26o),
+        and all(r["cause"] != "gate" for r in rows26o),
         rows26o[0]["reason"],
     )
 
@@ -1327,7 +1327,7 @@ with tempfile.TemporaryDirectory() as td:
         "case 27 a project Tier makes the Lane eligible in Range 1-2 and not in Range 3-3",
         sol27_mech["tier"] == 2 and sol27_mech["eligible"] is True
         and sol27_rev["tier"] == 2 and sol27_rev["eligible"] is False
-        and sol27_rev["veto"] == "floor",
+        and sol27_rev["cause"] == "floor",
         f"{sol27_mech['reason']} | {sol27_rev['reason']}",
     )
 

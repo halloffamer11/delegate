@@ -287,11 +287,9 @@ def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
             "remaining_weekly": remaining_weekly,
             "meter_status": meter_status,
             "eligible": veto_reason is None,
-            # None, or one of disabled, floor, ceiling, gate, cli: the veto
-            # half of `cause`, until `cause` replaces it (ticket 22)
-            "veto": veto_kind,
             # one of CAUSES: the veto, or for an eligible row the cause set
-            # below once the Pick is known
+            # below once the Pick is known. It replaced the `veto` field
+            # (ticket 22).
             "cause": veto_kind,
             "pick": False,
             # only a Pick admitted past its Ceiling carries a record here
@@ -361,14 +359,14 @@ def gate_only_stop(rows, floor, ceiling):
     """
     in_range = [
         row for row in rows
-        if row.get("veto") != "disabled"
+        if row["cause"] != "disabled"
         and row["tier"] is not None
         and (floor is None or row["tier"] >= floor)
         and (ceiling is None or row["tier"] <= ceiling)
     ]
-    if not any(row.get("veto") == "gate" for row in in_range):
+    if not any(row["cause"] == "gate" for row in in_range):
         return False
-    return all(row.get("veto") in ("gate", "cli") for row in in_range)
+    return all(row["cause"] in ("gate", "cli") for row in in_range)
 
 
 def rank(cls, cat, meters, present, tier=None):

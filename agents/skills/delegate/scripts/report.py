@@ -29,6 +29,8 @@ try:
 except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
+# `eligible_order` and `choose` serve `handover` alone, which ticket 23 moves
+# into rank's Tier preview.
 try:
     from rank import rank, tier_leaders, eligible_order, choose
 except ImportError:
@@ -749,11 +751,12 @@ def lane_lines(catalog, meters, present, picks, c):
 
 # ------------------------------------------------------------- popup
 # The Herdr popup (ticket 40, layout D): each Meter's weekly Pace as its
-# calculation, then each Tier's Lanes on the same Pace axis with the steal line
-# (leader Pace + Margin) and how far the leader's Meter can fall before the Tier
-# hands over. Everything reads the cached Meters at the moment of display: no
-# usage history and no burn rate (ADR 0001), so a distance is in quota points at
-# today's readings, never a time.
+# calculation, then each Tier's Lanes on the same Pace axis with the Pace each
+# other Meter needs to lead it, as rank's Tier preview gives it (ticket 22), and
+# how far the leader's Meter can fall before the Tier hands over. Everything
+# reads the cached Meters at the moment of display: no usage history and no burn
+# rate (ADR 0001), so a distance is in quota points at today's readings, never a
+# time.
 POPUP_LEGEND = ("Pace = weekly figure ÷ share of the week left: 1 on track, above 1 spend it"
                 " · ┊ = the Pace that Meter needs to lead the Tier")
 POPUP_NUM_HEAD = "Pace = left ÷ time  5h      resets"
@@ -833,22 +836,6 @@ def handover(preview, meter, margin, gate):
             return spent, pick
 
 
-def pace_to_lead(preview, meter_key, top):
-    """The lowest Pace at which a Lane on `meter_key` would lead the Tier, by
-    rank's own choice (Pace order, then a steal by the Margin across Order),
-    with every other Meter as it reads now; None when none up to `top` does."""
-    rows = [r for r in preview["rows"] if r["eligible"]]
-    margin = preview.get("margin", 0)
-    pace = 0.0
-    while pace <= top:
-        trial = [dict(r, pace=pace) if r["meter"] == meter_key else r for r in rows]
-        trial.sort(key=lambda r: eligible_order(r, True))
-        if choose(trial, margin, True)[0]["meter"] == meter_key:
-            return pace
-        pace = round(pace + 0.01, 2)
-    return None
-
-
 def pace_axis(paces, width):
     """(top of the scale, value -> cell) for a Pace axis `width` cells wide."""
     top = max(3.0, min(8.0, float(int(max([p for p in paces if p is not None] + [1]) + 1))))
@@ -892,9 +879,11 @@ def popup_lines(catalog, snapshot, present, picks, won_by_meter, c, width, now):
 
     left_w = 2 + POPUP_METER_W + POPUP_LANE_W + 1
     axis_w = max(24, width - left_w - 2 - POPUP_NUM_W)
-    steals = [r["pace"] + margin for p in previews for r in p["rows"]
-              if r["lane"] == p["leader"] and r["pace"] is not None]
-    top, x = pace_axis([m["pace"] for m in meters] + steals, axis_w)
+    # The axis reaches every Meter's Pace and every Pace to lead, up to its
+    # cap; a Pace to lead past the cap keeps its value in the row's note, and
+    # its mark sits on the axis's last cell.
+    needs = [v for p in previews for v in p["pace_to_lead"].values() if v is not None]
+    top, x = pace_axis([m["pace"] for m in meters] + needs, axis_w)
 
     age = dur_short(now, snapshot.taken_at or now) or "0m"
     lines = [f"{c['BOLD']}delegate usage{c['R']}  {c['DIM']}read {age} ago · Margin {margin:.2f} · "
@@ -923,15 +912,16 @@ def popup_lines(catalog, snapshot, present, picks, won_by_meter, c, width, now):
 
 def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
     """A Tier's header (its leader and what changes next), then one row per
-    Meter with Lanes in the Tier: the leader's Meter first, then by Pace."""
+    Meter with Lanes in the Tier: the leader's Meter first, then by Pace. Each
+    other Meter's row says the Pace to lead the preview gives it."""
     t = preview["tier"]
     tc = c["TIER_COL"][t]
     head = f"{tc}{c['BOLD']}{TIER_GLYPH[t]} Tier {t}{c['R']}  "
-    rows = [r for r in preview["rows"] if r["veto"] in (None, "gate", "cli")]
+    rows = [r for r in preview["rows"] if r["cause"] not in ("disabled", "floor", "ceiling")]
     if not rows:
         return [head + f"{c['MUTE']}no eligible lane{c['R']}"]
     lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
-    preview = dict(preview, margin=margin)
+    paces = preview["pace_to_lead"]
     out = [head + f"{c['DIM']}leader{c['R']} {tc}{c['BOLD']}{preview['leader'] or 'none'}{c['R']}  "
            f"{c['DIM']}{handover_note(preview, lead, by_key, margin, gate)}{c['R']}"]
     groups = {}
@@ -946,16 +936,18 @@ def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
         col = tc if is_lead else c["FG"]
         bold = c["BOLD"] if is_lead else ""
         name = r["lane"].split("@")[0] + (f" +{len(group) - 1}" if len(group) > 1 else "")
-        dot = (r["pace"], c["RED"], "✗") if r["veto"] == "gate" else (r["pace"], col + c["BOLD"], "●")
+        dot = (r["pace"], c["RED"], "✗") if r["cause"] == "gate" else (r["pace"], col + c["BOLD"], "●")
         need = None
-        if r["veto"] == "gate":
+        if r["cause"] == "gate":
             note = f"{c['RED']}under the Gate{c['R']}"
-        elif r["veto"] == "cli":
+        elif r["cause"] == "cli":
             note = "no CLI here"
-        elif is_lead or lead is None or r["pace"] is None:
+        elif is_lead or key not in paces:
+            # the leader's Meter, a Pace unknown, or no leader: nothing to reach
             note = ""
         else:
-            need = pace_to_lead(preview, key, top)
+            # None only when no Pace a Meter can read (usage.MAX_PACE) leads
+            need = paces[key]
             note = "cannot lead on Pace" if need is None else f"needs {need:.2f} (+{max(0.0, need - r['pace']):.2f})"
         if len(group) > 1:
             note = (note + " · " if note else "") + "with " + ", ".join(o["lane"].split("@")[0] for o in group[1:])
