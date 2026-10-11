@@ -621,13 +621,14 @@ def main(argv=None):
                                                      again.effort_rows)
                 return {"lanes_doc": doc, "discovered": found, "discovery": data, "refresh": plan,
                         "rows_note": again.note, "effort_rows": again.effort_rows,
+                        "epoch_rows": again.epoch_rows,
                         "bench": collect_bench(args, doc, again),
                         "message": "; ".join(again.errors)}
 
             fd, page_path = tempfile.mkstemp(prefix="delegate-bench-", suffix=".html")
             os.close(fd)
             try:
-                bench_page.write(page_path, bench_data, lanes_doc, effort_rows)
+                bench_page.write(page_path, bench_data, lanes_doc, effort_rows, snap.epoch_rows)
             except OSError as e:
                 page_path = None
                 page_message = f"benchmark page: {e}"
@@ -643,6 +644,7 @@ def main(argv=None):
                 rows_note=snap.note,
                 rescan=rescan if args.screen == "start" else None,
                 tier_lines=tier_lines,
+                epoch_rows=snap.epoch_rows,
             )
             if tier_lines is not None:
                 summary = wizard.apply_start_lines()

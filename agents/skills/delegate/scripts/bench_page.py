@@ -213,12 +213,13 @@ def _annotate(effort_rows, lanes_doc, prescreen):
     carry verdict, whether its provenance is weak, and the effort an off
     verdict on this row's own source names.
 
-    Identity, the Lanes (exactly those whose `LaneEvidence.lane_rows` hold the
-    row, the rows carry judged), standing, cost basis and version come from
-    `bench.evidence_records` on the pre-screen's own evidence, so the HTML
-    table is the same records model inspection prints. A point is struck only
-    when every Lane on it is proposed off: a point two Harnesses share can
-    carry two verdicts. `render` annotates once and every block reads it.
+    Identity and the Lanes (exactly those whose `LaneEvidence.lane_rows` hold
+    the row, the rows carry judged) come from `bench.evidence_records` on the
+    pre-screen's own evidence, and each item keeps its display record
+    (`_record`), which the rows table prints, so the HTML table is the same
+    records model inspection prints. A point is struck only when every Lane
+    on it is proposed off: a point two Harnesses share can carry two
+    verdicts. `render` annotates once and every block reads it.
     """
     evidence, proposals = prescreen
     # The composite and uncertain rows inform no verdict, so no point of theirs
@@ -240,13 +241,7 @@ def _annotate(effort_rows, lanes_doc, prescreen):
         item["_weak"] = bool(row.get("uncertain")) or row.get("provenance") in WEAK_PROVENANCE
         item["_score"] = _num(row.get("score"))
         item["_cost"] = _num(row.get("cost_usd"))
-        item["_identity"] = rec.get("identity")
-        item["_identity_reason"] = rec.get("identity_reason")
-        item["_version"] = rec.get("version")
-        item["_standing"] = rec.get("standing")
-        item["_cost_basis"] = rec.get("cost_basis")
-        item["_direction"] = rec.get("direction")
-        item["_attributed"] = rec.get("attributed")
+        item["_record"] = rec
         item["_verdicts"] = {name: (proposals or {}).get(name) or {} for name in item["_lanes"]}
         item["_off_lanes"] = [name for name in item["_lanes"]
                               if item["_verdicts"][name].get("kind") == carry.KIND_DOMINATED]
@@ -852,12 +847,37 @@ def _boards_block(items):
     return _details("Each board, model by model", f"{len(boards)} boards", body)
 
 
-def _rows_block(items):
-    if not items:
+def _verdict_notes(item):
+    """What carry said about an accepted row's Lanes: the effort that beats
+    each off Lane on this row's source, and which Lanes it proposes off."""
+    note = []
+    if len(item["_beaten"]) == 1:
+        note.append(f"beaten by {item['_dominated_by']}")
+    elif item["_beaten"]:
+        # off Lanes on one point that lose to different efforts, each named
+        note.append("beaten by " + ", ".join(f"{effort} ({', '.join(names)})"
+                                             for effort, names in item["_beaten"].items()))
+    if item["_off_lanes"]:
+        note.append("proposed off" if item["_kind"] == LANE_OFF
+                    else f"proposed off: {', '.join(item['_off_lanes'])}")
+    return note
+
+
+def _rows_block(items, lanes_doc, epoch_rows=None):
+    """Every row, with where it came from: the accepted rows `_annotate`
+    read, each with carry's notes, and the Epoch rows as display records
+    (`bench.epoch_records` over their own `LaneEvidence`). Each line prints a
+    display record, so an Epoch row shows its source linked to the CSV, its
+    standing and its cost basis in the columns every row uses. No plot, board
+    or verdict reads an Epoch row, so none carries a verdict's note."""
+    entries = [(item["_record"], item) for item in items]
+    entries += [(rec, None) for rec in bench.epoch_records(LaneEvidence(lanes_doc, epoch_rows))]
+    if not entries:
         return []
-    items = sorted(items, key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
-                                         r["_lane_model"] is None, _model_key(r),
-                                         _effort_desc(r.get("effort"))))
+    entries.sort(key=lambda entry: (entry[0]["source"] or "", entry[0]["benchmark"] or "",
+                                    entry[0]["lane_model"] is None,
+                                    entry[0]["lane_model"] or entry[0]["row"].get("model") or "?",
+                                    _effort_desc(entry[0]["row"].get("effort"))))
     head = ["source", "benchmark", "version", "published as", "lane model", "effort", "score",
             "cost", "cost basis", "standing", "observed", "provenance", "note"]
     body = ["<p>Where each number came from. A row that names no lane model is the "
@@ -867,48 +887,51 @@ def _rows_block(items):
             '<div class="scroll"><table class="rows"><thead><tr>'
             + "".join(f'<th{" class=num" if h in ("score", "cost") else ""}>{_esc(h)}</th>' for h in head)
             + "</tr></thead><tbody>"]
-    for r in items:
-        url = r.get("url")
-        src = f'<a href="{_esc(url)}">{_esc(r.get("source"))}</a>' if url else _esc(r.get("source"))
+    for rec, item in entries:
+        row = rec["row"]
+        url = rec.get("url")
+        src = f'<a href="{_esc(url)}">{_esc(rec.get("source"))}</a>' if url else _esc(rec.get("source"))
+        lane_model = rec.get("lane_model")
         note = []
-        if r.get("uncertain"):
+        if rec.get("uncertain"):
             note.append("uncertain")
-        if r.get("_identity") == "unresolved" and r.get("_identity_reason"):
-            note.append(r["_identity_reason"])
-        if len(r["_beaten"]) == 1:
-            note.append(f"beaten by {r['_dominated_by']}")
-        elif r["_beaten"]:
-            # off Lanes on one point that lose to different efforts, each named
-            note.append("beaten by " + ", ".join(f"{effort} ({', '.join(names)})"
-                                                 for effort, names in r["_beaten"].items()))
-        if r["_off_lanes"]:
-            note.append("proposed off" if r["_kind"] == LANE_OFF
-                        else f"proposed off: {', '.join(r['_off_lanes'])}")
-        if not r.get("_attributed") and r.get("_lane_model"):
+        if rec.get("identity") == "unresolved" and rec.get("identity_reason"):
+            note.append(rec["identity_reason"])
+        if item is not None:
+            note += _verdict_notes(item)
+        if not rec.get("attributed") and lane_model:
             note.append("not attributed to a lane at this effort")
-        unit = r.get("score_unit")
-        standing = r.get("_standing") or {}
+        score, cost = _num(rec.get("score")), _num(rec.get("cost_usd"))
+        if score is None:
+            score_cell = _esc(row.get("score"))
+        elif rec.get("source") == bench.EPOCH_SOURCE:
+            # Epoch publishes a fraction; the scores table prints it as a percentage
+            score_cell = _esc(bench.fmt_pct(score))
+        else:
+            score_cell = _esc(_fmt_score(score, rec.get("score_unit")))
+        standing = rec.get("standing") or {}
         if standing.get("rank") is not None:
             tied = " tied" if standing.get("tied") else ""
             standing_cell = (f"{standing['rank']}/{standing.get('n')} "
                              f"{standing.get('direction')}{tied}")
         else:
             standing_cell = f"unknown ({standing.get('direction') or 'unknown'})"
-        body.append(f'<tr class="{"weak" if r["_weak"] else ""}{" nolane" if r["_lane_model"] is None else ""}">'
-                    f"<td>{src}</td><td>{_esc(r.get('benchmark'))}</td>"
-                    f"<td>{_esc(r.get('_version'))}</td>"
-                    f"<td>{_esc(r.get('model'))}</td>"
-                    f'<td>{"<span class=mono>" + _esc(r["_lane_model"]) + "</span>" if r["_lane_model"] else NO_LANE}</td>'
-                    f"<td>{_esc(r.get('effort'))}</td>"
-                    f'<td class="num">{_esc(_fmt_score(r["_score"], unit)) if r["_score"] is not None else _esc(r.get("score"))}</td>'
-                    f'<td class="num">{_esc(_fmt_money(r["_cost"])) if r["_cost"] is not None else _esc(r.get("cost_usd"))}</td>'
-                    f"<td>{_esc(r.get('_cost_basis'))}</td>"
+        weak = rec.get("uncertain") or rec.get("provenance") in WEAK_PROVENANCE
+        body.append(f'<tr class="{"weak" if weak else ""}{" nolane" if lane_model is None else ""}">'
+                    f"<td>{src}</td><td>{_esc(rec.get('benchmark'))}</td>"
+                    f"<td>{_esc(rec.get('version'))}</td>"
+                    f"<td>{_esc(row.get('model'))}</td>"
+                    f'<td>{"<span class=mono>" + _esc(lane_model) + "</span>" if lane_model else NO_LANE}</td>'
+                    f"<td>{_esc(row.get('effort'))}</td>"
+                    f'<td class="num">{score_cell}</td>'
+                    f'<td class="num">{_esc(_fmt_money(cost)) if cost is not None else _esc(row.get("cost_usd"))}</td>'
+                    f"<td>{_esc(rec.get('cost_basis'))}</td>"
                     f"<td>{_esc(standing_cell)}</td>"
-                    f"<td>{_esc(r.get('observed'))}</td>"
-                    f'<td class="{"flag" if r.get("provenance") in WEAK_PROVENANCE else ""}">{_esc(r.get("provenance"))}</td>'
+                    f"<td>{_esc(rec.get('observed'))}</td>"
+                    f'<td class="{"flag" if rec.get("provenance") in WEAK_PROVENANCE else ""}">{_esc(rec.get("provenance"))}</td>'
                     f"<td>{_esc(', '.join(note)) if note else ''}</td></tr>")
     body.append("</tbody></table></div>")
-    return _details("Every row, with its provenance", f"{len(items)} rows", body)
+    return _details("Every row, with its provenance", f"{len(entries)} rows", body)
 
 
 def _catalog_block(lanes_doc, proposals):
@@ -1400,8 +1423,12 @@ footer { margin-top: 3rem; color: var(--muted); font-size: 12.5px; }
 """.strip()
 
 
-def render(bench, lanes_doc, effort_rows=None):
-    """Return a self-contained HTML document. No network resources."""
+def render(bench, lanes_doc, effort_rows=None, epoch_rows=None):
+    """Return a self-contained HTML document. No network resources.
+
+    `effort_rows` are the accepted rows, which the plots, the boards, the
+    verdicts and the rows table read; `epoch_rows` are the Benchmark
+    snapshot's Epoch rows, which only the rows table lists."""
     prescreen = _prescreen(lanes_doc, effort_rows)
     _evidence, proposals = prescreen
     # one annotation of the rows, which the plots, the boards and the rows
@@ -1427,7 +1454,7 @@ def render(bench, lanes_doc, effort_rows=None):
     chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
                "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
     chunks.extend(_boards_block(items))
-    chunks.extend(_rows_block(items))
+    chunks.extend(_rows_block(items, lanes_doc, epoch_rows))
     chunks.extend(_catalog_block(lanes_doc, proposals))
     chunks.extend(_scores_block(bench, lanes_doc))
     chunks.append("</section>")
@@ -1438,9 +1465,9 @@ def render(bench, lanes_doc, effort_rows=None):
     return "\n".join(chunks)
 
 
-def write(path, bench, lanes_doc, effort_rows=None):
+def write(path, bench, lanes_doc, effort_rows=None, epoch_rows=None):
     """Write the rendered page to path and return path."""
-    text = render(bench, lanes_doc, effort_rows)
+    text = render(bench, lanes_doc, effort_rows, epoch_rows)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path

@@ -321,7 +321,7 @@ class Wizard:
                  lanes_path, routing_path, initial_message="",
                  bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
                  focus=None, refresh=None, rows_note="", rescan=None, tier_lines=None,
-                 clock=None, class_guide=None):
+                 clock=None, class_guide=None, epoch_rows=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         # every shipped Class is on the routing page, with the default Range
@@ -346,12 +346,14 @@ class Wizard:
         self.tier = None
         self._result = None
         self._width = 80
-        self._load(lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note)
+        self._load(lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note,
+                   epoch_rows)
         self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
         if self.focus:
             self._enter_focus()
 
-    def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note):
+    def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note,
+              epoch_rows):
         """Start from what one scrub found: the catalog with the current
         generation proposed, the benchmark data, the harnesses and their
         models. Every decision the pages after the harnesses page hold is
@@ -360,6 +362,8 @@ class Wizard:
         self.lanes_doc = copy.deepcopy(lanes_doc)
         self.bench = bench
         self.effort_rows = effort_rows
+        # the snapshot's Epoch rows, which only the benchmark page lists
+        self.epoch_rows = epoch_rows
         self.discovered = set(discovered)
         self.discovery = discovery
         # what the refresh proposed before the first screen, and where the
@@ -453,7 +457,7 @@ class Wizard:
             found = self._rescan()
             self._load(found["lanes_doc"], found.get("bench"), found.get("discovered") or (),
                        found.get("effort_rows"), found.get("discovery"), found.get("refresh"),
-                       found.get("rows_note") or "")
+                       found.get("rows_note") or "", found.get("epoch_rows"))
             self.scanned = f"at {self._clock()}"
             refresh = self.refresh or {}
             message = (f"Rescanned {self.scanned}: {plural(len(refresh.get('new') or ()), 'new Lane')}, "
@@ -516,7 +520,7 @@ class Wizard:
             return ""
         try:
             bench_page.write(self.bench_page_path, self.bench, self.current_lanes(),
-                             self.effort_rows)
+                             self.effort_rows, self.epoch_rows)
         except (OSError, ValueError) as e:
             return f"benchmark page: {e}"
         return ""

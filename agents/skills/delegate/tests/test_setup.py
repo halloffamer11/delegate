@@ -997,6 +997,150 @@ def case_a_fixture_run_reaches_no_url():
     return not problems and cache_touched == [], f"{problems} home={cache_touched}"
 
 
+EPOCH_CSV = os.path.join(HERE, "fixture", "bench-epoch.csv")
+EPOCH_SOURCE_CELL = f'<a href="{EPOCH_URL}">epoch</a>'
+EPOCH_COST_BASIS = "Epoch CSV has no cost column; not comparable across sources"
+# a standing cell: "<rank>/<n> <direction>[ tied]", or "unknown (<direction>)"
+STANDING_CELL = r"\d+/\d+ \S+( tied)?|unknown \(\S+\)"
+
+
+def provenance_rows(page):
+    """(the count the "Every row, with its provenance" table's summary gives,
+    the cells of each of its rows). The cells are source, benchmark, version,
+    published as, lane model, effort, score, cost, cost basis, standing,
+    observed, provenance and note, as HTML."""
+    import re
+    at = page.find("<summary>Every row, with its provenance")
+    if at < 0:
+        return None, []
+    count = re.match(r'<summary>Every row, with its provenance <span class="count">([^<]*)</span>',
+                     page[at:])
+    table = page[page.find('<table class="rows">', at):]
+    table = table[:table.find("</table>")]
+    rows = [re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+            for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.S)]
+    return (count.group(1) if count else None), [cells for cells in rows if cells]
+
+
+def wizard_on_named_epoch(run_curses, epoch_csv):
+    """setup.main in this process, with no live acquisition: `--no-discover`
+    with a saved discovery of every harness, the refresh fixture's catalog
+    and accepted rows, and `epoch_csv` named, under a temporary HOME. The
+    wizard goes to `run_curses`. Returns (exit code, what HOME holds after)."""
+    import io
+    import setup
+    import setup_tui
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    with tempfile.TemporaryDirectory() as td:
+        home, cfg = os.path.join(td, "home"), os.path.join(td, "config")
+        os.makedirs(home)
+        os.makedirs(cfg)
+        shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(cfg, "lanes.json"))
+        catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
+        saved = os.path.join(td, "discover.json")
+        write_discover(saved, harnesses.NAMES)
+        real_run, real_home = setup_tui.run_curses, os.environ.get("HOME")
+        real_in, real_out = sys.stdin, sys.stdout
+        setup_tui.run_curses = run_curses
+        os.environ["HOME"] = home
+        sys.stdin, sys.stdout = Terminal(), Terminal()
+        try:
+            code = setup.main(["--config-dir", cfg, "--no-discover", "--discover-json", saved,
+                               "--epoch-csv", epoch_csv,
+                               "--effort-rows", os.path.join(REFRESH_DIR, "aa-accepted.json")])
+        finally:
+            setup_tui.run_curses = real_run
+            sys.stdin, sys.stdout = real_in, real_out
+            if real_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = real_home
+        return code, os.listdir(home)
+
+
+def read_page(wizard):
+    """The benchmark page the wizard holds, read and then removed."""
+    path = wizard.bench_page_path
+    if not path:
+        return ""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    os.unlink(path)
+    return text
+
+
+def case_the_page_lists_the_epoch_rows():
+    """The page the wizard opens lists every Epoch row in its "Every row, with
+    its provenance" table, beside the accepted rows: its source linked to
+    Epoch's URL, its standing and the Epoch cost basis, and the table's count
+    counts it (H3). The table used to list the accepted rows only."""
+    import re
+    import bench_snapshot
+    epoch = bench_snapshot.snapshot((), epoch=bench_snapshot.local(EPOCH_CSV)).epoch_rows
+    accepted = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
+    seen = {}
+
+    def run_curses(wizard):
+        seen["page"] = read_page(wizard)
+        return None
+
+    code, home = wizard_on_named_epoch(run_curses, EPOCH_CSV)
+    count, rows = provenance_rows(seen.get("page", ""))
+    listed = [cells for cells in rows if cells[0] == EPOCH_SOURCE_CELL]
+    fable_deepswe = [cells for cells in listed
+                     if cells[1] == "DeepSWE" and cells[3] == "Claude Fable 5.1"]
+    ok = (code == 0 and home == [] and len(epoch) == 25
+          and count == f"{len(accepted) + 25} rows"
+          and sorted((cells[1], cells[3], cells[5]) for cells in listed)
+          == sorted((row["benchmark"], row["model"], row["effort"]) for row in epoch)
+          and all(cells[8] == EPOCH_COST_BASIS for cells in listed)
+          and all(re.fullmatch(STANDING_CELL, cells[9]) for cells in listed)
+          # the figure as the scores table prints an Epoch figure
+          and [cells[6] for cells in fable_deepswe] == ["98.0"])
+    return ok, (f"code={code} home={home} count={count} epoch_listed={len(listed)} "
+                f"first={listed[:1]} sources={sorted({cells[0] for cells in rows})}")
+
+
+def case_a_rescan_rewrites_the_page_with_its_epoch_rows():
+    """After `r`, the page `o` writes lists the rescan's Epoch rows: the CSV
+    loses its Grok rows between launch and `r`, and the rewritten page lists
+    20 Epoch rows where launch's listed 25 (H3)."""
+    with tempfile.TemporaryDirectory() as td:
+        csv_path = os.path.join(td, "epoch.csv")
+        shutil.copy(EPOCH_CSV, csv_path)
+        seen = {}
+
+        def run_curses(wizard):
+            seen["launch"] = provenance_rows(read_page(wizard))[1]
+            with open(EPOCH_CSV, encoding="utf-8") as f:
+                kept = [line for line in f if not line.startswith("grok-4.6,")]
+            with open(csv_path, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            wizard.handle("enter")
+            wizard.handle("r")
+            seen["message"] = wizard.message
+            seen["rewrite"] = wizard.rewrite_bench_page()
+            seen["after"] = provenance_rows(read_page(wizard))[1]
+            return None
+
+        code, home = wizard_on_named_epoch(run_curses, csv_path)
+
+    def epoch_models(rows):
+        return sorted({cells[3] for cells in rows if cells[0] == EPOCH_SOURCE_CELL})
+
+    launch = [cells for cells in seen.get("launch", []) if cells[0] == EPOCH_SOURCE_CELL]
+    after = [cells for cells in seen.get("after", []) if cells[0] == EPOCH_SOURCE_CELL]
+    ok = (code == 0 and home == [] and str(seen.get("message")).startswith("Rescanned at ")
+          and seen.get("rewrite") == "" and len(launch) == 25 and len(after) == 20
+          and "Grok 4.6" in epoch_models(launch) and "Grok 4.6" not in epoch_models(after))
+    return ok, (f"code={code} message={seen.get('message')!r} rewrite={seen.get('rewrite')!r} "
+                f"launch={len(launch)} after={len(after)} models={epoch_models(seen.get('after', []))}")
+
+
 def case_no_discover_fetches_no_rows():
     """--no-discover skips every live acquisition, the benchmark-row fetch
     included: a run with it says nothing about where rows came from, because it
@@ -1067,6 +1211,9 @@ for name, case in (
     ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
     ("a rescan opens the Epoch URL once", case_a_rescan_opens_the_epoch_url_once),
     ("a fixture run reaches no URL", case_a_fixture_run_reaches_no_url),
+    ("the page lists the Epoch rows", case_the_page_lists_the_epoch_rows),
+    ("a rescan rewrites the page with its Epoch rows",
+     case_a_rescan_rewrites_the_page_with_its_epoch_rows),
     ("no-discover fetches no rows", case_no_discover_fetches_no_rows),
     ("plain prints the refresh change lines", case_plain_prints_the_refresh_change_lines),
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),

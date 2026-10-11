@@ -245,9 +245,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   records (`bench.evidence_records`, read once per render and drawn by the plots, the boards and
   the rows tables) and each point's Lanes from one `LaneEvidence`, and the wizard's own verdicts
   (`carry.decisions` on that evidence, asked once per render, never caught) rather than deciding
-  any of them again. Points group by the Model's display name, so an agy Model's efforts are one
-  sweep; the scores table names the Lanes `collect` says claim each figure. Each Lane on a point
-  carries its own verdict, a point is struck only when
+  any of them again. Its rows table also lists the Benchmark snapshot's Epoch rows (`write` and
+  `render` take `epoch_rows`), as `bench.epoch_records` over their own `LaneEvidence`, in the same
+  columns; no plot, board or verdict reads them. Points group by the Model's display name, so an
+  agy Model's efforts are one sweep; the scores table names the Lanes `collect` says claim each
+  figure. Each Lane on a point carries its own verdict, a point is struck only when
   every Lane on it is proposed off, and "beaten by" comes only from an off verdict on the board's
   own source; two off Lanes on one point that lose to different efforts each get their own
   arithmetic in the finding and their own competitor in the rows table. A point no Lane runs takes
@@ -341,7 +343,8 @@ because a predecessor switched off at an effort judged that model, not this one
 (ticket 35, changing ticket 33). `o` writes the page again before opening it, from
 `Wizard.current_lanes()` — the document the session started from, with the carry and
 Tier decisions made so far — so a lane carried on the carry page reaches the page
-(`Wizard.rewrite_bench_page`). The page's catalog key is its lane names, which no
+(`Wizard.rewrite_bench_page`), with the snapshot's Epoch rows, the rescan's after `r`.
+The page's catalog key is its lane names, which no
 screen changes, so tiers already drawn in the browser survive the rewrite.
 Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
 It restores current choices and shows only changed fields before confirmation.

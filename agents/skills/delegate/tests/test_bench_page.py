@@ -408,6 +408,36 @@ try:
 except Exception as e:
     record("render reads the evidence records once", False, repr(e))
 
+try:
+    # H3: the Epoch rows are listed in the rows table, and nothing else on the
+    # page takes them. Epoch publishes no cost, so no Epoch row is a point, a
+    # board's step or carry's evidence.
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
+    without = bench_page.render(collected, ASTRA, SWEEP)
+    with_epoch = bench_page.render(collected, ASTRA, SWEEP, epoch_rows=epoch_rows_of(FIXTURE))
+
+    def boards_block(page):
+        return page[page.find("<summary>Each board, model by model"):page.find("<summary>Every row")]
+
+    def verdicts(page):
+        return re.findall(r'<p class="verdict">(.*?)</p>', page, re.S)
+
+    def rows_count(page):
+        return re.search(r'<summary>Every row, with its provenance <span class="count">(\d+) rows', page)
+
+    plotted = json.loads(json.dumps(bench_page.plot_data(SWEEP, ASTRA, bench=collected)))
+    record("the Epoch rows reach the rows table and never the plots, the boards or the verdicts",
+           data_of(with_epoch) == data_of(without) == plotted
+           and boards_block(with_epoch) == boards_block(without) != ""
+           and verdicts(with_epoch) == verdicts(without) != []
+           and int(rows_count(with_epoch).group(1)) == len(SWEEP) + 25
+           and int(rows_count(without).group(1)) == len(SWEEP),
+           f"rows={rows_count(with_epoch) and rows_count(with_epoch).group(1)} "
+           f"same_data={data_of(with_epoch) == data_of(without)}")
+except Exception as e:
+    record("the Epoch rows reach the rows table and never the plots, the boards or the verdicts",
+           False, repr(e))
+
 # any-harness ticket 31: Claude Code runs Opus at low to xhigh, agy at low to
 # high. A point both harnesses share is one Lane per harness, each with its own
 # verdict, and the page strikes it only when every Lane on it is off.
