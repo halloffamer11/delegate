@@ -68,9 +68,10 @@ The deliverable is exactly `pong`.
 # each CLI, so the user's live run is what proves them. An orchestrator with no
 # launch is reported as skipped by `orchestrate`.
 
-# The files every relayed run directory holds when it finishes. Others (final.txt,
-# events.jsonl, brief.txt) depend on the harness and are not compared.
-RUN_FILES = ("dispatch.json", "prompt.md", "relay.stdout", "relay.stderr", "result.json", "return.json")
+# The Run's own files, which every relayed Run holds when it finishes. What a
+# relay leaves beside them depends on the relay and the harness, and is not
+# compared.
+RUN_FILES = ("dispatch.json", "prompt.md", "return.json")
 
 
 def validate_return(doc):
@@ -119,12 +120,111 @@ def check_ping_run(run_dir):
     return None
 
 
+class OfflineWorld:
+    """A throwaway world where delegate runs needing no harness CLI, no relay
+    clone and no network: the one the offline evals, test_dispatch and
+    test_relay share.
+
+    Under `root`, which the caller owns and removes, it holds the sample
+    catalog, a fake ADS tree with the fake relay standing in for each registry
+    relay, an empty orchestrator profile directory and a runs directory. Its
+    bin directory holds a `git` that answers ads.sh's pin read (with
+    $ADS_FAKE_GIT_SHA, when set, in place of the pin), one stub per harness
+    CLI, a `sandbox-exec` that nests, and links to the real node, sh and
+    python3. `env` puts that bin directory first on PATH and points every
+    delegate path at the world, so nothing on the host reaches a Run: not its
+    CLIs, its catalog, its Ledger, its Meters, its codex home, its Seatbelt or
+    its orchestrator. A test replaces one CLI with `stub`.
+    """
+
+    def __init__(self, root):
+        self.root = root
+        self.config_dir = os.path.join(root, "config")
+        self.ads_dir = os.path.join(root, "ads")
+        self.bin_dir = os.path.join(root, "bin")
+        self.runs_dir = os.path.join(root, "runs")
+        self.orchestrators_dir = os.path.join(root, "orchestrators")
+        self.ledger_path = os.path.join(root, "ledger.jsonl")
+        self.cache_path = os.path.join(root, "usage.json")
+        # A codex home of delegate's own changes the codex argv, so the world
+        # names one that does not exist; the host's never reaches a case.
+        self.codex_home = os.path.join(root, "codex-home")
+        for d in (self.config_dir, self.bin_dir, self.runs_dir, self.orchestrators_dir):
+            os.makedirs(d)
+
+        for name in ("lanes.json", "routing.json"):
+            shutil.copy(os.path.join(SAMPLES_DIR, name), self.config_dir)
+        for h in harnesses.REGISTRY:
+            scripts = os.path.join(self.ads_dir, "skills", h.relay, "scripts")
+            os.makedirs(scripts, exist_ok=True)
+            shutil.copy(FAKE_RELAY, os.path.join(scripts, "relay.mjs"))
+
+        # ads.sh checks the clone's HEAD against its pin; answer with the pin.
+        real_git = shutil.which("git") or "/usr/bin/git"
+        self.stub("git", 'for a in "$@"; do\n'
+                         f'  [ "$a" = HEAD ] && {{ echo "${{ADS_FAKE_GIT_SHA:-{_pinned_ads_commit()}}}"; exit 0; }}\n'
+                         f'done\nexec {real_git} "$@"\n')
+        for h in harnesses.REGISTRY:
+            self.stub(h.binary, "exit 0\n")
+        # The host's Seatbelt never reaches a Run: a sandbox-exec that nests
+        # answers before the one a Mac keeps in /usr/bin.
+        self.stub("sandbox-exec", "exit 0\n")
+        # Real node, sh and python3 stay reachable without exposing a real
+        # harness CLI that shares their directory.
+        for tool in ("node", "sh", "python3"):
+            src = shutil.which(tool)
+            if src:
+                os.symlink(src, os.path.join(self.bin_dir, tool))
+
+        env = dict(os.environ)
+        # No orchestrator is assumed: neither the host's choice nor any marker
+        # a profile the world loads detects.
+        env.pop("DELEGATE_ORCHESTRATOR", None)
+        for profile in orchestrators.load([orchestrators.SHIPPED_DIR, self.orchestrators_dir]).values():
+            for var in profile["detect_env"]:
+                env.pop(var, None)
+        env.update({
+            "PATH": os.pathsep.join([self.bin_dir, "/bin", "/usr/bin"]),
+            runs.LEDGER_ENV: self.ledger_path,
+            "DELEGATE_CACHE": self.cache_path,
+            # the world is stubs: no detached model scan runs against them
+            "DELEGATE_MODEL_SCAN": "off",
+            "ADS_DIR": self.ads_dir,
+            "DELEGATE_CODEX_HOME": self.codex_home,
+            "DELEGATE_ORCHESTRATORS_DIR": self.orchestrators_dir,
+            "DELEGATE_RUNS_DIR": self.runs_dir,
+        })
+        self.env = env
+
+    def stub(self, name, body):
+        """Put a shell script running `body` at `name` in the bin directory,
+        replacing what is there (a link is replaced, never written through).
+        Returns its path."""
+        path = os.path.join(self.bin_dir, name)
+        if os.path.lexists(path):
+            os.remove(path)
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n" + body)
+        os.chmod(path, 0o755)
+        return path
+
+
+def _pinned_ads_commit():
+    """The commit ads.sh pins, read from ads.sh itself, so the world follows
+    each repin."""
+    with open(ADS_SH) as f:
+        for line in f:
+            if line.startswith("ADS_COMMIT="):
+                return line.split("=", 1)[1].strip()
+    raise ValueError(f"no ADS_COMMIT= line in {ADS_SH}")
+
+
 class Sandbox:
     """Where an eval runs: its brief, working directory, runs directory and env.
 
-    Live, it uses this machine's catalog, relays and CLIs. Offline, it builds a
-    throwaway world: the sample catalog, the fake relay standing in for every
-    harness's relay, a stub CLI per harness and fixture Meters.
+    Live, it uses this machine's catalog, relays and CLIs. Offline, it runs in
+    an OfflineWorld (`world`) with fixture Meters, and the fake relay answers
+    pong.
     """
 
     def __init__(self, offline, keep=False):
@@ -132,70 +232,30 @@ class Sandbox:
         self.root = tempfile.mkdtemp(prefix="delegate-eval-")
         self.keep = keep
         self.cwd = os.path.join(self.root, "work")
-        self.runs_dir = os.path.join(self.root, "runs")
         os.makedirs(self.cwd)
-        os.makedirs(self.runs_dir)
         self.brief = os.path.join(self.root, "ping.md")
-        self.env = dict(os.environ)
-        self.env["DELEGATE_RUNS_DIR"] = self.runs_dir
-        self.config_dir = None
-        self.ads_dir = None
-        self.meters = None
         brief = PING_BRIEF
         if offline:
-            brief += "\n" + self._build_offline_world() + "\n"
+            self.world = OfflineWorld(self.root)
+            self.env = self.world.env
+            self.runs_dir = self.world.runs_dir
+            self.config_dir = self.world.config_dir
+            self.ads_dir = self.world.ads_dir
+            self.meters = FIXTURE_METERS
+            # The fake relay answers with the final message this file holds.
+            final = os.path.join(self.root, "final.txt")
+            with open(final, "w", encoding="utf-8") as f:
+                f.write('pong\n{"status": "done", "deliverable": "pong", "evidence": [], '
+                        '"open_questions": [], "changed_files": []}\n')
+            brief += f"\nfake-relay: final={final}\n"
+        else:
+            self.world = None
+            self.runs_dir = os.path.join(self.root, "runs")
+            os.makedirs(self.runs_dir)
+            self.env = dict(os.environ, DELEGATE_RUNS_DIR=self.runs_dir)
+            self.config_dir = self.ads_dir = self.meters = None
         with open(self.brief, "w", encoding="utf-8") as f:
             f.write(brief)
-
-    def _build_offline_world(self):
-        self.config_dir = os.path.join(self.root, "config")
-        os.makedirs(self.config_dir)
-        for name in ("lanes.json", "routing.json"):
-            shutil.copy(os.path.join(SAMPLES_DIR, name), self.config_dir)
-        self.meters = FIXTURE_METERS
-
-        self.ads_dir = os.path.join(self.root, "ads")
-        for h in harnesses.REGISTRY:
-            scripts = os.path.join(self.ads_dir, "skills", h.relay, "scripts")
-            os.makedirs(scripts)
-            shutil.copy(FAKE_RELAY, os.path.join(scripts, "relay.mjs"))
-
-        bin_dir = os.path.join(self.root, "bin")
-        os.makedirs(bin_dir)
-        # ads.sh checks the clone's HEAD against its pin; answer with the pin.
-        pin = next(line.split("=", 1)[1].strip() for line in open(ADS_SH) if line.startswith("ADS_COMMIT="))
-        real_git = shutil.which("git") or "/usr/bin/git"
-        self._stub(bin_dir, "git", f'for a in "$@"; do [ "$a" = HEAD ] && {{ echo {pin}; exit 0; }}; done\nexec {real_git} "$@"\n')
-        for h in harnesses.REGISTRY:
-            self._stub(bin_dir, h.binary, "exit 0\n")
-        # Real node, sh and python3 stay reachable without exposing a real
-        # harness CLI that shares their directory.
-        for tool in ("node", "sh", "python3"):
-            src = shutil.which(tool)
-            if src:
-                os.symlink(src, os.path.join(bin_dir, tool))
-        self.env["PATH"] = os.pathsep.join([bin_dir, "/bin", "/usr/bin"])
-        self.env[runs.LEDGER_ENV] = os.path.join(self.root, "ledger.jsonl")
-        self.env["DELEGATE_CACHE"] = os.path.join(self.root, "usage.json")
-        # the offline world is stubs: no detached model scan runs against them
-        self.env["DELEGATE_MODEL_SCAN"] = "off"
-        self.env["DELEGATE_CODEX_HOME"] = os.path.join(self.root, "codex-home")
-        self.env["ADS_DIR"] = self.ads_dir
-        self.bin_dir = bin_dir
-
-        # The fake relay answers with the final message this file holds.
-        final = os.path.join(self.root, "final.txt")
-        with open(final, "w", encoding="utf-8") as f:
-            f.write('pong\n{"status": "done", "deliverable": "pong", "evidence": [], '
-                    '"open_questions": [], "changed_files": []}\n')
-        return f"fake-relay: final={final}"
-
-    @staticmethod
-    def _stub(bin_dir, name, body):
-        path = os.path.join(bin_dir, name)
-        with open(path, "w") as f:
-            f.write("#!/bin/sh\n" + body)
-        os.chmod(path, 0o755)
 
     def common_args(self):
         args = ["--runs-dir", self.runs_dir]

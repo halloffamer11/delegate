@@ -124,7 +124,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   object) and catches only `OSError` and `ValueError`, so Ctrl-C and SIGTERM reach `runs.execute`.
   Settling is the private pure `_settle(report, job)`: the status table in the module docstring,
   the return-block scan, the caps and the read-only tripwire. `Scripted` is the in-process fake,
-  scripted with `Report`s, so `tests/test_relay.py` tests settling with no node.
+  scripted with `Report`s, so `tests/test_relay.py` tests settling with no node. Its `Ads` cases,
+  `tests/test_dispatch.py` and `evals.py --offline` share one `evals.OfflineWorld` (delegate-deepening
+  06): the sample catalog, the fake relay in a fake ADS tree, a `git` that answers the pin, stub CLIs,
+  a `sandbox-exec` that nests and an env that keeps the host's CLIs, Ledger, Meters, codex home and
+  orchestrator out; `world.stub(name, body)` replaces one CLI.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
@@ -163,7 +167,7 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   A probe writes nothing to the Ledger, which records Runs only; the latest Meter reading lives
   in the usage cache. `runs.py` owns the Ledger: its v1 start and finish lines (schema unchanged;
   a native Run's finish has `secs` null and `rc` 0), `$DELEGATE_LEDGER` (`runs.LEDGER_ENV`, which
-  the offline evals set), and `running`, through which the statusline reads it.
+  the offline world sets), and `running`, through which the statusline reads it.
 - `scripts/model_queue.py`: models the catalog lacks, queued for the next `delegate global`
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.

@@ -4,9 +4,9 @@
 
 Settling cases run through `relays.Scripted`, scripted with what a relay says
 (a Report), in-process with no node and no subprocess. Ads cases run the fake
-relay (tests/fake-ads/relay.mjs) under node, in the fake ADS tree that
-`evals.Sandbox(offline=True)` builds; `replay=<dir>` leaves a staged run
-directory's relay files, such as the grok gate-cancel fixture, in the run.
+relay (tests/fake-ads/relay.mjs) under node, with the fake ADS tree and the env
+of `evals.OfflineWorld`; `replay=<dir>` leaves a staged run directory's relay
+files, such as the grok gate-cancel fixture, in the run.
 Every case checks the Finish against the Run's record contracts:
 `runs.DISPATCH_FIELDS` and `runs.RETURN_FIELDS`.
 
@@ -239,14 +239,16 @@ def case_scripted_runs_its_script_in_order(run_dir):
 # ---------------------------------------------------------------------------
 
 class AdsWorld:
-    """The offline world's fake ADS tree, and a run directory per case."""
+    """The offline world's fake ADS tree and env, and a run directory per case."""
 
     def __init__(self):
-        self.sandbox = evals.Sandbox(offline=True)
-        self.ads_dir = self.sandbox.ads_dir
-        self.env = self.sandbox.env
-        self.cwd = self.sandbox.cwd
-        self.dir = os.path.join(self.sandbox.root, "relay-cases")
+        self.root = tempfile.mkdtemp(prefix="delegate-relay-")
+        world = evals.OfflineWorld(self.root)
+        self.ads_dir = world.ads_dir
+        self.env = world.env
+        self.cwd = os.path.join(self.root, "work")
+        self.dir = os.path.join(self.root, "relay-cases")
+        os.makedirs(self.cwd)
         os.makedirs(self.dir)
 
     def run(self, name, lane, directive, env=None, write=None):
@@ -286,7 +288,7 @@ class AdsWorld:
         return staged
 
     def close(self):
-        self.sandbox.close()
+        shutil.rmtree(self.root, ignore_errors=True)
 
 
 def stderr_lines(run_dir):
