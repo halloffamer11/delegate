@@ -109,7 +109,8 @@ screen. Use the CLI commands above where there is no terminal.
 checkout) builds or revises this machine's catalog. `setup` first runs
 `make runtime` (the codex home and the relays), which a plugin install needs
 once. At start it fetches the
-Artificial Analysis rows (cached for 24 hours) and asks each installed
+Artificial Analysis and Epoch AI rows (each cached for 24 hours; `r` on the
+harnesses page fetches Artificial Analysis again) and asks each installed
 harness for its models, then proposes the current generation in memory: a
 lane for every effort of every current model, each new lane in its
 predecessor's place with its tier, order, meter, weight and timeout, and a

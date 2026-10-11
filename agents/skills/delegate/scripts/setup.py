@@ -276,12 +276,11 @@ def read_benchmarks(args, renew=False):
     """The Benchmark snapshot this run reads. `--no-discover` skips every live
     acquisition, so it reads only named files; a fixture run reads the rows
     beside the harness fixtures; any other run reads the web through the
-    cache. `--epoch-csv` names Epoch's file, and `--no-bench`, which shows no
-    benchmark, reads no Epoch at all. `renew` is the harnesses page's `r`."""
+    cache. `--epoch-csv` names Epoch's file; else Epoch comes from where
+    Artificial Analysis does. `renew` is the harnesses page's `r`."""
     live = None if args.no_discover else (
         bench_snapshot.fixture(args.fixture_dir) if args.fixture_dir else bench_snapshot.web())
-    epoch = (bench_snapshot.local(args.epoch_csv) if args.epoch_csv
-             else None if args.no_bench else live)
+    epoch = bench_snapshot.local(args.epoch_csv) if args.epoch_csv else live
     return bench_snapshot.snapshot(args.effort_rows or (), aa=live, epoch=epoch, renew=renew)
 
 

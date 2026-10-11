@@ -16,7 +16,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (H. Benchmark snapshot)
 
 **Blocked by:** 27 The wizard reads Epoch through the cache, and a fixture run reaches no URL
 
-**Status:** landed 2026-10-11. `bench_page.write` and `render` take `epoch_rows`, and the page's "Every row, with its provenance" table lists them as `bench.epoch_records` over their own `LaneEvidence`; the wizard writes them at launch and again after `r`. `case_the_page_lists_the_epoch_rows` and `case_a_rescan_rewrites_the_page_with_its_epoch_rows` in test_setup.py and "the Epoch rows reach the rows table and never the plots, the boards or the verdicts" in test_bench_page.py verify it. No box is open.
+**Status:** landed 2026-10-11 (0789532; review fixes in "delegate-deepening H: review fixes"). `bench_page.write` and `render` take `epoch_rows`, and the page's "Every row, with its provenance" table lists them as `bench.epoch_records` over their own `LaneEvidence`; the wizard writes them at launch and again after `r`. `case_the_page_lists_the_epoch_rows` and `case_a_rescan_rewrites_the_page_with_its_epoch_rows` in test_setup.py and "the Epoch rows reach the rows table and never the plots, the boards or the verdicts" in test_bench_page.py verify it. No box is open.
 
 - [x] `case_the_page_lists_the_epoch_rows` (test_setup.py; `setup.main` with `--no-discover`, a saved discovery of every harness, `--epoch-csv tests/fixture/bench-epoch.csv` and `--effort-rows tests/fixtures/refresh-2026-09-22/aa-accepted.json`; `run_curses` reads `wizard.bench_page_path`) fails on the parent commit with no epoch row in the rows table and passes with the fixture's Epoch rows listed.
 - [x] `bench_page` defines no `_epoch_items`; the Epoch rows come from `LaneEvidence(...).records()`.
@@ -26,6 +26,10 @@ Spec: `.scratch/delegate-deepening/spec.md` (H. Benchmark snapshot)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** 0789532 (this ticket). The H review changed nothing on the page; with its fix to
+`setup.read_benchmarks` (ticket 27), a `--no-bench` wizard run's page lists the Epoch rows too.
+That fix is in "delegate-deepening H: review fixes".
 
 **What shipped.**
 - `bench_page.write(path, bench, lanes_doc, effort_rows=None, epoch_rows=None)` and `render(...)`

@@ -210,6 +210,13 @@ try:
                               "AA and Epoch: cannot fetch: connection refused"),
             f"origins={bare.origins} note={bare.note!r}",
         )
+        # nothing came back, so nothing was written: not even an empty
+        # directory for either source
+        record(
+            "a failed fetch with nothing cached leaves no cache directory behind",
+            not os.path.exists(cache) and not os.path.exists(os.path.join(td, "bare")),
+            f"cache={sorted(os.listdir(cache)) if os.path.isdir(cache) else None}",
+        )
 except Exception as e:
     record("a failed fetch with nothing cached keeps the named Artificial Analysis rows; "
            "Epoch is unavailable while the accepted rows stand", False, repr(e))

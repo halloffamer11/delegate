@@ -316,7 +316,7 @@ probes and returns `(discovered, discovery_data, snapshot)`; launch, the `r` res
 report (`show_bench`), `collect_bench` and `propose_generation` read it. A live run reads both
 sources through the cache (`web()`); `--fixture-dir` reads `aa-accepted.json` and `epoch.csv`
 beside the harness fixtures; `--no-discover` reads only named files; `--epoch-csv` names Epoch's
-file, and `--no-bench` reads no Epoch. The fetched AA rows replace only the named AA rows, so
+file, else Epoch comes from where AA does. The fetched AA rows replace only the named AA rows, so
 Terminal-Bench stays on the repo's rows. `r` renews AA and reads Epoch from the cache launch
 wrote, and a renew that fails keeps the rows launch read. The start page's rows line is the
 snapshot's `note`: both sources on one line, where each came from, then why either is not

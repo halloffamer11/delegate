@@ -22,7 +22,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (H. Benchmark snapshot; decisions H.
 
 **Blocked by:** 27 The wizard reads Epoch through the cache, and a fixture run reaches no URL
 
-**Status:** landed 2026-10-11. `bench.run` and `bench.run_model` read one Benchmark snapshot: the report reads Epoch from `--epoch-csv` or the web through the 24-hour cache, writes the report with Epoch skipped when the fetch fails, and names each source's origin; `inspect_model` takes rows. `case_the_report_names_the_epoch_file_it_read`, `case_an_epoch_outage_still_writes_the_report`, `case_the_report_dates_a_cached_epoch_fetch` and the model CLI case under the tripwire in test_bench.py verify it. No box is open.
+**Status:** landed 2026-10-11 (3c4e662; review fixes in "delegate-deepening H: review fixes"). `bench.run` and `bench.run_model` read one Benchmark snapshot: the report reads Epoch from `--epoch-csv` or the web through the 24-hour cache, writes the report with Epoch skipped when the fetch fails, and names each source's origin; `inspect_model` takes rows. `case_the_report_names_the_epoch_file_it_read`, `case_an_epoch_outage_still_writes_the_report`, `case_the_report_dates_a_cached_epoch_fetch` and the model CLI case under the tripwire in test_bench.py verify it. No box is open.
 
 - [x] `case_the_report_names_the_epoch_file_it_read` (test_bench.py; `write_epoch_csv(fixture_rows())` with `--date 2026-09-09`) fails on the parent commit with "fetched 2026-09-09" and passes with "read from <file>".
 - [x] `case_an_epoch_outage_still_writes_the_report` (test_bench.py; `bench.py --effort-rows <aa rows>` with `HOME` a temp dir and the closed proxy) fails on the parent commit with exit 1 and passes with exit 0, the AA table and "Epoch AI: skipped".
@@ -33,6 +33,10 @@ Spec: `.scratch/delegate-deepening/spec.md` (H. Benchmark snapshot; decisions H.
 - [x] `make test` passes on Python 3.9 and 3.13; `references/architecture.md` says the report reads Epoch through the cache.
 
 ## Landed, 2026-10-11
+
+**Commits.** 3c4e662 (this ticket). The H review changed nothing in the report CLIs; its fix to
+the web adapter (a failed fetch leaves no empty cache directory) is in "delegate-deepening H: review
+fixes" (ticket 27).
 
 **What shipped.**
 - `bench.read_snapshot(effort_rows, epoch_csv, fetch)` is how both bench CLIs read the Benchmark

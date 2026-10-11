@@ -687,6 +687,24 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
         return ok, f"code={code} seen={seen} written={written} out={out.getvalue()[-400:]!r}"
 
 
+def case_no_bench_reads_epoch_where_the_run_reads_its_rows():
+    """`--no-bench` hides the report, not a source: a run reads Epoch from the
+    adapter it reads Artificial Analysis from, as the spec's usage passes it,
+    so the rows line never tells a run that has a source to name
+    `--epoch-csv` (H review)."""
+    import setup
+    from types import SimpleNamespace
+    with tempfile.TemporaryDirectory() as td:
+        shutil.copy(os.path.join(REFRESH_DIR, "aa-accepted.json"), os.path.join(td, "aa-accepted.json"))
+        shutil.copy(os.path.join(HERE, "fixture", "bench-epoch.csv"), os.path.join(td, "epoch.csv"))
+        snap = setup.read_benchmarks(SimpleNamespace(
+            no_discover=False, fixture_dir=td, epoch_csv=None, no_bench=True, effort_rows=None))
+    origin = snap.origins.get("epoch")
+    ok = (len(snap.epoch_rows or ()) == 25 and origin is not None and origin.how == "file"
+          and snap.note == "Benchmark rows: AA read from aa-accepted.json, Epoch read from epoch.csv")
+    return ok, f"note={snap.note!r} origins={snap.origins}"
+
+
 def case_scan_and_propose_are_the_launch_steps():
     """`r` runs the same steps launch ran, through the same functions: `scan`
     acquires the rows and the harnesses' models, `propose_generation`
@@ -1202,6 +1220,8 @@ for name, case in (
     ("the save after a rescan uses the rescan's plan",
      case_the_save_after_a_rescan_uses_the_rescans_plan),
     ("scan and propose are the launch steps", case_scan_and_propose_are_the_launch_steps),
+    ("no-bench reads Epoch where the run reads its rows",
+     case_no_bench_reads_epoch_where_the_run_reads_its_rows),
     ("native agent files follow the claude lanes",
      case_native_agent_files_follow_the_claude_lanes),
     ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),

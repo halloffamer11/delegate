@@ -220,7 +220,9 @@ def _web(root, source, url_of, accept, read, get, clock, renew):
     url = None
     try:
         url = url_of()
-        rows = _replace(root, source, artifact, lambda staging: accept(get(url), url, staging), now)
+        # fetched before the cache is touched, so a failed fetch leaves it as it was
+        raw = get(url)
+        rows = _replace(root, source, artifact, lambda staging: accept(raw, url, staging), now)
     except Exception as e:  # a source that is down is a note, never a stop
         failure = str(e)
         # the URLs are this module's to know, so the reason the rows line
@@ -272,10 +274,10 @@ def _read_aa(path):
 
 
 def _read_epoch(path):
+    """The cached Epoch rows, or None when there are none to read."""
     try:
-        with open(path, "r", encoding="utf-8-sig", newline="") as f:
-            return _parse_epoch(f.read())
-    except (OSError, UnicodeDecodeError, ValueError):
+        return _epoch_file(path)
+    except ValueError:
         return None
 
 
@@ -287,15 +289,7 @@ def _read_named(source, path):
         if source == AA:
             rows = load_effort_rows([path])
         elif source == EPOCH:
-            try:
-                with open(path, "r", encoding="utf-8-sig", newline="") as f:
-                    text = f.read()
-            except (OSError, UnicodeDecodeError) as e:
-                raise ValueError(f"epoch-csv: cannot read Epoch CSV: {e}") from e
-            try:
-                rows = _parse_epoch(text)
-            except ValueError as e:
-                raise ValueError(f"epoch-csv: {path}: {e}") from e
+            rows = _epoch_file(path)
         else:
             raise ValueError(f"{path}: no source {source}")
     except ValueError as e:
@@ -309,10 +303,24 @@ def _read_named(source, path):
 
 # --- Epoch's CSV -----------------------------------------------------------------
 
+def _epoch_file(path):
+    """A saved Epoch CSV's rows: a named file or the cached copy. Raises
+    ValueError naming the file when it cannot be read or lacks the header."""
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise ValueError(f"epoch-csv: cannot read Epoch CSV: {e}") from e
+    try:
+        return _parse_epoch(text)
+    except ValueError as e:
+        raise ValueError(f"epoch-csv: {path}: {e}") from e
+
+
 def _parse_epoch(text):
     """The rows on EPOCH_BENCHMARKS, each keeping `model` and the `slug` and
     `effort` its model_version carries. Raises ValueError without the header."""
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         text = text[1:]
     lines = text.splitlines()
     if not lines or lines[0].strip() != _EPOCH_HEADER:

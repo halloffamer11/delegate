@@ -40,7 +40,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (H. Benchmark snapshot; decisions H.
 
 **Blocked by:** 25 An Epoch row reaches the same Lane in every benchmark view (the evidence-based `collect`); 26 One published name names one Model on every Harness that runs it (lane order: all of A before H)
 
-**Status:** landed 2026-10-11. `bench_snapshot.py` is the one place benchmark rows are acquired: the wizard's launch and `r` read one snapshot on the scan thread through a 24-hour cache, `bench.collect` takes rows, and `make test` runs behind a closed proxy; `case_a_rescan_opens_the_epoch_url_once`, `case_a_fixture_run_reaches_no_url`, the 14 cases of `tests/test_bench_snapshot.py` and test_setup_tui 63e verify it. Three boxes stay open, none the user's to do: the test_model_queue box and the rebase half of the `make test` box wait for this lane's rebase onto catalog-write, meters-and-preview and run-and-relay at merge, and the start page box waits for a review under `/frontend-design:frontend-design`, which this session did not offer.
+**Status:** landed 2026-10-11 (71072e7; review fixes in "delegate-deepening H: review fixes"). `bench_snapshot.py` is the one place benchmark rows are acquired: the wizard's launch and `r` read one snapshot on the scan thread through a 24-hour cache, `bench.collect` takes rows, and `make test` runs behind a closed proxy; `case_a_rescan_opens_the_epoch_url_once`, `case_a_fixture_run_reaches_no_url`, the 15 cases of `tests/test_bench_snapshot.py` and test_setup_tui 63e verify it. Three boxes stay open, none the user's to do: the test_model_queue box and the rebase half of the `make test` box wait for this lane's rebase onto catalog-write, meters-and-preview and run-and-relay at merge, and the start page box waits for a review under `/frontend-design:frontend-design`, which this session did not offer.
 
 - [x] `case_a_rescan_opens_the_epoch_url_once` (test_setup.py; subprocess driver with `HOME` a temp dir, a fake `urlopen` serving `tests/fixtures/real_aa_model_page_sample.html` and `tests/fixture/bench-epoch.csv`, `run_curses` pressing enter then `r`) fails on the parent commit with the Epoch URL opened twice and passes with it opened once and the AA URL twice.
 - [x] `case_a_fixture_run_reaches_no_url` (test_setup.py; `setup.py --plain` with `--fixture-dir tests/fixtures/refresh-2026-09-22`, and again with `--no-discover` and a saved discovery, both with `--effort-rows` that fixture's `aa-accepted.json` and every proxy variable at a closed local port) fails on the parent commit with "bench: cannot read Epoch CSV" and no AA table, and passes with exit 0, the AA table, "Epoch AI: skipped" and the reason in the start facts.
@@ -55,6 +55,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (H. Benchmark snapshot; decisions H.
 - [x] `CONTEXT.md`'s Benchmark snapshot, Fetched source and Accepted rows entries match what shipped; `references/architecture.md` describes the snapshot and the cache instead of `refresh_effort_rows`.
 
 ## Landed, 2026-10-11
+
+**Commits.** 71072e7 (this ticket), then the review fixes in "delegate-deepening H: review fixes".
 
 **What shipped.**
 - `scripts/bench_snapshot.py`: `snapshot(row_files, aa=, epoch=, renew=)`, the `web()`, `fixture()`
@@ -115,8 +117,8 @@ also with only the recipe's own tripwire.
 - The note is "" only when nothing was named and no source had an adapter (the spec: "" when no
   source had an adapter). An offline run with `--effort-rows` names both sources and says Epoch
   needs `--epoch-csv`, which the fixture-run case's "reason in the start facts" needs.
-- `--no-bench` reads no Epoch (the spec's usage passes the live adapter regardless), so a run that
-  shows no benchmark fetches no CSV.
+- `--no-bench` read no Epoch at first. The review reverted that to the spec's usage (Epoch comes
+  from where AA does), because the rows line then told a `--no-bench` run to name `--epoch-csv`.
 - The web adapter treats an AA page whose check accepts no row as unparsed, so it never replaces
   the cache with an empty list.
 - `bench.load_epoch` stays until H2 and reads through the snapshot: a named CSV through `local`,
@@ -128,4 +130,16 @@ also with only the recipe's own tripwire.
 - `collect` drops the "absent from Epoch AI" notes when Epoch is skipped, and test_setup_tui's
   "collect returns documented keys" gains `epoch_skipped`. test_setup_tui's older cases that pass a
   literal `rows_note` keep their strings; they test that the page shows the line it is given.
+
+**Review fixes (code-review on both axes, red first).**
+- `setup.read_benchmarks` passes Epoch the adapter AA gets unless `--epoch-csv` names a file, as
+  the spec's usage does; test_setup "no-bench reads Epoch where the run reads its rows" was red
+  with "Epoch: no --epoch-csv" on a fixture run that held `epoch.csv`.
+- The web adapter fetches before it touches the cache, so a failed fetch with nothing cached
+  leaves no empty `aa/` or `epoch/` directory; test_bench_snapshot "a failed fetch with nothing
+  cached leaves no cache directory behind" was red with both.
+- One private `_epoch_file` reads a saved CSV for both the cached and the named copy, and the BOM
+  check is spelled `"\ufeff"` instead of a literal invisible character.
+- `references/catalog.md` says the wizard fetches Epoch through the 24-hour cache too, and that `r`
+  fetches AA again.
 
