@@ -303,15 +303,27 @@ def commit(read: CatalogRead, documents: Mapping[str, dict]) -> Committed:
             raise catalog.CatalogError(
                 f"{snap.files[name]}: cannot write: {e}; {_restore(snap, written)}") from e
         written.append(name)
+    # The catalog is written: from here on a failure is a note line, never an
+    # error, so these two steps catch any Exception (a machine-local profile
+    # can fail in ways no narrower class names).
     lines = []
     if "lanes" in documents:
         lines += _sync_agents(snap, documents["lanes"])
     if snap.queued or snap.applied:
         try:
             model_queue.forget(snap.queued, snap.applied)
-        except (OSError, ValueError) as e:
-            lines.append(f"note: could not forget the model queue entries this run named: {e}")
+        except Exception as e:
+            lines.append(f"note: could not forget the model queue entries this run named: {_why(e)}")
     return Committed(written=tuple(snap.files[name] for name in written), lines=tuple(lines))
+
+
+def _why(error):
+    """How a note names an exception: an OSError's message already says what
+    failed; any other gets its class too, since a KeyError's message is only
+    the key."""
+    if isinstance(error, OSError):
+        return str(error)
+    return f"{type(error).__name__}: {error}"
 
 
 def _is_live(config_dir):
@@ -334,8 +346,8 @@ def _sync_agents(snap, lanes_doc):
     one note. Returns the lines; a failure is a note line, never an error."""
     try:
         profiles = orchestrators.native_profiles()
-    except (orchestrators.ProfileError, OSError) as e:
-        return [f"note: no agent file was written: {e}"]
+    except Exception as e:
+        return [f"note: no agent file was written: {_why(e)}"]
     after = lanes_doc.get("lanes") or {}
     before = (_as_read(snap, "lanes") or {}).get("lanes") or {}
     if not _is_live(snap._config_dir):
@@ -351,22 +363,23 @@ def _sync_agents(snap, lanes_doc):
     for profile in profiles:
         agents_dir = os.path.expanduser(profile["native"]["agents_dir"])
         for name in _native(after, profile["harness"]):
-            path = orchestrators.agent_path(profile, name, agents_dir)
             try:
-                line = _place_agent(path, _agent_text(profile, name, after[name]))
-            except (OSError, ValueError) as e:
-                line = f"note: could not write {path}: {e}"
+                line = _place_agent(orchestrators.agent_path(profile, name, agents_dir),
+                                    _agent_text(profile, name, after[name]))
+            except Exception as e:
+                line = f"note: could not write the agent file of {name}: {_why(e)}"
             if line:
                 lines.append(line)
         for name in _native(before, profile["harness"]):
-            path = orchestrators.agent_path(profile, name, agents_dir)
-            if name in after or not os.path.lexists(path):
+            if name in after:
                 continue
             try:
-                os.remove(path)
-                lines.append(f"removed {path}")
-            except OSError as e:
-                lines.append(f"note: could not remove {path}: {e}")
+                path = orchestrators.agent_path(profile, name, agents_dir)
+                if os.path.lexists(path):
+                    os.remove(path)
+                    lines.append(f"removed {path}")
+            except Exception as e:
+                lines.append(f"note: could not remove the agent file of {name}: {_why(e)}")
     return lines
 
 

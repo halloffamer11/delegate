@@ -77,8 +77,8 @@ replaces partial use of invalid documents.
   "intervening edit" refusal, and `Committed.lines` go to stderr, so `catalog set`'s JSON stdout is
   only the result. A global apply backs up the document it replaces, and one that writes the live
   catalog's `lanes.json` keeps the Agent files in step; a project apply, the dashboard's only
-  write, does neither. An empty customization over an absent file is a noop and commits nothing. `plan_edits()` is the one
-  planning path (ticket 14). It takes the source documents already in hand and a list of the same
+  write, does neither. An empty customization over an absent file is a noop and commits nothing.
+  `plan_edits()` is the one planning path (ticket 14). It takes the source documents already in hand and a list of the same
   `set`/`range`/`order` operations, plans each one onto the documents the one before it produced,
   and returns named fields: the four planned documents, the effective `catalog` they produce, and
   one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes
@@ -169,8 +169,8 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   its start facts name it ("Dispatch noticed") whether or not the refresh ran; its save forgets
   exactly the entries those facts named and keeps any noted since (deepening D.4, which replaces
   any-harness ticket 29's "the wizard's confirm write empties the queue" and the rule that a run
-  whose refresh did not run keeps it). Focused screens read no queue and forget nothing. `$DELEGATE_MODEL_SCAN=off` stops the scan. A newer version of a model
-  the catalog already runs is not queued but applied (ticket 44 of the redesign): the scan swaps
+  whose refresh did not run keeps it). Focused screens read no queue and forget nothing.
+  `$DELEGATE_MODEL_SCAN=off` stops the scan. A newer version of a model the catalog already runs is not queued but applied (ticket 44 of the redesign): the scan swaps
   each Lane the refresh replaces with its successor into lanes.json, keeping Tier, Order and an off
   Lane off, through a Catalog commit, so the old lanes.json is backed up to
   `<config dir>/backups` and the Agent files follow. A catalog that changed while the scan listed
@@ -328,10 +328,12 @@ fields before confirmation. Its save commits only the documents the screen chang
 through the Catalog read taken at launch, which holds no Model queue: untouched
 records and documents keep their bytes, a shipped Class the routing lacks is shown
 but never written unless a routing field changed, and a save with no change writes
-nothing. The full `start` wizard and `--plain` commit both documents through the
-Catalog read taken at launch (`catalog_commit`). On every screen a document
-changed since launch, by `catalog set` or by the scan's Model swap, stops the save,
-which names it, writes nothing and exits 1. Catalog owns the bulk tier-line parser/application/order helpers;
+nothing. On a first run, with no catalog yet, a focused save that writes one document
+writes the other as the screen showed it, so the catalog is never half written. The
+full `start` wizard and `--plain` commit both documents through the Catalog read taken
+at launch (`catalog_commit`). On every screen a document changed since launch, by
+`catalog set` or by the scan's Model swap, stops the save, which names it, writes
+nothing and exits 1. Catalog owns the bulk tier-line parser/application/order helpers;
 `setup_tui` keeps aliases. The routing screen exposes metering with `[x]`/`[ ]`,
 space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark moves
 down one Tier; Tier 1 requires Carry to switch off.

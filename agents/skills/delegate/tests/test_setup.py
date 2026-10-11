@@ -760,7 +760,6 @@ def case_the_save_after_a_rescan_writes_the_agent_files_of_the_lanes_it_saved():
     saved has its file and the superseded ones have none (wizard-design 01,
     deepening D.7). It runs under a temp HOME, so ~/.config/delegate there is
     the live catalog."""
-    import io
     import setup
     import setup_tui
     real_scan, real_run = setup.scan, setup_tui.run_curses
@@ -784,10 +783,6 @@ def case_the_save_after_a_rescan_writes_the_agent_files_of_the_lanes_it_saved():
                 break
             wizard.handle("y" if wizard.screen == "confirm" else "enter")
         return wizard.result()
-
-    class Terminal(io.StringIO):
-        def isatty(self):
-            return True
 
     with tempfile.TemporaryDirectory() as td:
         agents = os.path.join(td, ".claude", "agents")
@@ -938,6 +933,8 @@ def case_plain_prints_the_refresh_change_lines():
 # --- deepening D1: a wizard save commits through the catalog it read ---------
 
 class Terminal(io.StringIO):
+    """A stream that says it is a terminal, so setup.main takes the TUI."""
+
     def isatty(self):
         return True
 
@@ -1288,6 +1285,29 @@ def case_a_focused_save_refuses_a_catalog_changed_since_launch():
         return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
 
 
+def case_a_focused_save_on_a_first_run_writes_the_whole_catalog():
+    """With no catalog yet, a focused screen opens on the sample. A toggle
+    there writes lanes.json and the routing.json the screen showed, so the
+    catalog is never half written and the next run opens it; confirmed with no
+    change, the screen still writes nothing (deepening D3)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "cfg")
+        argv = ["--config-dir", cfg, "--no-discover", "--no-bench", "--screen", "tier3"]
+        idle, idle_out, _ = wizard_in_process(td, argv, drive=take_as_is)
+        untouched = not os.path.isdir(cfg) or os.listdir(cfg) == []
+        code, out, err = wizard_in_process(td, argv, drive=toggle_one_lane)
+        files = sorted(os.listdir(cfg)) if os.path.isdir(cfg) else []
+        again, again_out, again_err = wizard_in_process(td, argv, drive=take_as_is)
+        routing = (catalog.load_json(os.path.join(cfg, "routing.json"))
+                   if "routing.json" in files else None)
+        ok = (idle == 0 and "nothing changed; nothing written" in idle_out and untouched
+              and code == 0 and files == ["lanes.json", "routing.json"]
+              and routing == catalog.with_default_classes(routing_sample)
+              and again == 0 and "nothing changed; nothing written" in again_out)
+        return ok, (f"idle={idle} code={code} files={files} again={again} "
+                    f"err={err[-200:]!r} again_err={again_err[-200:]!r}")
+
+
 for name, case in (
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
@@ -1340,6 +1360,8 @@ for name, case in (
     ("a focused save with no change writes nothing", case_a_focused_save_with_no_change_writes_nothing),
     ("a focused save refuses a catalog changed since launch",
      case_a_focused_save_refuses_a_catalog_changed_since_launch),
+    ("a focused save on a first run writes the whole catalog",
+     case_a_focused_save_on_a_first_run_writes_the_whole_catalog),
 ):
     try:
         ok, detail = case()

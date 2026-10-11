@@ -38,7 +38,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decisions D.1, D
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-11. `scripts/catalog_commit.py` adds `read()` and `commit()`, and the wizard's full and `--plain` saves commit through the read taken at launch, so a catalog set or a Model swap made while the wizard is open is refused, not overwritten; `catalog.write_json` carries the link rule. Verified by the nine `test_catalog_commit.py` cases, four new test_setup cases and test_catalog 10.14, each red on the base first; no box is open.
+**Status:** landed 2026-10-11 (ed45ae9). `scripts/catalog_commit.py` adds `read()` and `commit()`, and the wizard's full and `--plain` saves commit through the read taken at launch, so a catalog set or a Model swap made while the wizard is open is refused, not overwritten; `catalog.write_json` carries the link rule. Verified by the nine `test_catalog_commit.py` cases, four new test_setup cases and test_catalog 10.14, each red on the base first; no box is open.
 
 - [x] `tests/test_catalog_commit.py` passes these cases: unchanged documents keep bytes and mtime; an intervening edit or a retargeted link raises `CatalogChanged` naming the document and writes nothing; an invalid document writes nothing; a link to an existing file is written through and kept; a dangling link is refused at read and at commit and its target is never created; a replaced global document is backed up and only the newest 20 per document are kept; a failed second write restores the first; a first run commits onto absent documents.
 - [x] test_setup.py "a catalog set made while the wizard is open survives its save" fails before this ticket (exit 0, tier reverted). After the change it passes: exit 1, stderr names `lanes.json`, and the set's tier is on disk.
@@ -53,6 +53,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decisions D.1, D
 - [x] `references/architecture.md` and `references/catalog.md` name `catalog_commit` as the write path and describe the link rule and the backups. `CONTEXT.md`'s Catalog, Catalog read, Catalog commit and Intervening edit entries (added with the spec) match what shipped.
 
 ## Landed, 2026-10-11
+
+Commit: `ed45ae9` ("delegate-deepening 09: A wizard save never overwrites a catalog change
+made while it was open").
 
 What shipped:
 

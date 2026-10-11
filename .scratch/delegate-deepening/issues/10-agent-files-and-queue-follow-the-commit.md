@@ -35,7 +35,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decisions D.2, D
 
 **Blocked by:** 09 A wizard save never overwrites a catalog change made while it was open
 
-**Status:** landed 2026-10-11. `catalog_commit.commit` now keeps the Agent files in step with the live catalog's lanes and forgets exactly the Model queue entries a `read(queue=True)` returned, and the wizard, its start facts and dispatch's scan go through it; setup and the scan write no Agent file and empty no queue themselves. Verified by seven new `test_catalog_commit.py` cases, two new test_setup cases and the rewritten rescan case, and test_model_queue cases 9, 13 and 14, each new or changed one red on the base first; no box is open.
+**Status:** landed 2026-10-11 (3b2956c, with the review fixes in "delegate-deepening D: review fixes"). `catalog_commit.commit` now keeps the Agent files in step with the live catalog's lanes and forgets exactly the Model queue entries a `read(queue=True)` returned, and the wizard, its start facts and dispatch's scan go through it; setup and the scan write no Agent file and empty no queue themselves. Verified by seven new `test_catalog_commit.py` cases, two new test_setup cases and the rewritten rescan case, and test_model_queue cases 9, 13 and 14, each new or changed one red on the base first; no box is open.
 
 - [x] `test_catalog_commit.py` passes these cases: native Lanes added and removed gain and lose their files under a temp `HOME`; a link at a Lane's path is replaced and its target is untouched; a template change reaches the Lanes already placed; a non-live catalog gets a note and no file; a commit of project documents alone writes no Agent file; a commit forgets exactly the entries its read returned; a read without the queue leaves the queue alone.
 - [x] test_setup.py "a model noticed while the wizard is open stays queued" (`--fixture-dir` refresh-2026-09-22, `--no-bench`, `model_queue.note` inside the `run_curses` stub) fails before this ticket and passes after.
@@ -48,6 +48,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decisions D.2, D
 - [x] `make test` passes on 3.9 and 3.13. `references/architecture.md` and `model_queue`'s docstring state the new queue rule (forget what the start page named) and where backups live, and redesign ticket 29 records that its queue sentence was replaced.
 
 ## Landed, 2026-10-11
+
+Commits: `3b2956c` ("delegate-deepening 10: Agent files and the model queue follow every
+catalog commit"), then the review fixes in "delegate-deepening D: review fixes".
 
 What shipped:
 
@@ -131,3 +134,12 @@ Deviations:
   confirm write emptied the queue on any `y`. The non-live note counts the native Lanes after
   the commit and says nothing when there are none.
 - The scan prints its commit's lines to stderr; a scan that dispatch starts discards them.
+
+Review fixes ("delegate-deepening D: review fixes"):
+
+- Steps 7 and 8 caught only `OSError` and `ValueError`, so a machine-local profile whose
+  template holds a JSON object (`{"ok": true}`) raised `KeyError` out of `commit` after the
+  catalog was written, and the queue entries the read returned were never forgotten. Both
+  steps now catch any `Exception` per Lane and per step and turn it into a note line naming
+  the Lane. test_catalog_commit "an agent file that cannot be written is a note, and the
+  queue is still forgotten" failed before the fix (the commit raised) and passes after.

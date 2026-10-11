@@ -28,6 +28,7 @@ sys.path.insert(0, SCRIPTS)
 import catalog  # noqa: E402
 import catalog_commit  # noqa: E402
 import model_queue  # noqa: E402
+import orchestrators  # noqa: E402
 
 fails = 0
 
@@ -569,6 +570,37 @@ def case_a_read_without_the_queue_leaves_the_queue_alone():
         return ok, f"queued={snap.queued} lines={done.lines}"
 
 
+def case_an_agent_file_that_cannot_be_written_is_a_note():
+    """The Agent files and the queue follow a catalog already written, so a
+    failure there is a note line, never an error. A machine-local Claude
+    profile whose template holds a JSON object cannot fill any Agent file;
+    the commit still returns, the catalog stays written, each claude Lane
+    gets a note, and the queue entries its read returned are forgotten."""
+    with temp_home() as home:
+        cfg, agents = native_catalog(home)
+        with open(os.path.join(orchestrators.SHIPPED_DIR, "claude.json"), encoding="utf-8") as f:
+            profile = json.load(f)
+        profile["native"]["template"].insert(-1, 'End with a JSON object: {"ok": true}')
+        place(os.path.join(cfg, "orchestrators", "claude.json"), json.dumps(profile))
+        write_queue(NOTICED, SWAPPED)
+        snap = catalog_commit.read(cfg, queue=True)
+        tier = 2 if snap.lanes["lanes"]["opus-high@claude"]["tier"] != 2 else 3
+        try:
+            done = catalog_commit.commit(snap, {"lanes": with_tier(snap.lanes, "opus-high@claude", tier)})
+        except Exception as e:
+            return False, f"the commit raised {e!r}"
+        lanes_path = os.path.join(cfg, "lanes.json")
+        notes = [line for line in done.lines if line.startswith("note: ")]
+        placed = os.listdir(agents) if os.path.isdir(agents) else []
+        ok = (done.written == (lanes_path,)
+              and catalog.load_json(lanes_path)["lanes"]["opus-high@claude"]["tier"] == tier
+              and len(notes) == len(done.lines) == len(claude_lanes(snap.lanes))
+              and any("opus-high@claude" in line for line in notes)
+              and not any(name.startswith("lane-") for name in placed)
+              and queue_file()["models"] == [] and queue_file()["applied"] == [])
+        return ok, f"written={done.written} lines={done.lines[:2]} queue={queue_file()}"
+
+
 for name, case in (
     ("a commit writes only the documents that changed",
      case_a_commit_writes_only_the_documents_that_changed),
@@ -602,6 +634,8 @@ for name, case in (
      case_a_commit_forgets_exactly_the_queue_entries_its_read_returned),
     ("a read without the queue leaves the queue alone",
      case_a_read_without_the_queue_leaves_the_queue_alone),
+    ("an agent file that cannot be written is a note, and the queue is still forgotten",
+     case_an_agent_file_that_cannot_be_written_is_a_note),
 ):
     try:
         ok, detail = case()

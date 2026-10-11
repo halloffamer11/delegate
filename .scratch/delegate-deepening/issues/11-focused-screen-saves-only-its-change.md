@@ -22,7 +22,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decision D.6, wh
 
 **Blocked by:** 09 A wizard save never overwrites a catalog change made while it was open
 
-**Status:** landed 2026-10-11. A focused setup screen now starts from the catalog as read with no generation proposed, and its save commits only the documents the screen changed through the launch `catalog_commit` read, so a one-Lane toggle writes that Lane and the Orders it moved, and an Intervening edit is refused naming the file; `write_focused` is gone. Verified by four new test_setup cases ("a focused tier screen saves only the change made on it" and "a focused save refuses a catalog changed since launch" red on the base first; the routing and no-change cases red against a commit of both documents); no box is open.
+**Status:** landed 2026-10-11 (454b5ea, with the review fixes in "delegate-deepening D: review fixes"). A focused setup screen now starts from the catalog as read with no generation proposed, and its save commits only the documents the screen changed through the launch `catalog_commit` read, so a one-Lane toggle writes that Lane and the Orders it moved, and an Intervening edit is refused naming the file; `write_focused` is gone. Verified by four new test_setup cases ("a focused tier screen saves only the change made on it" and "a focused save refuses a catalog changed since launch" red on the base first; the routing and no-change cases red against a commit of both documents); no box is open.
 
 - [x] test_setup.py "a focused tier screen saves only the change made on it" (frozen refresh-2026-09-22 `lanes.json`, `--fixture-dir`, `--no-bench`, `--screen tier3`, one Lane toggled) fails before this ticket, where 20 Lanes are added and 17 removed. After the change it passes: the Lane names are unchanged, and only that Lane's tier and the Orders it moved differ.
 - [x] A focused save whose screen changed no routing field leaves `routing.json`'s bytes and mtime unchanged, even when the catalog lacks a shipped Class.
@@ -32,6 +32,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decision D.6, wh
 - [x] `make test` passes on 3.9 and 3.13. The focused-setup paragraph in `references/architecture.md` says the screen proposes no generation.
 
 ## Landed, 2026-10-11
+
+Commits: `454b5ea` ("delegate-deepening 11: A focused setup screen saves only the change made
+on it"), then the review fixes in "delegate-deepening D: review fixes".
 
 What shipped:
 
@@ -80,6 +83,15 @@ or `--no-discover` under a temporary `HOME`):
 Deviations:
 
 - The ticket names one new test; four were added, one per behaviour the boxes name.
-- Left as it was: a focused save on a first run (no `lanes.json`) compares against the
-  sample it showed, as `write_focused` did, so a toggle there writes `lanes.json` without
-  `routing.json` (checked by hand). No box covers it.
+- A focused save on a first run (no `lanes.json`) compared against the sample it showed, as
+  `write_focused` did, so a toggle there wrote `lanes.json` without `routing.json`, and the
+  next setup run failed on the missing `routing.json`. Fixed in the review (below).
+
+Review fixes ("delegate-deepening D: review fixes"):
+
+- On a first run, a focused save that writes one document now also writes the other the read
+  found absent, as the screen showed it, so the catalog is never left half written; a first
+  run confirmed with no change still writes nothing. test_setup "a focused save on a first run
+  writes the whole catalog" failed before the fix (only `lanes.json` written, the next run
+  exited 1) and passes after. The focused-setup paragraph of `references/architecture.md`
+  says so.

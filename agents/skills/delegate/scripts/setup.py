@@ -647,9 +647,14 @@ def main(argv=None):
                     # changed. The routing a screen shows carries every
                     # shipped Class, so committing it unchanged would write
                     # a file the confirm page never listed (deepening D3).
+                    # On a first run the read found no catalog: a save that
+                    # writes one document writes the other as the screen
+                    # showed it, so the catalog is never left half written.
                     started = {"lanes": lanes_doc, "routing": routing_doc}
+                    changed = [name for name, doc in documents.items() if doc != started[name]]
+                    absent = [name for name in documents if getattr(snap, name) is None]
                     documents = {name: doc for name, doc in documents.items()
-                                 if doc != started[name]}
+                                 if name in changed or (changed and name in absent)}
                 report_commit(catalog_commit.commit(snap, documents))
     except SetupAbort:
         return 130

@@ -20,7 +20,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decisions D.1 an
 
 **Blocked by:** 09 A wizard save never overwrites a catalog change made while it was open
 
-**Status:** landed 2026-10-11. `edit_catalog`'s apply now commits its one document with `catalog_commit.commit`, so a global `catalog set` backs up what it replaces and, on the live catalog's `lanes.json`, keeps the Agent files in step, while a project set, the dashboard's only write, does neither; a `CatalogChanged` there is the dashboard's exact "intervening edit" text. Verified by test_catalog 10.15 to 10.18 (10.15 and 10.17 red on the base first) with 10.3, 10.3b, 10.3c, 11.7, 10.12 and the dashboard test unchanged; no box is open.
+**Status:** landed 2026-10-11 (db1ca98). `edit_catalog`'s apply now commits its one document with `catalog_commit.commit`, so a global `catalog set` backs up what it replaces and, on the live catalog's `lanes.json`, keeps the Agent files in step, while a project set, the dashboard's only write, does neither; a `CatalogChanged` there is the dashboard's exact "intervening edit" text. Verified by test_catalog 10.15 to 10.18 (10.15 and 10.17 red on the base first) with 10.3, 10.3b, 10.3c, 11.7, 10.12 and the dashboard test unchanged; no box is open.
 
 - [x] test_catalog.py cases 10.3, 10.3b, 10.3c and 11.7 and the intervening-write case pass unchanged.
 - [x] `tools/delegate-dashboard/test_dashboard.py` passes unchanged.
@@ -30,6 +30,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (D. Catalog commit; decisions D.1 an
 - [x] `make test` passes on 3.9 and 3.13. `references/catalog.md` says apply writes through links and refuses a dangling one.
 
 ## Landed, 2026-10-11
+
+Commit: `db1ca98` ("delegate-deepening 12: catalog set and the dashboard write through the
+one commit").
 
 What shipped:
 
