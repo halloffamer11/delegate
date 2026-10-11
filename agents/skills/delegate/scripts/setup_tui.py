@@ -235,6 +235,18 @@ def plural(count, word):
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
+def placement_text(lane):
+    """Where a Lane record as written places it: `tier 2, order 1` for a
+    carried Lane with an Order, `tier 2` for an off Lane or a carried one
+    without an Order. The full confirm page and `--plain`'s confirm listing
+    both print it, from `draft.documents()["lanes"]`, so each says exactly
+    what `y` writes (deepening F.3)."""
+    text = f"tier {lane['tier']}"
+    if lane.get("enabled") is not False and "order" in lane:
+        text += f", order {lane['order']}"
+    return text
+
+
 def refresh_lines(refresh, width=80, queued=(), applied=()):
     """What the catalog refresh proposes, one line per model (ticket 33), then
     the Model queue the wizard read with the catalog: `queued` and `applied`,
@@ -779,30 +791,27 @@ class Wizard:
                 self._enter_tier(1)
             return
         if self.screen == "routing":
-            count = len(self.classes) * 2 + 3
-            meters_idx = len(self.classes) * 2 + 2
+            # the cursor is an index into the settings the page draws
+            # (`_routing_rows`), so the setting under it is read from there
+            settings = self._routing_settings()
             if key == "up":
-                self.cursor = (self.cursor - 1) % count
+                self.cursor = (self.cursor - 1) % len(settings)
             elif key == "down":
-                self.cursor = (self.cursor + 1) % count
+                self.cursor = (self.cursor + 1) % len(settings)
             elif key in ("plus", "minus", "x", "space"):
-                if self.cursor == meters_idx:
+                cls, kind, value = settings[min(self.cursor, len(settings) - 1)]
+                if kind == "meters":
                     self.draft.set_routing("meters", not self._meters_on())
                 elif key in ("plus", "minus"):
                     delta = 1 if key == "plus" else -1
-                    routing = self._routing()
-                    if self.cursor < len(self.classes) * 2:
-                        name = self.classes[self.cursor // 2]
-                        cls_info = routing["classes"][name]
-                        if self.cursor % 2 == 1:
-                            self.draft.set_routing(
-                                "ceiling", min(4, max(cls_info["floor"], cls_info["ceiling"] + delta)), name)
-                        else:
-                            self.draft.set_routing(
-                                "floor", min(cls_info["ceiling"], max(1, cls_info["floor"] + delta)), name)
+                    if kind == "ceiling":
+                        floor = self._routing()["classes"][cls]["floor"]
+                        self.draft.set_routing("ceiling", min(4, max(floor, value + delta)), cls)
+                    elif kind == "floor":
+                        ceiling = self._routing()["classes"][cls]["ceiling"]
+                        self.draft.set_routing("floor", min(ceiling, max(1, value + delta)), cls)
                     else:
-                        name = "margin" if self.cursor == len(self.classes) * 2 else "gate"
-                        self.draft.set_routing(name, round(min(1.0, max(0.0, routing[name] + delta * 0.05)), 2))
+                        self.draft.set_routing(kind, round(min(1.0, max(0.0, value + delta * 0.05)), 2))
             elif key == "enter":
                 self.screen = "confirm"
                 self.cursor = 0
@@ -817,9 +826,9 @@ class Wizard:
             # The list of what is about to be written is longer than a short
             # window: at 80x24 eleven of twenty items showed, and the nine out
             # of sight included both file paths and every routing value. A
-            # confirm screen you cannot read to the end is not one.
-            count = (len(self._focus_rows()) if self.focus else
-                     len(self.lanes_doc["lanes"]) + len(self.classes) * 2 + 5)
+            # confirm screen you cannot read to the end is not one. The
+            # cursor runs over the rows the page draws, and no others.
+            count = len(self._confirm_rows())
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -837,6 +846,42 @@ class Wizard:
                 self.screen = "quit"
             elif key == "b":
                 self._back_from_confirm()
+
+    def _confirm_rows(self):
+        """The confirm page's rows, the one list the page draws and its
+        cursor runs over: on a focused screen `_focus_rows`; in the full
+        wizard each Lane as `y` writes it, from `draft.documents()`, then each
+        Class Range, margin, gate, meters and the two files."""
+        if self.focus:
+            return self._focus_rows()
+        rows = []
+        # `carry` sits between the item and its value so that `value`, the
+        # one column with a path in it, is last: an elastic column pads to
+        # the widest row it holds, and a 40-place path column with `tier 4`
+        # in it opened a river of blanks across every other line.
+        documents = self.draft.documents()
+        routing = documents["routing"]
+        for name, lane in documents["lanes"]["lanes"].items():
+            off = not self.draft.lane(name).carried
+            # the column says `off`; a tag saying it again read `off  off`
+            rows.append({"cells": [name, "off" if off else "", placement_text(lane)],
+                         "marked": False, "dimmed": off, "tag": "",
+                         "harness": lane.get("harness")})
+        for name in self.classes:
+            cls_info = routing["classes"][name]
+            rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
+                         "marked": False, "dimmed": False, "tag": ""})
+            rows.append({"cells": [f"classes.{name}.ceiling", "", str(cls_info["ceiling"])],
+                         "marked": False, "dimmed": False, "tag": ""})
+        for name in ("margin", "gate"):
+            rows.append({"cells": [name, "", str(routing[name])], "marked": False,
+                         "dimmed": False, "tag": ""})
+        rows.append({"cells": ["meters", "", "on" if meters_enabled(routing) else "off"],
+                     "marked": False, "dimmed": False, "tag": ""})
+        for path in (self.lanes_path, self.routing_path):
+            rows.append({"cells": ["file", "", path], "marked": False,
+                         "dimmed": False, "tag": ""})
+        return rows
 
     def _focus_rows(self):
         """A focused confirm page's rows: each field `draft.changes()` lists,
@@ -1374,35 +1419,7 @@ class Wizard:
                 elastic="value",
             )
         if self.screen == "confirm":
-            rows = []
-            # `carry` sits between the item and its value so that `value`, the
-            # one column with a path in it, is last: an elastic column pads to
-            # the widest row it holds, and a 40-place path column with `tier 4`
-            # in it opened a river of blanks across every other line.
-            documents = self.draft.documents()
-            routing = documents["routing"]
-            for name, lane in documents["lanes"]["lanes"].items():
-                off = not self.draft.lane(name).carried
-                # the column says `off`; a tag saying it again read `off  off`
-                rows.append({"cells": [name, "off" if off else "", f"tier {lane['tier']}"],
-                             "marked": False, "dimmed": off, "tag": "",
-                             "harness": lane.get("harness")})
-            for name in self.classes:
-                cls_info = routing["classes"][name]
-                rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
-                             "marked": False, "dimmed": False, "tag": ""})
-                rows.append({"cells": [f"classes.{name}.ceiling", "", str(cls_info["ceiling"])],
-                             "marked": False, "dimmed": False, "tag": ""})
-            for name in ("margin", "gate"):
-                rows.append({"cells": [name, "", str(routing[name])], "marked": False,
-                             "dimmed": False, "tag": ""})
-            rows.append({"cells": ["meters", "", "on" if self._meters_on() else "off"],
-                         "marked": False, "dimmed": False, "tag": ""})
-            for path in (self.lanes_path, self.routing_path):
-                rows.append({"cells": ["file", "", path], "marked": False,
-                             "dimmed": False, "tag": ""})
-            if self.focus:
-                rows = self._focus_rows()
+            rows = self._confirm_rows()
             for index, row in enumerate(rows):
                 row["cursor"] = index == self.cursor
             return self._frame(

@@ -218,7 +218,10 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   them in sections tier 4 to 1, each numbered in its current order; j/k moves the cursor, J/K or
   shift-up/down moves the lane inside its tier, 1-4 moves it to the end of that tier, and the
   confirm write gives each carried lane `order`, its place from 1 (`catalog.py check` takes `order`
-  as a whole number from 1). The starting order is the Draft's: the Order as read, then lane name;
+  as a whole number from 1). The confirm page lists each lane as `y` writes it, from the Draft's
+  `documents()`: `tier N, order M`, or `tier N` for a lane off (`setup_tui.placement_text`, which
+  `--plain`'s confirm listing prints too); its cursor runs over the rows the page draws, as the
+  routing page's runs over its settings. The starting order is the Draft's: the Order as read, then lane name;
   lines and `p` put the lanes they name first in their tier, in their order; a lane that joins a
   tier, by a tick or by 1-4, joins it at its end; and undo restores the starting place, so a lane
   ticked back, or switched off and on, returns to its place. Tier pages restore the current catalog

@@ -1181,7 +1181,22 @@ def case_a_focused_tier_screen_saves_only_the_change_made_on_it():
     """One toggle on `--screen tier3` writes that Lane's Tier and the Orders
     it moved, and nothing else: the screen starts from the catalog as read and
     proposes no generation, which on these fixtures adds 20 Lanes and removes
-    17 the screen never showed (deepening D.6, bug 4)."""
+    17 the screen never showed (deepening D.6, bug 4). Its confirm page lists
+    `draft.changes()`, one row per field, and then the one file it writes;
+    those rows are the fields the save changed on disk (deepening F, bug 2)."""
+    seen = {}
+
+    def toggle_and_read(wizard):
+        wizard.handle("space")
+        wizard.handle("enter")
+        seen["rows"] = [(row["cells"][0], row["cells"][2]) for row in wizard.view()["rows"]]
+        seen["changes"] = wizard.draft.changes()
+        wizard.handle("y")
+        return wizard.result()
+
+    def shown(value):
+        return "unset" if value is None else str(value)
+
     with tempfile.TemporaryDirectory() as td:
         cfg = refresh_catalog_in(os.path.join(td, "cfg"))
         lanes_path, routing_path = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
@@ -1189,21 +1204,31 @@ def case_a_focused_tier_screen_saves_only_the_change_made_on_it():
         routing_before = open(routing_path, "rb").read()
         code, out, err = wizard_in_process(
             td, ["--config-dir", cfg, "--fixture-dir", REFRESH_DIR, "--no-bench", "--screen", "tier3"],
-            drive=toggle_one_lane)
+            drive=toggle_and_read)
         saved = catalog.load_json(lanes_path)["lanes"]
         changes = changed_fields(frozen, saved)
         moved = [name for name, fields in changes.items() if "tier" in fields]
         tiers = {frozen[moved[0]]["tier"], saved[moved[0]]["tier"]} if len(moved) == 1 else set()
         others = {name: fields for name, fields in changes.items() if name not in moved}
+        rows, draft_changes = seen.get("rows") or [], seen.get("changes") or []
+        listed = [row for row in rows if row[0] not in ("file", "target")]
         ok = (code == 0 and set(saved) == set(frozen)
               and len(moved) == 1 and 3 in tiers and len(tiers) == 2
               and all(fields == ["order"] for fields in others.values())
               and all(saved[name]["tier"] in tiers for name in others)
               and f"wrote {lanes_path}" in out and routing_path not in out
-              and open(routing_path, "rb").read() == routing_before)
+              and open(routing_path, "rb").read() == routing_before
+              # the confirm page's change rows are the draft's changes...
+              and listed == [(".".join(change.path[1:]), f"{shown(change.old)} → {shown(change.new)}")
+                             for change in draft_changes]
+              and rows[len(listed):] == [("file", lanes_path)]
+              # ...and exactly the fields the save changed on disk
+              and sorted(tuple(item.rsplit(".", 1)) for item, _value in listed)
+              == sorted((name, field) for name, fields in changes.items() for field in fields))
         added, removed = set(saved) - set(frozen), set(frozen) - set(saved)
         return ok, (f"code={code} added={len(added)} removed={len(removed)} moved={moved} "
-                    f"changes={changes if len(changes) < 8 else len(changes)} err={err[-300:]!r}")
+                    f"changes={changes if len(changes) < 8 else len(changes)} rows={rows} "
+                    f"err={err[-300:]!r}")
 
 
 def without_a_shipped_class(cfg):
@@ -1341,9 +1366,64 @@ def case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier():
         return ok, f"code={code} placed={placed} out={out[-500:]!r} err={err[-300:]!r}"
 
 
+# --- deepening F3: the confirm page lists exactly what save writes -----------
+
+def case_plain_and_the_tui_confirm_print_the_same_placement_for_every_lane():
+    """The same lines on the same numbered catalog: --plain's confirm listing
+    and the TUI's confirm page give each Lane the same placement, a carried
+    Lane its Tier and Order and an off Lane its Tier alone; --plain says `off`
+    after it, where the TUI has its carry column (deepening F.3). Both are
+    declined, so neither writes."""
+    numbered = {"fable-xhigh@claude": 1, "sol-high@codex": 1, "terra-high@codex": 1,
+                "grok46-high@grok": 2, "luna-low@codex": 1, "flash-high@agy": 2}
+    expected = {"fable-xhigh@claude": ("", "tier 4, order 1"), "terra-high@codex": ("", "tier 3, order 1"),
+                "sol-high@codex": ("", "tier 3, order 2"), "grok46-high@grok": ("", "tier 2, order 1"),
+                "luna-low@codex": ("", "tier 1, order 1"), "flash-high@agy": ("off", "tier 1")}
+    seen = {}
+
+    def read_confirm(wizard):
+        wizard.handle("enter")
+        for _ in range(40):
+            if wizard.screen == "confirm":
+                break
+            wizard.handle("enter")
+        seen.update({row["cells"][0]: (row["cells"][1], row["cells"][2])
+                     for row in wizard.view()["rows"] if row["cells"][0] in expected})
+        wizard.handle("n")
+        return wizard.result()
+
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        lanes_path = os.path.join(cfg, "lanes.json")
+        doc = catalog.load_json(lanes_path)
+        for name, order in numbered.items():
+            doc["lanes"][name]["order"] = order
+        catalog.write_json(lanes_path, doc)
+        lines = os.path.join(td, "tiers.txt")
+        with open(lines, "w", encoding="utf-8") as f:
+            f.write("fable-xhigh@claude 4\nterra-high@codex 3\nsol-high@codex 3\n"
+                    "grok46-high@grok 2\nluna-low@codex 1\nflash-high@agy off\n")
+        argv = ["--config-dir", cfg, "--no-discover", "--no-bench", "--tiers-from", lines]
+        # six Tier prompts kept as the lines left them, routing kept, then no
+        answers = io.StringIO("\n" * len(numbered) + "\n" + "n\n")
+        plain_code, plain_out, plain_err = wizard_in_process(td, argv + ["--plain"], stdin=answers)
+        tui_code, tui_out, tui_err = wizard_in_process(td, argv, drive=read_confirm)
+        printed = {name: text for name, sep, text in (line.partition(": ") for line in plain_out.splitlines())
+                   if sep and name in expected}
+        ok = (plain_code == 0 and tui_code == 0 and seen == expected
+              and printed == {name: value + (", off" if carry == "off" else "")
+                              for name, (carry, value) in seen.items()}
+              and "nothing written" in plain_out and "nothing written" in tui_out
+              and catalog.load_json(lanes_path) == doc)
+        return ok, (f"plain={plain_code} tui={tui_code} seen={seen} printed={printed} "
+                    f"plain_err={plain_err[-300:]!r} tui_err={tui_err[-300:]!r}")
+
+
 for name, case in (
     ("a prompted tier change moves the lane to the end of its new tier",
      case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier),
+    ("plain and the TUI confirm print the same placement for every Lane",
+     case_plain_and_the_tui_confirm_print_the_same_placement_for_every_lane),
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
     ("tiers-from with an unreadable file writes nothing", case_tiers_from_unreadable_file_writes_nothing),

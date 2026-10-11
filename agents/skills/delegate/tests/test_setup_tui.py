@@ -3076,4 +3076,35 @@ try:
 except Exception as e:
     record("80 the wizard shows the shipped Classes by default", False, repr(e))
 
+# 81. The confirm page lists what `y` writes (deepening F, bug 3): each
+# carried Lane with its Tier and the Order the review page gave it, an off
+# Lane with its Tier alone. The page used to say `tier 2` while `y` wrote an
+# Order beside it.
+try:
+    w = wizard()
+    not_carried(w, "flash-high@agy")
+    while w.screen == "tier":
+        w.handle("enter")
+    assert w.screen == "review", w.screen
+    # tier 2 starts grok, terra (lane name); J moves grok below terra
+    move_to(w, "grok46-high@grok")
+    w.handle("lane-down")
+    to_confirm(w)
+    assert w.screen == "confirm", w.screen
+    shown = {row["cells"][0]: row["cells"][2] for row in w.view()["rows"]
+             if row["cells"][0] in LANES["lanes"]}
+    w.handle("y")
+    written = {name: (lane["tier"], lane.get("order"))
+               for name, lane in w.result()["lanes"]["lanes"].items()}
+    record("81 the confirm page lists each carried Lane with the Order y writes",
+           shown == {"fable-xhigh@claude": "tier 4, order 1", "sol-high@codex": "tier 3, order 1",
+                     "terra-high@codex": "tier 2, order 1", "grok46-high@grok": "tier 2, order 2",
+                     "luna-low@codex": "tier 1, order 1", "flash-high@agy": "tier 1"}
+           and written == {"fable-xhigh@claude": (4, 1), "sol-high@codex": (3, 1),
+                           "terra-high@codex": (2, 1), "grok46-high@grok": (2, 2),
+                           "luna-low@codex": (1, 1), "flash-high@agy": (1, None)},
+           repr((shown, written)))
+except Exception as e:
+    record("81 the confirm page lists each carried Lane with the Order y writes", False, repr(e))
+
 sys.exit(1 if fails else 0)

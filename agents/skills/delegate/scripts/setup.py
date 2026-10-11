@@ -480,17 +480,16 @@ def report_commit(done):
 
 
 def confirm_and_write(draft, read):
-    """The --plain confirm: list each Lane as `draft` writes it, then commit
-    the draft's documents through the launch read `read`, which also keeps the
-    Agent files in step and forgets the Model queue entries the start facts
-    named."""
+    """The --plain confirm: list each Lane as `draft` writes it, with the
+    TUI confirm page's placement text, then commit the draft's documents
+    through the launch read `read`, which also keeps the Agent files in step
+    and forgets the Model queue entries the start facts named."""
     documents = draft.documents()
     print(read.files["lanes"])
     print(read.files["routing"])
     for name, lane in documents["lanes"]["lanes"].items():
-        order = f", order {lane['order']}" if "order" in lane else ""
         off = ", off" if lane.get("enabled") is False else ""
-        print(f"{name}: tier {lane['tier']}{order}{off}")
+        print(f"{name}: {setup_tui.placement_text(lane)}{off}")
     answer = read_answer("write both files? [y/N] ").strip()
     if answer not in ("y", "yes"):
         print("nothing written")
