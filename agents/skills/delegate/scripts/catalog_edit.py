@@ -7,7 +7,10 @@ under the cached meters, and the catalog revision), and writes only with
 wizard, the dashboard and `delegate catalog set|range|order` all edit through
 `edit_catalog`. Split out of catalog.py (ticket 26), which keeps loading and
 validating; this module imports `rank` at load, and `catalog` never does. The
-sources and their revision come from `catalog_commit.read()`.
+sources and their revision come from `catalog_commit.read()`, and an apply
+writes its one document with `catalog_commit.commit()`, which also backs up a
+global document it replaces and, for the live catalog's lanes.json, keeps the
+Agent files in step; its lines go to stderr.
 """
 import copy
 import os
@@ -20,8 +23,8 @@ import harnesses  # noqa: E402
 import rank  # noqa: E402
 
 
-# The refusal when a source changed between the preview and the apply; the
-# dashboard matches this exact text.
+# The refusal when a source changed between the preview and the apply, at the
+# revision check or at the commit; the dashboard matches this exact text.
 INTERVENING_EDIT = "intervening edit: source documents or resolved paths changed; preview again"
 _SET_LANE_PREFIX = "lanes."
 _SET_LANE_TIER_SUFFIX = ".tier"
@@ -232,15 +235,6 @@ def _read(cwd, config_dir):
     """The catalog read an edit works from: the global pair, and the project
     pair of the Git root above `cwd` (default: the current directory)."""
     return catalog_commit.read(config_dir, project_dir=cwd if cwd is not None else os.getcwd())
-
-
-def _unchanged_since(snap, cwd, config_dir):
-    """Whether the sources still read as `snap` read them. A source that no
-    longer reads (now invalid, or now a dangling link) has changed too."""
-    try:
-        return _read(cwd, config_dir).revision == snap.revision
-    except catalog.CatalogError:
-        return False
 
 
 def _require_scope(scope):
@@ -702,9 +696,14 @@ def edit_catalog(
     target = _target(snap, dest)
     written = False
     if apply and not noop:
-        if not _unchanged_since(snap, cwd, config_dir):
-            raise catalog.CatalogError(INTERVENING_EDIT)
-        catalog.write_json(target["file"], proposed_by_dest[dest])
+        try:
+            done = catalog_commit.commit(snap, {dest: proposed_by_dest[dest]})
+        except catalog_commit.CatalogChanged as e:
+            raise catalog.CatalogError(INTERVENING_EDIT) from e
+        # the Agent files and notes go to stderr, so the JSON on stdout stays
+        # the result alone
+        for line in done.lines:
+            sys.stderr.write(f"{line}\n")
         written = True
 
     return {

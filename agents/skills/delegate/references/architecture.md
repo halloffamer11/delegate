@@ -66,12 +66,18 @@ replaces partial use of invalid documents.
   dir resolves to `catalog.CONFIG_DIR`) then gives every native Lane its Agent file and removes the
   file of each native Lane it took out; another catalog, or project documents alone, write none.
   Last it forgets the Model queue entries its read returned (`read(queue=True)`). A failure in
-  either step is a line in `Committed.lines`, which callers print to stderr. The wizard's full save
-  and `--plain` save commit through the read taken at launch, and so does dispatch's scan.
+  either step is a line in `Committed.lines`, which callers print to stderr. The wizard's saves
+  commit through the read taken at launch, and dispatch's scan and `edit_catalog`'s apply commit
+  through theirs. No other script writes a catalog document, except `catalog fmt`, which formats
+  one named file through `catalog.write_json`.
 - `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
-  previews cached Picks and resolved source paths from `catalog_commit.read()`, validates complete
-  proposals, and rechecks the revision before writing one document through `catalog.write_json`,
-  which writes through links. `plan_edits()` is the one
+  previews cached Picks and resolved source paths from `catalog_commit.read()` and validates
+  complete proposals. An apply checks `--expect` against that read's revision, then commits its one
+  document with `catalog_commit.commit(read, {dest: doc})`; a `CatalogChanged` there is the same
+  "intervening edit" refusal, and `Committed.lines` go to stderr, so `catalog set`'s JSON stdout is
+  only the result. A global apply backs up the document it replaces, and one that writes the live
+  catalog's `lanes.json` keeps the Agent files in step; a project apply, the dashboard's only
+  write, does neither. An empty customization over an absent file is a noop and commits nothing. `plan_edits()` is the one
   planning path (ticket 14). It takes the source documents already in hand and a list of the same
   `set`/`range`/`order` operations, plans each one onto the documents the one before it produced,
   and returns named fields: the four planned documents, the effective `catalog` they produce, and

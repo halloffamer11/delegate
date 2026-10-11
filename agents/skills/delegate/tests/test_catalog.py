@@ -2066,6 +2066,120 @@ with tempfile.TemporaryDirectory() as td:
         msg is not None and link in msg and outside in msg
         and not os.path.lexists(outside) and not os.path.isdir(os.path.dirname(outside))
         and os.path.islink(link), msg)
+
+# An apply writes through the Catalog commit (deepening D4), so a global set
+# copies the lanes.json it replaces to <config dir>/backups first.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    lanes_path = os.path.join(cfg, "lanes.json")
+    replaced = file_bytes(lanes_path)
+    kwargs = dict(scope="global", cwd=repo, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                  value=3, meters={}, present=ALL_HARNESSES)
+    preview = catalog_edit.edit_catalog("set", **kwargs)
+    catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
+    folder = os.path.join(cfg, "backups")
+    found = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    record("10.15 a global set backs up lanes.json beside the catalog",
+        len(found) == 1 and found[0].startswith("lanes-") and found[0].endswith(".json")
+        and file_bytes(os.path.join(folder, found[0])) == replaced
+        and catalog.load_json(lanes_path)["lanes"]["terra-high@codex"]["tier"] == 3, found)
+
+# `catalog set` on a live layout: the catalog in a temp HOME's
+# ~/.config/delegate, with claude Lanes that have no Agent file yet. A global
+# set of lanes.json gives every claude Lane its Agent file and says so on
+# stderr; a project set never touches ~/.claude/agents. Either way stdout is
+# the one JSON result, keys as before.
+RESULT_KEYS = ["op", "scope", "revision", "target", "sources", "values", "changed", "picks",
+               "leaders", "unavailable_harnesses", "missing_observations", "observations",
+               "noop", "written"]
+
+
+def live_layout(td):
+    """(env, config dir, agents dir, repo) for a temp HOME holding the live
+    catalog: the refresh fixture's lanes (sixteen claude Lanes) and the sample
+    routing."""
+    home = os.path.join(td, "home")
+    cfg = os.path.join(home, ".config", "delegate")
+    os.makedirs(cfg)
+    shutil.copy(os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json"), cfg)
+    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), cfg)
+    repo = os.path.join(td, "repo")
+    os.makedirs(repo)
+    open(os.path.join(repo, ".git"), "w").close()
+    env = isolated_cli_env(td)
+    env["HOME"] = home
+    env["DELEGATE_MODEL_QUEUE"] = os.path.join(td, "new-models.json")
+    env.pop("DELEGATE_ORCHESTRATORS_DIR", None)
+    return env, cfg, os.path.join(home, ".claude", "agents"), repo
+
+
+def cli_set(env, repo, *args):
+    """Preview then apply one `catalog set` on the live catalog; returns the apply."""
+    preview = run_catalog_cli(["set", *args, "--cwd", repo], env)
+    revision = json.loads(preview.stdout)["revision"]
+    return run_catalog_cli(["set", *args, "--cwd", repo, "--apply", "--expect", revision], env)
+
+
+def one_json_result(stdout):
+    """Whether stdout is exactly one formatted result, with its keys in order."""
+    try:
+        doc = json.loads(stdout)
+    except ValueError:
+        return False
+    return list(doc) == RESULT_KEYS and stdout == catalog.format_json(doc)
+
+
+with tempfile.TemporaryDirectory() as td:
+    env, cfg, agents, repo = live_layout(td)
+    res = cli_set(env, repo, "routing.gate", "0.2", "--scope", "project")
+    record("10.16 a project set on the live catalog writes no agent file and prints only its JSON",
+        res.returncode == 0 and one_json_result(res.stdout) and res.stderr == ""
+        and json.loads(res.stdout)["written"] is True
+        and catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))["gate"] == 0.2
+        and not os.path.exists(agents) and not os.path.exists(os.path.join(cfg, "backups")),
+        res.stderr + res.stdout[:200])
+
+with tempfile.TemporaryDirectory() as td:
+    env, cfg, agents, repo = live_layout(td)
+    res = cli_set(env, repo, "lanes.opus-high@claude.tier", "2", "--scope", "global")
+    claude = [name for name, lane in catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"].items()
+              if lane["harness"] == "claude"]
+    files = sorted(os.listdir(agents)) if os.path.isdir(agents) else []
+    wanted = sorted(f"lane-{name.split('@')[0]}.md" for name in claude)
+    noted = sorted(line for line in res.stderr.splitlines() if line.startswith("wrote "))
+    record("10.17 a global set on the live catalog gives every claude Lane its agent file, notes on stderr",
+        res.returncode == 0 and one_json_result(res.stdout)
+        and json.loads(res.stdout)["written"] is True
+        and files == wanted and len(claude) == 16
+        and noted == sorted(f"wrote {os.path.join(agents, f)}" for f in wanted)
+        and len(os.listdir(os.path.join(cfg, "backups"))) == 1,
+        f"files={files} stderr={res.stderr[:300]!r}")
+
+# An edit that lands after the apply's revision check, while it ranks, is
+# caught by the commit, and the refusal is the text the dashboard matches.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    path = os.path.join(cfg, "lanes.json")
+    kwargs = dict(scope="global", cwd=repo, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                  value=3, meters={}, present=ALL_HARNESSES)
+    preview = catalog_edit.edit_catalog("set", **kwargs)
+    original_preview = catalog_edit._rank_preview
+    def lands_while_ranking(*args):
+        catalog.write_json(path, dict(catalog.load_json(path), note="a set landed meanwhile"))
+        return original_preview(*args)
+    catalog_edit._rank_preview = lands_while_ranking
+    try:
+        msg = check_catalog_error(catalog_edit.edit_catalog, "set", apply=True,
+                                  expect=preview["revision"], **kwargs)
+    finally:
+        catalog_edit._rank_preview = original_preview
+    theirs = catalog.load_json(path)
+    record("10.18 an edit landing after the revision check is refused with the dashboard's text",
+        msg == "intervening edit: source documents or resolved paths changed; preview again"
+        and theirs.get("note") == "a set landed meanwhile"
+        and theirs["lanes"]["terra-high@codex"]["tier"] != 3
+        and not os.path.exists(os.path.join(cfg, "backups")), msg)
+
 # 11. routing.meters: validators, default on, project override, no-op absence.
 doc_m = copy.deepcopy(routing_sample)
 record("11.1 legacy routing without meters defaults on",

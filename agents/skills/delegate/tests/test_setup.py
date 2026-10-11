@@ -995,6 +995,14 @@ def sample_catalog(root):
     return cfg
 
 
+def only_the_sets_backup(cfg):
+    """Whether <cfg>/backups holds one file, the lanes.json backup the
+    `catalog set` made: a refused save backs up nothing."""
+    folder = os.path.join(cfg, "backups")
+    found = os.listdir(folder) if os.path.isdir(folder) else []
+    return len(found) == 1 and found[0].startswith("lanes-")
+
+
 def case_a_catalog_set_made_while_the_wizard_is_open_survives_its_save():
     """`delegate catalog set` lands while the wizard is open; the wizard's
     save then refuses, names lanes.json, writes nothing and exits 1, so the
@@ -1012,7 +1020,7 @@ def case_a_catalog_set_made_while_the_wizard_is_open_survives_its_save():
             td, ["--config-dir", cfg, "--no-discover", "--no-bench"], during=catalog_set)
         tier = catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"]["terra-high@codex"]["tier"]
         ok = (code == 1 and "lanes.json" in err and "nothing written" in err and tier == 1
-              and not os.path.isdir(os.path.join(cfg, "backups")))
+              and only_the_sets_backup(cfg))
         return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
 
 
@@ -1276,7 +1284,7 @@ def case_a_focused_save_refuses_a_catalog_changed_since_launch():
         ok = (code == 1 and lanes_path in err and "nothing written" in err
               and tier == 1 and [open(lanes_path, "rb").read()] == theirs
               and open(routing_path, "rb").read() == routing_before
-              and "wrote" not in out and not os.path.isdir(os.path.join(cfg, "backups")))
+              and "wrote" not in out and only_the_sets_backup(cfg))
         return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
 
 

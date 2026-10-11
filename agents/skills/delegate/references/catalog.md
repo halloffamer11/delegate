@@ -93,7 +93,12 @@ targets, the changed fields, and the picks and tier leaders before and after,
 from cached meters. Apply the same operation with `--apply --expect
 <revision>` from that preview. A request that states the value authorizes
 both; do not ask again. If a source changed since the preview, preview again.
-Apply writes only the chosen document, through a link to an existing file.
+Apply writes only the chosen document, through a link to an existing file,
+and refuses a dangling link or a loop. A global apply first copies the file it
+replaces to `backups/` beside the catalog (the newest 20 of each are kept), and
+one that writes this machine's `lanes.json` also gives every native lane its
+agent file, saying so on stderr; stdout is only the JSON result. A project
+apply touches no agent file.
 
 `delegate setup --screen carry|tier1|tier2|tier3|tier4|review|routing` opens
 one wizard screen on the current catalog, with no generation proposed. Its
