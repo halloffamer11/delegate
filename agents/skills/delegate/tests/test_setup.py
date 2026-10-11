@@ -980,7 +980,9 @@ def case_the_refreshed_rows_reach_the_new_lanes():
     import bench
     _frozen, refreshed, _plan = refresh_fixture()
     rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
-    data = bench.collect(refreshed, effort_rows=rows)
+    # the Epoch fixture, so the case never reaches the web (until H1's epoch_rows)
+    data = bench.collect(refreshed, epoch_csv=os.path.join(HERE, "fixture", "bench-epoch.csv"),
+                         effort_rows=rows)
     lanes = data["lanes"]
 
     def columns(name):

@@ -145,12 +145,104 @@ def test_not_installed_is_skip():
     import evals
     sandbox = evals.Sandbox(offline=True)
     try:
-        os.remove(os.path.join(sandbox.bin_dir, "grok"))
+        os.remove(os.path.join(sandbox.world.bin_dir, "grok"))
         verdict, detail, _ = evals.ping_one(sandbox, "grok")
         record("eval 1: a harness whose CLI is absent is skipped, not failed",
                verdict == "skip" and "not installed" in detail, f"{verdict} {detail}")
     finally:
         sandbox.close()
+
+
+def test_host_seatbelt_never_reaches_the_offline_world():
+    # A shell inside a Seatbelt that refuses a nested one (a Claude Code Bash
+    # sandbox on a Mac) has a sandbox-exec like this one on its PATH, after
+    # the world's bin directory. The world's own sandbox-exec must answer
+    # first, or codex's preflight blocks the offline ping.
+    import evals
+    sandbox = evals.Sandbox(offline=True)
+    try:
+        host_bin = os.path.join(sandbox.root, "host-bin")
+        os.makedirs(host_bin)
+        refusing = os.path.join(host_bin, "sandbox-exec")
+        with open(refusing, "w") as f:
+            f.write("#!/bin/sh\necho 'sandbox-exec: sandbox_apply: Operation not permitted' >&2\nexit 71\n")
+        os.chmod(refusing, 0o755)
+        path = sandbox.env["PATH"].split(os.pathsep)
+        after = path.index(sandbox.world.bin_dir) + 1
+        sandbox.env["PATH"] = os.pathsep.join(path[:after] + [host_bin] + path[after:])
+        verdict, detail, _ = evals.ping_one(sandbox, "codex")
+        record("eval 1 offline: the host's Seatbelt never reaches the offline world",
+               verdict == "pass", f"{verdict} {detail}")
+    finally:
+        sandbox.close()
+
+
+def test_offline_world_keeps_the_host_out():
+    # The host names an orchestrator, sets Claude Code's marker and has a
+    # Ledger of its own; none of it reaches the world's env. A stub replaces a
+    # linked tool without writing through the link.
+    import evals
+    root = tempfile.mkdtemp(prefix="delegate-eval-world-")
+    host = {"DELEGATE_ORCHESTRATOR": "codex", "CLAUDECODE": "1", "DELEGATE_LEDGER": "/host/ledger.jsonl"}
+    saved = {k: os.environ.get(k) for k in host}
+    os.environ.update(host)
+    try:
+        world = evals.OfflineWorld(root)
+        env = world.env
+        sh = os.path.join(world.bin_dir, "sh")
+        linked = os.path.islink(sh)
+        world.stub("sh", "exit 3\n")
+        ran = subprocess.run([sh], env=env).returncode
+        seen = {k: env.get(k) for k in ("DELEGATE_ORCHESTRATOR", "CLAUDECODE", "DELEGATE_LEDGER",
+                                        "DELEGATE_ORCHESTRATORS_DIR", "DELEGATE_RUNS_DIR", "ADS_DIR")}
+        record("the offline world: no host orchestrator, marker or Ledger reaches its env, and a stub replaces a link",
+               seen == {"DELEGATE_ORCHESTRATOR": None, "CLAUDECODE": None, "DELEGATE_LEDGER": world.ledger_path,
+                        "DELEGATE_ORCHESTRATORS_DIR": world.orchestrators_dir,
+                        "DELEGATE_RUNS_DIR": world.runs_dir, "ADS_DIR": world.ads_dir}
+               and os.listdir(world.orchestrators_dir) == []
+               and env["PATH"].split(os.pathsep)[0] == world.bin_dir
+               and linked and not os.path.islink(sh) and ran == 3,
+               f"seen={seen} linked={linked} ran={ran}")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(root)
+
+
+def test_equivalence_reads_the_runs_own_files():
+    # Eval 3 compares what the orchestrator gets back. A Run holds its own
+    # files whatever relay ran it, so two Runs that left no relay file at all
+    # are still equivalent, and a Run that lost its return is not.
+    import evals
+    root = tempfile.mkdtemp(prefix="delegate-eval-runs-")
+    try:
+        ret = {"status": "done", "deliverable": "pong", "evidence": [], "open_questions": [],
+               "changed_files": []}
+
+        def run_dir(name, files):
+            d = os.path.join(root, name)
+            os.makedirs(d)
+            for file in files:
+                with open(os.path.join(d, file), "w", encoding="utf-8") as f:
+                    if file == "dispatch.json":
+                        json.dump({"lane": "luna-low@codex", "status": "done"}, f)
+                    elif file == "return.json":
+                        json.dump(ret, f)
+                    else:
+                        f.write("the prompt\n")
+            return d
+
+        every = ("dispatch.json", "prompt.md", "return.json")
+        reference, other = run_dir("reference", every), run_dir("other", every)
+        no_return = run_dir("no-return", ("dispatch.json", "prompt.md"))
+        same, missing = evals.equivalent(reference, other), evals.equivalent(reference, no_return)
+        record("eval 3: Runs are equivalent by the Run's own files, with no relay file named",
+               same is None and missing == "missing return.json", f"same={same} missing={missing}")
+    finally:
+        shutil.rmtree(root)
 
 
 def test_validate_return():
@@ -167,7 +259,10 @@ if __name__ == "__main__":
     test_routing_cases()
     test_gate_veto_is_named()
     test_validate_return()
+    test_equivalence_reads_the_runs_own_files()
+    test_offline_world_keeps_the_host_out()
     test_not_installed_is_skip()
+    test_host_seatbelt_never_reaches_the_offline_world()
     test_offline_ping()
     test_offline_orchestrate()
     sys.exit(1 if fails else 0)

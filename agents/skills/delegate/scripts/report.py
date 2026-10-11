@@ -7,12 +7,13 @@ Deterministic rendering, so every report has the same shape:
                               remaining, the model each meter runs, both resets.
                               Then a plan-consumption table for this cycle.
   report.py log ...           append one adjudicated dispatch to the run ledger.
-  report.py log --run DIR     same, plus token cost from DIR/dispatch.json.
+  report.py log --run DIR     same, plus the cost of DIR/dispatch.json's tokens.
   report.py runs [--last N]   Markdown table of recent dispatches + the roll-up.
   report.py cost DIR          token-cost breakdown for one run.
 
 Two ledgers exist and they are not the same file:
-  ledger.jsonl  machine events from delegate.py / usage.py; the statusline reads it.
+  ledger.jsonl  one line when each Run starts and one when it ends, written by
+                runs.py; the statusline reads it through runs.running.
   runs.jsonl    what the LEAD concluded after verifying a dispatch — the work
                 label and whether the definition of done was met. Only the lead
                 knows this, so only the lead writes it.
@@ -44,6 +45,11 @@ try:
 except ImportError:
     from . import orchestrators
 
+try:
+    import runs
+except ImportError:
+    from . import runs
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
 CACHE = usage.get_cache_path()
@@ -52,10 +58,6 @@ SWITCH = os.environ.get("DELEGATE_STATUSLINE_SWITCH") or os.path.expanduser("~/.
 VERDICTS = ("clean", "findings", "partial", "failed")
 DAYS_PER_MONTH = 30.4375
 WEEK_DAYS = 7
-INPUT_KEYS = ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens")
-OUTPUT_KEYS = ("output_tokens", "outputTokens", "completion_tokens", "completionTokens")
-CACHE_READ_KEYS = ("cache_read_input_tokens", "cachedInputTokens", "cached_tokens", "cache_read_tokens")
-CACHE_WRITE_KEYS = ("cache_creation_input_tokens", "cacheCreationInputTokens")
 
 
 # ---------------------------------------------------------------- shared
@@ -246,37 +248,24 @@ def cmd_limits(a):
 
 
 # ---------------------------------------------------------------- cost
-def _first_present(obj, keys):
-    for k in keys:
-        if k in obj and obj[k] is not None:
-            return obj[k]
-    return None
-
-
-def compute_cost(usage, lane_name, catalog):
-    """Token dollars for one dispatch. Unmeasured when the relay sent no counts.
+def compute_cost(tokens, lane_name, catalog):
+    """Token dollars for one Run, from its Token counts (dispatch.json's
+    `tokens`, keyed like the Lane's price record). Unmeasured when there are
+    none: null from a relay that reported no usage, or absent from a Run
+    directory written before Token counts.
 
     A Lane with no input or output price is unpriced, not free: the wizard
     creates every new Lane with null prices, and reading them as $0 would
     under-report spend. Its tokens are kept and it is never measured. A null
     cache price is only unpublished (codex has no cache-write price) and adds 0.
     """
-    if not isinstance(usage, dict):
-        return {"measured": False, "reason": "relay reported no token usage"}
-    input_raw = _first_present(usage, INPUT_KEYS)
-    output_raw = _first_present(usage, OUTPUT_KEYS)
-    if input_raw is None and output_raw is None:
-        return {"measured": False, "reason": "relay reported no token usage"}
+    if not isinstance(tokens, dict):
+        return {"measured": False, "reason": "relay reported no token counts"}
     lane = catalog["lanes"].get(lane_name)
     if not lane:
         return {"measured": False, "reason": "lane not in catalog"}
     price = lane["price"]
-    tokens = {
-        "in": 0 if input_raw is None else input_raw,
-        "out": 0 if output_raw is None else output_raw,
-        "cache_read": _first_present(usage, CACHE_READ_KEYS) or 0,
-        "cache_write": _first_present(usage, CACHE_WRITE_KEYS) or 0,
-    }
+    tokens = {key: tokens.get(key) or 0 for key in ("in", "out", "cache_read", "cache_write")}
     missing = [k for k in ("in", "out") if price.get(k) is None]
     if missing:
         return {
@@ -339,7 +328,7 @@ def cmd_cost(a):
     catalog = load_catalog_or_die(a.config_dir)
     dispatch = read_dispatch(a.run_dir)
     lane = dispatch.get("lane")
-    cost = compute_cost(dispatch.get("usage"), lane, catalog)
+    cost = compute_cost(dispatch.get("tokens"), lane, catalog)
     if not cost.get("measured"):
         word = "unpriced" if cost.get("unpriced") else "unmeasured"
         print(f"{word}: {cost.get('reason', '')}")
@@ -388,7 +377,7 @@ def cmd_log(a):
            "thread_id": thread, "batch": a.batch}
     if a.run_dir:
         catalog = load_catalog_or_die(a.config_dir)
-        rec["cost"] = compute_cost((dispatch or {}).get("usage"), lane, catalog)
+        rec["cost"] = compute_cost((dispatch or {}).get("tokens"), lane, catalog)
     append_run(rec)
     extra = ""
     if "cost" in rec:
@@ -629,40 +618,7 @@ def cmd_statusline(a):
                 won_by_meter.setdefault(m_name, set()).add(tier)
             picks[cls] = picked
 
-    ledger_path = os.environ.get("DELEGATE_LEDGER") or os.path.expanduser("~/.cache/delegate/ledger.jsonl")
-    running_by_lane = Counter()
-    if os.path.exists(ledger_path):
-        try:
-            starts = {}
-            with open(ledger_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        e = json.loads(line)
-                    except Exception:
-                        continue
-                    k = e.get("kind")
-                    tid = e.get("thread_id")
-                    if k == "dispatch.start" and tid:
-                        starts[tid] = e
-                    elif k == "dispatch.finish" and tid:
-                        starts.pop(tid, None)
-            for e in starts.values():
-                ts_str = e.get("ts")
-                timeout_s = e.get("timeout_s") or 0
-                if ts_str:
-                    try:
-                        t = datetime.fromisoformat(ts_str).timestamp()
-                    except Exception:
-                        continue
-                    if now <= t + timeout_s:
-                        lane_name = e.get("lane")
-                        if lane_name:
-                            running_by_lane[lane_name] += 1
-        except Exception:
-            return
+    running_by_lane = Counter(r.lane for r in runs.running(now))
 
     by_meter = usage.observations(usage_doc) or {}
     all_meters = catalog.get("meters", {})
@@ -1054,7 +1010,7 @@ def main():
     log.add_argument("--thread", default=None, help="thread_id from the delegate-metrics: line")
     log.add_argument("--batch", default=None, help="tag grouping one fan-out")
     log.add_argument("--run", dest="run_dir", default=None,
-                     help="run directory; read lane, usage, secs, status, thread_id from dispatch.json")
+                     help="run directory; read lane, tokens, secs, status, thread_id from dispatch.json")
     log.set_defaults(fn=cmd_log)
 
     run = sub.add_parser("runs", parents=[cfg], help="the dispatch table")

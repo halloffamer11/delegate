@@ -29,7 +29,7 @@ field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
 preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
 use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
 `usage.load_cached()` / `rank.load_cached_usage()` read observations without a vendor
-probe or meter event. `usage.acquire()` is the refresh path. `usage.observations()`
+probe. `usage.acquire()` is the refresh path. `usage.observations()`
 owns cache validity (`rank.meter_observations()` re-exports it): valid envelope and
 legacy map formats keep their behavior; any malformed observation makes the whole
 document unknown. Envelope observations require a finite timestamp; raw Window/reset fields are
@@ -98,9 +98,47 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   records the orchestrator. `--json` on either prints one object in place of the finish and
   metrics lines (`run --json` sends the ranking to stderr); the courier, the evals and the
   browser probes read that or `runs.parse_finish_line`, never a regex of their own.
-- `scripts/runs.py`: the run directory's one owner (ticket 24). A `Run` is created, finished or
-  failed here, and only here are `dispatch.json` and `return.json` written; it spells and parses
-  the finish and native lines. Run directories under `~/.cache/delegate/runs/`, never reused.
+- `scripts/runs.py`: the Run module (ticket 24; delegate-deepening 01 to 04). `execute(request,
+  prompt, work)` runs every Run from its start to its Outcome: the run directory, `prompt.md`,
+  `dispatch.json` and the Ledger start, then the work, then `return.json`, the outcome, the
+  Usage-limit hold and the Ledger finish. Relayed work (`delegate.relay_work`) runs the relay through
+  `relay.run(job, run.path)`, which returns the `Finish`; the relay is `relays.Ads(ads_dir)` unless
+  the caller hands one to `dispatch(relay=...)` or `run(relay=...)`.
+  A native Run ends as a hand-off: its work returns a `HandOff` (the agent and the spawn line), and
+  the Run ends at once with status `native`, reason `handed to <agent>`, secs null, no
+  `return.json` and the Meter left as it is; `report.py log --run` reads status `native` for it and
+  still asks for `--secs`. Anything that stops the work, SIGTERM included, ends the Run blocked
+  with why; a write that fails becomes a note and never stops the Run ending. Only here are
+  `dispatch.json`, `return.json` and the Ledger written; `Ended.text` spells the finish lines,
+  or the native and spawn lines, and `parse_finish_line` and `parse_native_line` read them.
+  `running(now)` lists the Runs still running: a Ledger start with no finish, whose
+  `dispatch.json` has not ended, within its Lane's timeout. It skips a Ledger line it cannot read
+  and never raises, and `report.py statusline` counts its glyphs from it. Run directories under
+  `~/.cache/delegate/runs/`, never reused.
+- `scripts/relays.py`: the Relay seam (delegate-deepening 05, 07 and 08). `Relay.check()` says in
+  one line why relays cannot run here, or None; `delegate.resolve` asks it for a relayed Lane before
+  a Run starts, and a refusal exits 2 with nothing started. `Relay.run(job, run_dir)` runs one
+  relayed `Job` and returns a `runs.Finish`; the module defines no outcome type of its own. The
+  `Ads` adapter alone knows the ADS directory (the argument, else `$ADS_DIR`, else
+  `relays.DEFAULT_DIR`, which a test holds equal to `ads.sh`'s default), `ads.sh check` (run with
+  `ADS_DIR` set to that directory), node, the relay path, the argv (`--brief --cd --out-dir --model`
+  plus `Harness.run_args`) and env overrides, `relay.stdout` and `relay.stderr`, every `result.json`
+  key (each usage spelling it normalizes into Token counts `{in, out, cache_read, cache_write}`,
+  keyed like a Lane's price record, or None when the relay reported neither input nor output; the
+  raw record stays in `result.json`), the form of node's crash output (the `<Name>Error: ...` line,
+  never the `Node.js v...` trailer) and, through `Harness.blocked_reason`, `events.jsonl`. It
+  returns a blocked `Finish` for every way a relay fails (node missing at spawn, no `result.json`,
+  one that does not parse or is not an object) and catches only `OSError` and `ValueError` (and
+  `RecursionError` from a `result.json` nested too deep to parse), so Ctrl-C and SIGTERM reach
+  `runs.execute`. Settling is the private pure `_settle(report, job)`: the status table in the
+  module docstring, the return-block scan, the caps and the read-only tripwire. `Scripted` is the
+  in-process fake, scripted with `Report`s (its check answers `ready`), so `tests/test_relay.py`
+  tests settling with no node, and `dispatch(relay=Scripted(...))` runs in-process. Its `Ads` cases,
+  `tests/test_dispatch.py` and `evals.py --offline` share one `evals.OfflineWorld`
+  (delegate-deepening 06): the sample catalog, the fake relay in a fake ADS tree, a `git` that
+  answers the pin, stub CLIs, a `sandbox-exec` that nests and an env that keeps the host's CLIs,
+  Ledger, Meters, codex home and orchestrator out; `world.stub(name, body)` replaces one CLI and
+  `world.path_without(name)` hides one.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
@@ -136,7 +174,10 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
   on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
   its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
-  `scripts/events.py`: the ledger encoder (schema unchanged); the statusline reads the ledger.
+  A probe writes nothing to the Ledger, which records Runs only; the latest Meter reading lives
+  in the usage cache. `runs.py` owns the Ledger: its v1 start and finish lines (schema unchanged;
+  a native Run's finish has `secs` null and `rc` 0), `$DELEGATE_LEDGER` (`runs.LEDGER_ENV`, which
+  the offline world sets), and `running`, through which the statusline reads it.
 - `scripts/model_queue.py`: models the catalog lacks, queued for the next `delegate global`
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.
@@ -147,8 +188,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   replaces with its successor into lanes.json, keeping Tier, Order and an off Lane off, after
   copying lanes.json to `lanes-backups/` beside the queue. The wizard names the swaps ("Dispatch
   swapped in"). `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
-- `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
-  benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis
+- `scripts/report.py`: limits, runs, and the lead's run ledger. `log --run` and `cost` price a Run
+  from `dispatch.json`'s `tokens` and the Lane's price record (`compute_cost(tokens, lane, catalog)`,
+  delegate-deepening 08); null tokens, or a Run directory from before them, are unmeasured, never
+  $0. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no
+  routing code reads it. Artificial Analysis
   comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
   ticket 19): the AA columns are the component benchmarks some lane has a figure for, with cost per
   task beside them and the composite never a column. `collect()` returns two views of the same
@@ -353,8 +397,9 @@ down one Tier; Tier 1 requires Carry to switch off.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out
   of the relay's final message.
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in
-  for the relays. Each script first moves to a fresh temporary directory with no Git root above it,
-  so the invoking checkout's own `.delegate/routing.json` never reaches a test.
+  for the relays (its brief directive also crashes it with `crash=`, or replays a staged run
+  directory with `replay=`). Each script first moves to a fresh temporary directory with no Git
+  root above it, so the invoking checkout's own `.delegate/routing.json` never reaches a test.
 - `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate
   rank|run|dispatch|status|log|runs|cost|catalog|setup`). A user's harness constraint is `--harness
   <h>` on `rank` and `run`; it replaced the four `delegate-<harness>` wrapper skills.
@@ -371,8 +416,8 @@ kernel-enforced (Seatbelt/Landlock) and strictly stronger than the advisory plan
 tool auto-approval inside it (`--sandbox --dangerously-skip-permissions`), confining the run to its
 workspace. `--write` is no longer the workaround it was before 2026-09-10; do not reach for it to
 get agy's tools working. Note the ADS skill docs for agy still describe the old plan mode (ticket 14
-follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_result` returns
-`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; the
+follow-up); the relay code is what runs. If a gate cancels a tool anyway, settling (`relays.py`)
+returns `blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; the
 reason is the harness adapter's `blocked_reason`, which only grok's implements (fixture
 `tests/fixtures/dispatch/grok-gate-cancel/`).
 
@@ -391,8 +436,8 @@ unenforced, so delegate does not do it.
 ## Browser use per harness
 
 Browser use per harness, as proven on the Mac on 2026-09-12. **agy**: works, disposable browser,
-nothing to do. **codex**: works, through a home of delegate's own — `run_relay` sets `CODEX_HOME` to
-`~/.local/share/delegate/codex-home` when it exists and then drops `--ignore-user-config`, so the
+nothing to do. **codex**: works, through a home of delegate's own — the `Ads` adapter sets
+`CODEX_HOME` to `~/.local/share/delegate/codex-home` when it exists and then drops `--ignore-user-config`, so the
 worker reads one MCP server and nothing else in `~/.codex`; without that home a run keeps the old
 isolation and has no browser (`codex_home()`, ticket 03). **grok**: works on a write run only. Its
 built-in `read-only` sandbox kills every stdio MCP server on macOS, `context7` as well as

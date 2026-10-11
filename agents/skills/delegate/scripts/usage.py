@@ -26,8 +26,8 @@ Cache: get_cache_path() — $DELEGATE_CACHE, else $CONSULT_CACHE, else
 ~/.cache/delegate/usage.json. Absence of a CLI, auth failure, or a probe
 timeout marks that lane "unknown" — never a crash. Exit 0 always.
 
-Public acquisition: load_cached() never probes and never writes a meter
-event; probe(refresh=...) is the refresh/TTL path.
+Public acquisition: load_cached() never probes; probe(refresh=...) is the
+refresh/TTL path. Neither writes the Ledger, which records Runs only.
 """
 import json, math, os, re, subprocess, sys, time
 from datetime import datetime, timezone
@@ -35,10 +35,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Each harness's probe lives in its adapter (scripts/harnesses/); this module
 # owns the rows they build, the cache and the combined figures.
 import harnesses  # noqa: E402
-try:
-    from events import append, meter_event
-except ImportError:
-    from .events import append, meter_event
 
 TTL_MIN_DEFAULT = 10
 WEEK = 7 * 86400      # assumed weekly-cycle length for pace
@@ -278,7 +274,7 @@ def eligible(observation, gate):
 
 
 def load_cached(cache_path=None):
-    """Read the usage cache without probing or emitting a meter event.
+    """Read the usage cache without probing.
 
     Missing or unreadable files become {}. A combined Remaining or Pace the
     cache lacks is derived in the returned copy; the file on disk is not
@@ -362,13 +358,12 @@ def write_cache(d, cache_path=None):
         os.makedirs(parent, exist_ok=True)
     with open(p, "w") as f:
         json.dump(d, f, indent=1)
-    append(meter_event(d))
 
 def probe(refresh=False, max_age_min=None, cache_path=None):
     """Return a usage document, probing vendors when the cache is missing or stale.
 
-    refresh=True always probes. A cache hit emits no meter event. Timeout and
-    per-harness failures stay inside each adapter's `meters` (unknown rows).
+    refresh=True always probes. Timeout and per-harness failures stay inside
+    each adapter's `meters` (unknown rows).
     """
     ttl = TTL_MIN_DEFAULT if max_age_min is None else max_age_min
     d = None if refresh else load_cache(ttl, cache_path=cache_path)

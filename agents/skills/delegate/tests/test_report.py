@@ -14,6 +14,8 @@ os.chdir(_ISOLATED_CWD.name)
 SKILL = os.path.dirname(HERE)
 REPORT = os.path.abspath(os.path.join(SKILL, "scripts", "report.py"))
 SAMPLES = os.path.abspath(os.path.join(SKILL, "assets", "samples"))
+sys.path.insert(0, os.path.join(SKILL, "scripts"))
+import runs  # noqa: E402
 fails = []
 
 
@@ -188,7 +190,7 @@ with tempfile.TemporaryDirectory() as tmp:
     grok_run = os.path.join(tmp, "run-grok")
     write_dispatch(grok_run, {
         "lane": "grok46-high@grok",
-        "usage": {"input_tokens": 120000, "output_tokens": 30000, "cached_tokens": 50000},
+        "tokens": {"in": 120000, "out": 30000, "cache_read": 50000, "cache_write": 0},
         "secs": 300, "status": "done", "thread_id": "t1",
     })
     rc, out, err = run(["log", "--work", "Grok job", "--run", grok_run, "--verdict", "clean"] + cfg, env)
@@ -211,24 +213,35 @@ with tempfile.TemporaryDirectory() as tmp:
 
     codex_null = os.path.join(tmp, "run-codex-null")
     write_dispatch(codex_null, {
-        "lane": "terra-high@codex", "usage": None, "secs": 12, "status": "done",
+        "lane": "terra-high@codex", "tokens": None, "secs": 12, "status": "done",
     })
     rc, out, err = run(["log", "--work", "Codex null", "--run", codex_null, "--verdict", "clean"] + cfg, env)
-    check("log --run null usage exits 0", rc == 0, err)
+    check("log --run null tokens exits 0", rc == 0, err)
     check("logged line ends with unmeasured", out.strip().endswith("unmeasured"), out)
     null_rec = [json.loads(l) for l in open(env["DELEGATE_RUNS"])][-1]
-    check("null usage stores measured false",
+    check("null tokens store measured false",
           (null_rec.get("cost") or {}).get("measured") is False, str(null_rec.get("cost")))
     rc, out, _ = run(["runs", "--last", "1"] + cfg, env)
     null_row = next((l for l in out.splitlines() if "Codex null" in l), "")
     check("runs shows unmeasured not $0.00",
           null_row and cells(null_row)[3] == "unmeasured" and "$0.00" not in null_row, out)
 
+    # A Run from before Token counts holds the relay's raw usage record; the
+    # report reads no relay spelling, so it is unmeasured.
+    raw_run = os.path.join(tmp, "run-raw-usage")
+    write_dispatch(raw_run, {
+        "lane": "grok46-high@grok",
+        "usage": {"input_tokens": 120000, "output_tokens": 30000, "cached_tokens": 50000},
+        "secs": 30, "status": "done",
+    })
+    rc, out, err = run(["cost", raw_run] + cfg, env)
+    check("cost of a Run with a raw usage record and no tokens is unmeasured",
+          rc == 0 and out.startswith("unmeasured: "), f"rc={rc} out={out} err={err}")
+
     claude_run = os.path.join(tmp, "run-claude")
     write_dispatch(claude_run, {
         "lane": "fable-xhigh@claude",
-        "usage": {"input_tokens": 1000, "output_tokens": 2000,
-                  "cache_creation_input_tokens": 8000},
+        "tokens": {"in": 1000, "out": 2000, "cache_read": 0, "cache_write": 8000},
         "secs": 9, "status": "done",
     })
     rc, _, err = run(["log", "--work", "Claude write", "--run", claude_run, "--verdict", "clean"] + cfg, env)
@@ -241,8 +254,7 @@ with tempfile.TemporaryDirectory() as tmp:
     terra_run = os.path.join(tmp, "run-terra")
     write_dispatch(terra_run, {
         "lane": "terra-high@codex",
-        "usage": {"input_tokens": 1000000, "output_tokens": 1000,
-                  "cache_creation_input_tokens": 4000},
+        "tokens": {"in": 1000000, "out": 1000, "cache_read": 0, "cache_write": 4000},
         "secs": 8, "status": "done",
     })
     rc, _, err = run(["log", "--work", "Terra null write", "--run", terra_run, "--verdict", "clean"] + cfg, env)
@@ -255,7 +267,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mixed_run = os.path.join(tmp, "run-explicit-lane")
     write_dispatch(mixed_run, {
         "lane": "grok46-high@grok",
-        "usage": {"input_tokens": 120000, "output_tokens": 30000, "cached_tokens": 50000},
+        "tokens": {"in": 120000, "out": 30000, "cache_read": 50000, "cache_write": 0},
         "secs": 15, "status": "done",
     })
     rc, _, err = run(["log", "--work", "Explicit lane", "--run", mixed_run,
@@ -266,6 +278,25 @@ with tempfile.TemporaryDirectory() as tmp:
           exp_rec.get("lane") == "luna-low@codex", exp_rec)
     check("explicit lane prices are used",
           (exp_rec.get("cost") or {}).get("usd_in") == 0.024, str(exp_rec.get("cost")))
+
+    # A native Run ends handed to its agent, with secs null (delegate never
+    # sees how long the agent ran): log reads its status, and still asks for
+    # the wall time, as SKILL.md step 4 says to pass it.
+    native_run = os.path.join(tmp, "run-native")
+    write_dispatch(native_run, {
+        "lane": "fable-xhigh@claude", "tokens": None, "secs": None, "status": "native",
+        "reason": "handed to lane-fable-xhigh", "thread_id": "t-native",
+    })
+    rc, out, err = run(["log", "--work", "Native job", "--run", native_run, "--verdict", "clean"] + cfg, env)
+    check("log --run on a native Run without --secs asks for --secs",
+          rc != 0 and "--secs is required" in err, f"rc={rc} out={out} err={err}")
+    rc, out, err = run(["log", "--work", "Native job", "--run", native_run, "--secs", "95",
+                        "--verdict", "clean"] + cfg, env)
+    native_rec = [json.loads(l) for l in open(env["DELEGATE_RUNS"])][-1]
+    check("log --run on a native Run records status native and the secs given",
+          rc == 0 and native_rec.get("work") == "Native job" and native_rec.get("status") == "native"
+          and native_rec.get("secs") == 95 and native_rec.get("thread_id") == "t-native",
+          f"rc={rc} err={err} rec={native_rec}")
 
     recs = [json.loads(l) for l in open(env["DELEGATE_RUNS"])]
     measured = [r for r in recs if (r.get("cost") or {}).get("measured")]
@@ -287,7 +318,7 @@ with tempfile.TemporaryDirectory() as tmp:
     unpriced_run = os.path.join(tmp, "run-unpriced")
     write_dispatch(unpriced_run, {
         "lane": "luna-low@codex",
-        "usage": {"input_tokens": 500000, "output_tokens": 1000},
+        "tokens": {"in": 500000, "out": 1000, "cache_read": 0, "cache_write": 0},
         "secs": 20, "status": "done",
     })
     rc, out, err = run(["log", "--work", "Unpriced job", "--run", unpriced_run, "--verdict", "clean",
@@ -338,29 +369,38 @@ with tempfile.TemporaryDirectory() as tmp:
              "reset_5h": sl_now + 2 * 3600 + 60, "reset_weekly": sl_now + 4 * 86400 + 60, "status": "ok"},
         ]}, f)
 
+    # The Ledger the Run below writes, so the live one is never read.
     sl_ledger = os.path.join(tmp, "sl_ledger.jsonl")
-    with open(sl_ledger, "w") as f:
-        # 1. open start inside timeout (flash-high@agy -> tier 1)
-        t_in = datetime.fromtimestamp(sl_now - 100).astimezone().isoformat(timespec="seconds")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_in, "thread_id": "tid-running",
-                            "lane": "flash-high@agy", "timeout_s": 600}) + "\n")
-        # 2. open start past timeout (terra-high@codex, timeout 300s, started 1000s ago)
-        t_stale = datetime.fromtimestamp(sl_now - 1000).astimezone().isoformat(timespec="seconds")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_stale, "thread_id": "tid-stale",
-                            "lane": "terra-high@codex", "timeout_s": 300}) + "\n")
-        # 3. start/finish pair (grok46-high@grok)
-        t_fin = datetime.fromtimestamp(sl_now - 200).astimezone().isoformat(timespec="seconds")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_fin, "thread_id": "tid-finished",
-                            "lane": "grok46-high@grok", "timeout_s": 600}) + "\n")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.finish", "ts": t_fin, "thread_id": "tid-finished",
-                            "lane": "grok46-high@grok", "secs": 50, "rc": 0, "status": "done"}) + "\n")
-
     # A switch path of its own, so the live ~/.cache/delegate/statusline.off
     # never hides the rows under test.
     sl_switch = os.path.join(tmp, "sl_rows_on", "statusline.off")
     sl_env = {"DELEGATE_CACHE": sl_cache, "DELEGATE_LEDGER": sl_ledger,
               "DELEGATE_STATUSLINE_SWITCH": sl_switch}
-    rc, out, err = run(["statusline", "--no-color"] + cfg, sl_env)
+
+    # The statusline run from inside a Run's work sees that Run (ticket 03):
+    # flash-high@agy is a Tier 1 lane on the agy Meter.
+    inside = {}
+
+    def statusline_work(handle):
+        inside["rows"] = run(["statusline", "--no-color"] + cfg, sl_env)
+        inside["norun"] = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
+        return runs.Finish({"status": "done", "deliverable": "ok", "evidence": [],
+                            "open_questions": [], "changed_files": []}, relay_exit=0, secs=1)
+
+    saved_ledger = os.environ.get("DELEGATE_LEDGER")
+    os.environ["DELEGATE_LEDGER"] = sl_ledger
+    try:
+        sl_ended = runs.execute(
+            runs.Request(lane="flash-high@agy", harness="agy", model="gemini-3.8-flash-high",
+                         effort="high", timeout="25m", class_name="scout", cwd=tmp, write=None,
+                         brief=os.path.join(tmp, "brief.md")),
+            b"p", statusline_work, os.path.join(tmp, "sl-runs"))
+    finally:
+        if saved_ledger is None:
+            os.environ.pop("DELEGATE_LEDGER", None)
+        else:
+            os.environ["DELEGATE_LEDGER"] = saved_ledger
+    rc, out, err = inside.get("rows", (None, "", "the work never ran"))
     check("statusline exits 0", rc == 0, err)
     sl_lines = [l for l in out.splitlines() if l.strip()]
     check("statusline prints 5 rows", len(sl_lines) == 5, f"got {len(sl_lines)} lines: {out}")
@@ -375,12 +415,35 @@ with tempfile.TemporaryDirectory() as tmp:
           all(l.startswith("·  ") for l in sl_lines[2:]), out)
     check("statusline fable shows remaining_weekly_model", "59%·4d" in sl_lines[2], sl_lines[2])
     check("statusline codex carries ✗ when gated", "8%·3d✗" in sl_lines[4], sl_lines[4])
-    check("statusline running agent shows tier glyph on agy", sl_lines[0].endswith("①"), sl_lines[0])
-    check("statusline stale start not in running", not any("③" in l.split("wk")[-1] for l in sl_lines), out)
-    check("statusline finished start not in running", not any("②" in sl_lines[1].split("wk")[-1] for l in [sl_lines[1]]), sl_lines[1])
+    check("statusline from inside a Run's work shows its tier glyph on the agy row",
+          sl_lines[0].endswith("①") and not any(l.endswith(("②", "③", "④")) for l in sl_lines),
+          out)
 
-    rc, out_norun, _ = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
+    rc, out_norun, _ = inside.get("norun", (None, "", ""))
     check("statusline --no-running drops running glyph", "①" not in out_norun.splitlines()[0].split("wk")[-1], out_norun)
+    rc, out_after, err_after = run(["statusline", "--no-color"] + cfg, sl_env)
+    check("statusline shows no glyph once the Run has ended",
+          sl_ended.status == "done" and rc == 0 and out_after == out_norun,
+          f"ended={sl_ended.status} err={err_after} after={out_after} norun={out_norun}")
+
+    # One Ledger line that is valid JSON but not an object, and one open start
+    # in today's v1 shape (ticket 03).
+    odd_ledger = os.path.join(tmp, "odd_ledger.jsonl")
+    with open(odd_ledger, "w") as f:
+        f.write("[1]\n")
+        f.write(json.dumps({
+            "v": 1, "kind": "dispatch.start",
+            "ts": datetime.fromtimestamp(sl_now - 100).astimezone().isoformat(timespec="seconds"),
+            "thread_id": "tid-open", "lane": "flash-high@agy", "class": "scout", "effort": "high",
+            "timeout_s": 1500, "cwd": tmp, "brief": os.path.join(tmp, "brief.md"),
+            "out": os.path.join(tmp, "odd-run", "return.json"), "write": None}) + "\n")
+    rc, out_odd, err_odd = run(["statusline", "--no-color"] + cfg, dict(sl_env, DELEGATE_LEDGER=odd_ledger))
+    odd = [l for l in out_odd.splitlines() if l.strip()]
+    norun_rows = [l for l in out_norun.splitlines() if l.strip()]
+    check("a Ledger line that is not an object never blanks the statusline",
+          rc == 0 and len(odd) == 5 and odd[0].endswith("①")
+          and odd[0][:-1].rstrip() == norun_rows[0] and odd[1:] == norun_rows[1:],
+          f"rc={rc} err={err_odd} out={out_odd}")
 
     # A model Meter is marked in the catalog, not known by its name (ticket 08):
     # renamed, with its probe row renamed too, it draws the same row; and its
@@ -483,7 +546,7 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_st, _ = run(["statusline", "status"] + cfg, sw_env)
     check("statusline status reports off", out_st.strip() == "off", out_st)
     rc, out_tg, _ = run(["statusline", "toggle"] + cfg, sw_env)
-    check("statusline toggle turns the rows back on", out_tg.strip() == "delegate rows on"
+    check("statusline toggle turns the rows back on", rc == 0 and out_tg.strip() == "delegate rows on"
           and not os.path.exists(sw_env["DELEGATE_STATUSLINE_SWITCH"]), out_tg)
     rc, out_sw, _ = run(["statusline", "--no-color"] + cfg, sw_env)
     check("statusline prints rows again after toggle", len([l for l in out_sw.splitlines() if l.strip()]) == 5, out_sw)
@@ -623,7 +686,6 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # The popup replays rank's choice: across Order a rival needs the leader's Pace
 # plus the Margin, and the handover point follows from it (ticket 40).
-sys.path.insert(0, os.path.join(SKILL, "scripts"))
 import report  # noqa: E402
 
 

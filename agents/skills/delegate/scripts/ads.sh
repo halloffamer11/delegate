@@ -17,6 +17,7 @@ set -eu
 # Neither is offered upstream yet.
 ADS_REPO=https://github.com/halloffamer11/delegate-skills.git
 ADS_COMMIT=b6ec937700174947234f4f46e4d793d78270545b
+# relays.DEFAULT_DIR repeats this default; test_relay a8 holds the two equal.
 ADS_DIR=${ADS_DIR:-$HOME/.local/share/delegate/ads}
 
 # The relays come from the harness registry, the one list of harnesses.
