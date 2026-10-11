@@ -11,11 +11,14 @@ Run: `runs.execute` runs every Run from its start to its Outcome
 (dispatch.json, prompt.md, return.json, the Ledger, the Meter hold and the
 finish line); runs.py is the Ledger's one writer. Dispatch supplies only the
 work: `relay_work`, or for a native Lane a `runs.HandOff` to the
-orchestrator's agent, which ends the Run at once as native. The relayed work
-runs the relay through `relays.Ads(ads_dir).run(job, run.path)`: relays.py
-runs it and settles what it said into the `runs.Finish` the Run records (its
-docstring holds the status table). The relay adds relay.stdout,
-relay.stderr, result.json, brief.txt, final.txt and events.jsonl.
+orchestrator's agent, which ends the Run at once as native. A relayed Lane
+asks its relay's `check()` before the Run starts (refused: exit 2, nothing
+started), and the relayed work runs `relay.run(job, run.path)`: relays.py runs
+it and settles what it said into the `runs.Finish` the Run records (its
+docstring holds the status table). The relay is `relays.Ads(ads_dir)` unless a
+caller hands one in (`dispatch(relay=...)`, as a test hands in
+`relays.Scripted`). Ads adds relay.stdout, relay.stderr, result.json,
+brief.txt, final.txt and events.jsonl.
 
 CLI:
   python3 delegate.py dispatch (--lane <name> | --model <slug>) [--class <c>] --brief <path> --cwd <dir>
@@ -33,7 +36,6 @@ import argparse
 import contextlib
 import json
 import os
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,7 +65,7 @@ def _lane_model_listing(lanes, harness=None):
     return ", ".join(items)
 
 
-def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, config_dir, ads_dir, model_slug=None, harness_filter=None, profile=None):
+def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, config_dir, relay, model_slug=None, harness_filter=None, profile=None):
     try:
         cat = load_catalog(cwd=cwd_dir, config_dir=config_dir)
     except CatalogError as e:
@@ -181,20 +183,14 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         )
         sys.exit(2)
 
-    # Only a relayed lane goes through ADS and node. A native lane runs as the
-    # orchestrator's own agent, so a machine without node (or ADS) still runs it.
+    # Only a relayed lane asks the relay whether it can run here. A native lane
+    # runs as the orchestrator's own agent, so a machine without node (or ADS)
+    # still runs it.
     if not orchestrators.is_native(profile, harness):
-        ads_sh = os.path.join(HERE, "ads.sh")
-        env = dict(os.environ)
-        if ads_dir:
-            env["ADS_DIR"] = os.path.abspath(ads_dir)
-        proc = subprocess.run(["sh", ads_sh, "check"], capture_output=True, text=True, env=env)
-        if proc.returncode != 0:
-            msg = (proc.stderr or proc.stdout).strip()
-            sys.stderr.write(f"{msg}\n")
+        why = relay.check()
+        if why:
+            sys.stderr.write(f"{why}\n")
             sys.exit(2)
-
-    resolved_ads_dir = os.path.abspath(ads_dir) if ads_dir else (os.environ.get("ADS_DIR") or os.path.expanduser("~/.local/share/delegate/ads"))
 
     return {
         "lane": lane_name,
@@ -204,7 +200,6 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         "effort": effort,
         "timeout": lane_data["timeout"],
         "child_cwd": child_cwd,
-        "ads_dir": resolved_ads_dir,
         "routing": cat.get("routing", {}),
     }
 
@@ -299,10 +294,10 @@ def probe_meters(no_probe, routing=None):
     usage.acquire(refresh=True, timeout=180)
 
 
-def relay_work(harness, model, effort, timeout, child_cwd, write, ads_dir, no_probe=False,
+def relay_work(harness, model, effort, timeout, child_cwd, write, relay, no_probe=False,
                routing=None, probed=False):
     """The work of a relayed Run, for `runs.execute`: preflight, probe, run
-    the relay through `relays.Ads`, which returns the `runs.Finish`, and probe.
+    the relay (`relay.run` returns the `runs.Finish`), and probe.
 
     ``probed`` means the caller acquired the Meters just now to rank, so the
     before-probe would only repeat it (and `claude -p /usage` can spend the
@@ -317,14 +312,16 @@ def relay_work(harness, model, effort, timeout, child_cwd, write, ads_dir, no_pr
             probe_meters(no_probe, routing)
         job = relays.Job(harness=harness, model=model, effort=effort, timeout=timeout,
                          prompt=run.prompt_path, cwd=child_cwd, write=write)
-        finish = relays.Ads(ads_dir).run(job, run.path)
+        finish = relay.run(job, run.path)
         probe_meters(no_probe, routing)
         return finish
     return work
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None, as_json=False):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None, as_json=False, relay=None):
     profile = load_profile(orchestrator)
+    if relay is None:
+        relay = relays.Ads(ads_dir)
     # Step 1: Resolve
     resolved = resolve(
         lane_name=lane,
@@ -334,7 +331,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         write_dir=write,
         effort_arg=effort,
         config_dir=config_dir,
-        ads_dir=ads_dir,
+        relay=relay,
         model_slug=model,
         harness_filter=harness,
         profile=profile,
@@ -345,7 +342,6 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     eff = resolved["effort"]
     lane_timeout = resolved["timeout"]
     child_cwd = resolved["child_cwd"]
-    ads_d = resolved["ads_dir"]
 
     effective_leash = should_leash(class_, no_leash=no_leash, routing=resolved["routing"])
     # at most once a day, a detached look for models the catalog lacks (ticket 29)
@@ -378,7 +374,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     else:
         work = relay_work(
             harness=harness, model=model, effort=eff, timeout=lane_timeout, child_cwd=child_cwd,
-            write=write, ads_dir=ads_d, no_probe=no_probe, routing=resolved.get("routing"), probed=probed,
+            write=write, relay=relay, no_probe=no_probe, routing=resolved.get("routing"), probed=probed,
         )
     try:
         ended = runs.execute(request, prompt_bytes, work, runs_dir)
@@ -393,7 +389,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     sys.exit(ended.exit_code)
 
 
-def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, present_harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None, as_json=False):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, present_harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None, as_json=False, relay=None):
     try:
         cat = load_catalog(cwd=cwd, config_dir=config_dir)
     except CatalogError as e:
@@ -472,6 +468,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         probed=probed,
         orchestrator=orchestrator,
         as_json=as_json,
+        relay=relay,
     )
 
 

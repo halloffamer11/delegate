@@ -2,6 +2,8 @@
 """test_dispatch.py — tests for delegate.py dispatch path.
 Run: python3 tests/test_dispatch.py
 """
+import contextlib
+import io
 import json
 import os
 import re
@@ -27,6 +29,7 @@ COURIER_MD = os.path.join(HERE, "..", "assets", "orchestrators", "claude", "cour
 sys.path.insert(0, DELEGATE_DIR)
 import delegate  # noqa: E402
 import evals  # noqa: E402
+import relays  # noqa: E402
 import runs  # noqa: E402
 
 
@@ -104,6 +107,26 @@ def run_dispatch(world, args, **kw):
 
 def run_run(world, args, **kw):
     return run_delegate(world, "run", args, **kw)
+
+
+def dispatch_in_process(world, extra_env=None, **kw):
+    """`delegate.dispatch(**kw)` in this process, in the world's env:
+    (exit code, stdout, stderr)."""
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(world.env)
+    os.environ.update(extra_env or {})
+    out, err = io.StringIO(), io.StringIO()
+    code = None
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            delegate.dispatch(**kw)
+    except SystemExit as e:
+        code = e.code
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    return code, out.getvalue(), err.getvalue()
 
 
 def parse_run_dir_from_stdout(stdout):
@@ -212,84 +235,55 @@ def main():
         )
         record("8. distinct run directories", ok8, f"dir1={dir8a} dir2={dir8b}")
 
+        # A PATH with everything the world's bin directory holds but node, and
+        # the Ledger's lines.
+        no_node_bin = os.path.join(tmpdir, "no_node_bin")
+        os.makedirs(no_node_bin, exist_ok=True)
+        for name in os.listdir(world.bin_dir):
+            if name != "node":
+                os.symlink(os.path.join(world.bin_dir, name), os.path.join(no_node_bin, name))
+        no_node_env = {"PATH": no_node_bin}
+        ledger_path = world.ledger_path
+
+        def ledger_lines():
+            if not os.path.exists(ledger_path):
+                return []
+            with open(ledger_path, "r", encoding="utf-8") as f:
+                return [json.loads(l) for l in f if l.strip()]
+
         # -------------------------------------------------------------
-        # 9. argv per harness
+        # 9. dispatch hands its relay the Job, in-process through a Scripted
+        # relay with no node on PATH: the Lane's harness and model, an --effort
+        # override, and the write worktree as the worker's cwd. A relay whose
+        # check refuses starts nothing. What each harness's relay is then
+        # handed is test_relay's (a6).
         # -------------------------------------------------------------
-        b9 = make_brief("b9.md", "fake-relay: status=completed\nArgv test.")
+        b9 = make_brief("b9.md", "Brief 9.")
+        wt9 = os.path.join(tmpdir, "worktree-9")
+        os.makedirs(wt9)
+        fake9 = relays.Scripted(relays.Report(status="completed", final_message=open(done_final).read(), exit=0))
+        code9, out9, err9 = dispatch_in_process(
+            world, no_node_env, lane="terra-high@codex", class_="impl", brief=b9, cwd=cwd, write=wt9,
+            effort="low", config_dir=world.config_dir, runs_dir=world.runs_dir, no_probe=True, relay=fake9)
+        dir9 = parse_run_dir_from_stdout(out9)
+        job9 = relays.Job(harness="codex", model="gpt-5.6-terra", effort="low", timeout="25m",
+                          prompt=os.path.join(dir9 or "", "prompt.md"), cwd=wt9, write=wt9)
+        ret9 = json.load(open(os.path.join(dir9, "return.json"))) if dir9 else {}
+        ok9 = (code9 == 0 and dir9 is not None and fake9.jobs == [(job9, dir9)]
+               and ret9.get("deliverable") == "all done deliverable")
 
-        # 9a: terra-high@codex read-only
-        res9a = run_dispatch(world, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd])
-        dir9a = parse_run_dir_from_stdout(res9a.stdout)
-        argv9a = json.load(open(os.path.join(dir9a, "argv.json")))
-        exp9a = ["--model", "gpt-5.6-terra", "--effort", "high", "--timeout", "25m", "--read-only", "--ignore-user-config", "--skip-git-repo-check"]
-        ok9a = all(x in argv9a for x in exp9a)
-
-        # 9a2: with a codex home of delegate's own, the run points CODEX_HOME at
-        # it and drops --ignore-user-config. The worker then reads that home's
-        # config alone — one MCP server, the disposable browser — and nothing in
-        # ~/.codex: no plugins, no Gmail, no hooks, no AGENTS.md.
-        delegate_codex_home = os.path.join(tmpdir, "delegate-codex-home")
-        os.makedirs(delegate_codex_home, exist_ok=True)
-        with open(os.path.join(delegate_codex_home, "config.toml"), "w") as f:
-            f.write('approvals_reviewer = "auto_review"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = []\n')
-        res9a2 = run_dispatch(
-            world,
-            ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd],
-            extra_env={"DELEGATE_CODEX_HOME": delegate_codex_home},
-        )
-        dir9a2 = parse_run_dir_from_stdout(res9a2.stdout)
-        argv9a2 = json.load(open(os.path.join(dir9a2, "argv.json")))
-        env9a2 = json.load(open(os.path.join(dir9a2, "env.json")))
-        ok9a2 = (
-            "--ignore-user-config" not in argv9a2 and
-            "--skip-git-repo-check" in argv9a2 and
-            env9a2.get("CODEX_HOME") == delegate_codex_home
-        )
-        record("9a2. codex home replaces --ignore-user-config", ok9a2, f"argv={argv9a2} env={env9a2}")
-
-        # 9b: terra-high@codex with --effort low
-        res9b = run_dispatch(world, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd, "--effort", "low"])
-        dir9b = parse_run_dir_from_stdout(res9b.stdout)
-        argv9b = json.load(open(os.path.join(dir9b, "argv.json")))
-        ok9b = ("--effort" in argv9b and argv9b[argv9b.index("--effort") + 1] == "low")
-
-        # 9c: terra-high@codex with --write
-        res9c = run_dispatch(world, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd, "--write", cwd])
-        dir9c = parse_run_dir_from_stdout(res9c.stdout)
-        argv9c = json.load(open(os.path.join(dir9c, "argv.json")))
-        ok9c = ("--read-only" not in argv9c)
-
-        # 9d: flash-high@agy read-only
-        res9d = run_dispatch(world, ["--lane", "flash-high@agy", "--class", "impl", "--brief", b9, "--cwd", cwd])
-        dir9d = parse_run_dir_from_stdout(res9d.stdout)
-        argv9d = json.load(open(os.path.join(dir9d, "argv.json")))
-        ok9d = ("--print-timeout" in argv9d and argv9d[argv9d.index("--print-timeout") + 1] == "25m" and "--effort" not in argv9d and "--read-only" in argv9d and "--dangerously-skip-permissions" not in argv9d)
-
-        # 9e: flash-high@agy with --write
-        res9e = run_dispatch(world, ["--lane", "flash-high@agy", "--class", "impl", "--brief", b9, "--cwd", cwd, "--write", cwd])
-        dir9e = parse_run_dir_from_stdout(res9e.stdout)
-        argv9e = json.load(open(os.path.join(dir9e, "argv.json")))
-        ok9e = ("--dangerously-skip-permissions" in argv9e and "--read-only" not in argv9e)
-
-        # 9f: fable-xhigh@claude (relay path when ORCHESTRATOR is codex)
-        res9f = run_dispatch(world, ["--lane", "fable-xhigh@claude", "--class", "impl", "--brief", b9, "--cwd", cwd], orchestrator="codex")
-        dir9f = parse_run_dir_from_stdout(res9f.stdout)
-        argv9f = json.load(open(os.path.join(dir9f, "argv.json")))
-        ok9f = ("--effort" in argv9f and argv9f[argv9f.index("--effort") + 1] == "xhigh" and "--timeout" in argv9f and argv9f[argv9f.index("--timeout") + 1] == "60m")
-
-        # 9g: grok46-high@grok
-        res9g = run_dispatch(world, ["--lane", "grok46-high@grok", "--class", "impl", "--brief", b9, "--cwd", cwd])
-        dir9g = parse_run_dir_from_stdout(res9g.stdout)
-        argv9g = json.load(open(os.path.join(dir9g, "argv.json")))
-        ok9g = ("--effort" in argv9g and argv9g[argv9g.index("--effort") + 1] == "high" and "--timeout" in argv9g and argv9g[argv9g.index("--timeout") + 1] == "40m")
-
-        # 9h: no argv ever contains --lane, --max-turns, or --max-budget-usd
-        all_argvs = [argv9a, argv9b, argv9c, argv9d, argv9e, argv9f, argv9g]
-        forbidden = {"--lane", "--max-turns", "--max-budget-usd"}
-        ok9h = not any(forbidden.intersection(set(a)) for a in all_argvs)
-
-        ok9 = ok9a and ok9b and ok9c and ok9d and ok9e and ok9f and ok9g and ok9h
-        record("9. argv per harness", ok9, f"9a={ok9a} 9b={ok9b} 9c={ok9c} 9d={ok9d} 9e={ok9e} 9f={ok9f} 9g={ok9g} 9h={ok9h}")
+        refusing9 = relays.Scripted(ready="relays are down for case 9")
+        runs_before9 = set(os.listdir(world.runs_dir))
+        ledger_before9 = len(ledger_lines())
+        code9r, out9r, err9r = dispatch_in_process(
+            world, no_node_env, lane="terra-high@codex", class_="impl", brief=b9, cwd=cwd,
+            config_dir=world.config_dir, runs_dir=world.runs_dir, no_probe=True, relay=refusing9)
+        ok9r = (code9r == 2 and err9r.strip() == "relays are down for case 9" and refusing9.jobs == []
+                and set(os.listdir(world.runs_dir)) == runs_before9 and len(ledger_lines()) == ledger_before9)
+        record("9. dispatch hands its relay the Job in-process; a relay check that refuses starts nothing",
+               ok9 and ok9r,
+               f"rc={code9} jobs={fake9.jobs} want={job9} out={out9!r} err={err9[-400:]!r} "
+               f"refused rc={code9r} err={err9r!r} out={out9r!r}")
 
         # -------------------------------------------------------------
         # 10. --effort on an agy lane is ignored; proceed with lane effort
@@ -350,18 +344,6 @@ def main():
         # records a start. A node that goes missing after the check is the Ads
         # adapter's (test_relay a5): the Run still finishes, blocked, saying why.
         # -------------------------------------------------------------
-        no_node_bin = os.path.join(tmpdir, "no_node_bin")
-        os.makedirs(no_node_bin, exist_ok=True)
-        for name in os.listdir(world.bin_dir):
-            if name != "node":
-                os.symlink(os.path.join(world.bin_dir, name), os.path.join(no_node_bin, name))
-        no_node_env = {"PATH": no_node_bin}
-        ledger_path = world.ledger_path
-
-        def ledger_lines():
-            with open(ledger_path, "r", encoding="utf-8") as f:
-                return [json.loads(l) for l in f if l.strip()]
-
         b12d = make_brief("b12d.md", f"fake-relay: status=completed final={done_final}\nBrief 12d.")
         runs_before12d = set(os.listdir(world.runs_dir))
         ledger_before12d = len(ledger_lines())
@@ -636,7 +618,8 @@ def main():
         record("23. run foo lists classes", ok23, f"rc={res23.returncode} err={res23.stderr}")
 
         # -------------------------------------------------------------
-        # 24. --effort low on flash-high@agy proceeds; argv has no --effort
+        # 24. --effort low on flash-high@agy proceeds, saying it is ignored
+        # (that agy's argv never carries --effort is test_relay's a6)
         # -------------------------------------------------------------
         b24 = make_brief("b24.md", f"fake-relay: status=completed final={done_final}\nBrief 24.")
         res24 = run_dispatch(world, ["--lane", "flash-high@agy", "--class", "impl", "--brief", b24, "--cwd", cwd, "--effort", "low"])
@@ -646,10 +629,7 @@ def main():
             "delegate: effort override ignored on flash-high@agy; agy carries effort in the model name" in res24.stderr and
             dir24 is not None
         )
-        if ok24:
-            argv24 = json.load(open(os.path.join(dir24, "argv.json")))
-            ok24 = "--effort" not in argv24
-        record("24. agy --effort ignored, no argv --effort", ok24, f"rc={res24.returncode} err={res24.stderr}")
+        record("24. agy --effort ignored", ok24, f"rc={res24.returncode} err={res24.stderr}")
 
         # -------------------------------------------------------------
         # 25. hard-impl prompt contains no tool-call sentence; dispatch.json leash: false
@@ -994,31 +974,6 @@ def main():
                res31e.returncode == 0 and res31e.stdout.startswith("delegate: native lane=opus-high@claude"),
                f"rc={res31e.returncode} stdout={res31e.stdout} stderr={res31e.stderr}")
 
-        # 31f. a Kiro Lane dispatches through kiro-delegate with the model and
-        # effort (any-harness ticket 15); offline, through the fake relay
-        kiro_config = os.path.join(tmpdir, "config-kiro")
-        shutil.copytree(world.config_dir, kiro_config)
-        lanes_kiro = json.load(open(os.path.join(kiro_config, "lanes.json")))
-        lanes_kiro["meters"]["kiro"] = {"harness": "kiro", "plan": "Kiro Pro", "price_month": 20,
-                                       "probe": "usage.py"}
-        lanes_kiro["lanes"]["opus55-high@kiro"] = {
-            "harness": "kiro", "model": "claude-opus-5.5", "effort": "high", "meter": "kiro",
-            "meter_weight": 1, "timeout": "30m",
-            "price": {"in": None, "cache_read": None, "cache_write": None, "out": None},
-            "tier": 3, "basis": "test"}
-        with open(os.path.join(kiro_config, "lanes.json"), "w") as f:
-            json.dump(lanes_kiro, f)
-        b31f = make_brief("b31f.md", f"fake-relay: status=completed final={done_final}\nBrief 31f.")
-        res31f = run_dispatch(world, ["--lane", "opus55-high@kiro", "--class", "impl", "--brief", b31f,
-                                      "--cwd", cwd], config_dir=kiro_config)
-        dir31f = parse_run_dir_from_stdout(res31f.stdout)
-        argv31f = json.load(open(os.path.join(dir31f, "argv.json"))) if dir31f else []
-        record("31f. a kiro lane dispatches through its relay with model, effort and --read-only",
-               res31f.returncode == 0 and "status=done" in res31f.stdout
-               and all(x in argv31f for x in ["--model", "claude-opus-5.5", "--effort", "high",
-                                               "--timeout", "30m", "--read-only"]),
-               f"rc={res31f.returncode} stdout={res31f.stdout} stderr={res31f.stderr} argv={argv31f}")
-
         # -------------------------------------------------------------
         # 32. prompt.md preamble permits disposable browser and forbids other network writes
         # -------------------------------------------------------------
@@ -1038,17 +993,20 @@ def main():
         # -------------------------------------------------------------
         # 33. agy read-only prompt has new line and no 'file tools only'; --write prompt omits it
         # -------------------------------------------------------------
-        prompt_path9e = os.path.join(dir9e, "prompt.md")
-        with open(prompt_path9e, "r", encoding="utf-8") as f:
-            prompt9e_text = f.read()
+        b33 = make_brief("b33.md", f"fake-relay: status=completed final={done_final}\nBrief 33.")
+        res33 = run_dispatch(world, ["--lane", "flash-high@agy", "--class", "impl", "--brief", b33, "--cwd", cwd,
+                                     "--write", cwd])
+        dir33 = parse_run_dir_from_stdout(res33.stdout)
+        with open(os.path.join(dir33, "prompt.md"), "r", encoding="utf-8") as f:
+            prompt33_text = f.read()
         new_agy_line = "Browser tools are permitted. Terminal commands run inside a sandbox confined to the workspace; you still must not create, edit, or delete files."
         ok33 = (
             new_agy_line in prompt24_text and
             "file tools only" not in prompt24_text and
             "auto-denied" not in prompt24_text and
-            new_agy_line not in prompt9e_text and
-            "file tools only" not in prompt9e_text and
-            "Writes are authorized inside" in prompt9e_text
+            new_agy_line not in prompt33_text and
+            "file tools only" not in prompt33_text and
+            "Writes are authorized inside" in prompt33_text
         )
         record("33. agy prompt: read-only has new sandbox line and no 'file tools only', --write omits it", ok33)
 

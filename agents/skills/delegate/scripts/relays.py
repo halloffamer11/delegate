@@ -5,15 +5,19 @@ A Relay runs one Job in a separate process and settles what the relay said
 into the Finish the Run records. How relayed work ended is `runs.Finish`, and
 this module defines no outcome type of its own.
 
+  relay.check() -> Optional[str]             why relays cannot run here now, in one line, or None;
+                                             asked before a Run starts
   relay.run(job, run_dir) -> runs.Finish     run_dir already exists
 
 Two adapters:
   Ads       the pinned delegate-skills relays, through node. It alone knows
-            the relay path, the argv, the env overrides, relay.stdout and
-            relay.stderr, every result.json key, the form of node's crash
-            output, and events.jsonl (through `Harness.blocked_reason`).
+            the ADS directory (the argument, else $ADS_DIR, else DEFAULT_DIR),
+            `ads.sh check`, node, the relay path, the argv, the env overrides,
+            relay.stdout and relay.stderr, every result.json key, the form of
+            node's crash output, and events.jsonl (through
+            `Harness.blocked_reason`).
   Scripted  a fake for tests, scripted with what a relay says (a Report), so
-            settling runs under it too.
+            settling runs under it too; its check answers `ready`.
 
 Ads returns a Finish for every way a relay can fail: node missing at spawn,
 no result.json, a result.json that does not parse or is not an object, an
@@ -47,6 +51,11 @@ from typing import NamedTuple, Optional
 
 import harnesses
 import runs
+
+_ADS_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ads.sh")
+# ads.sh's own default for $ADS_DIR (`ADS_DIR=${ADS_DIR:-...}`); test_relay a8
+# holds the two equal.
+DEFAULT_DIR = os.path.expanduser("~/.local/share/delegate/ads")
 
 _STATUSES = ("done", "partial", "blocked")
 _TRIPWIRE = "read-only tripwire fired; review the diff"
@@ -85,7 +94,12 @@ class Report(NamedTuple):
 
 
 class Relay:
-    """The port: run one Job in a run directory that already exists."""
+    """The port: whether relays can run here, and run one Job in a run
+    directory that already exists."""
+
+    def check(self):
+        """Why relays cannot run on this machine now, in one line, or None."""
+        raise NotImplementedError
 
     def run(self, job, run_dir):
         """How the job ended, settled into a `runs.Finish`."""
@@ -96,12 +110,27 @@ class Relay:
 
 
 class Ads(Relay):
-    """The pinned delegate-skills relays in `ads_dir`, run with node. `env` is
-    the relay's environment (default: this process's)."""
+    """The pinned delegate-skills relays, run with node. Their directory is
+    `ads_dir`, else the env's $ADS_DIR, else DEFAULT_DIR. `env` is the relay's
+    environment (default: this process's)."""
 
-    def __init__(self, ads_dir, env=None):
-        self.ads_dir = ads_dir
+    def __init__(self, ads_dir=None, env=None):
         self.env = env
+        given = ads_dir or (os.environ if env is None else env).get("ADS_DIR") or DEFAULT_DIR
+        self.ads_dir = os.path.abspath(given)
+
+    def check(self):
+        """`ads.sh check` on this adapter's directory: None when node, the pin
+        and every relay script are in place, else the first line it printed."""
+        env = dict(os.environ if self.env is None else self.env, ADS_DIR=self.ads_dir)
+        try:
+            proc = subprocess.run(["sh", _ADS_SH, "check"], capture_output=True, text=True, env=env)
+        except OSError as e:
+            return f"ads: cannot run ads.sh check: {e}"
+        if proc.returncode == 0:
+            return None
+        lines = [line.strip() for line in (proc.stderr + "\n" + proc.stdout).splitlines() if line.strip()]
+        return lines[0] if lines else f"ads: ads.sh check failed (exit {proc.returncode})"
 
     def _launch(self, job, run_dir):
         adapter = harnesses.get(job.harness)
@@ -184,11 +213,16 @@ def _crash_line(stderr_path):
 class Scripted(Relay):
     """A fake relay for tests: each run takes the next item of the script, a
     Report to settle or an exception to raise. `jobs` holds the (job, run_dir)
-    pairs it ran, in order."""
+    pairs it ran, in order. Its check answers `ready`: None, or why it
+    refuses."""
 
-    def __init__(self, *script):
+    def __init__(self, *script, ready=None):
         self._script = list(script)
+        self.ready = ready
         self.jobs = []
+
+    def check(self):
+        return self.ready
 
     def _launch(self, job, run_dir):
         self.jobs.append((job, run_dir))

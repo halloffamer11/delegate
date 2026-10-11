@@ -6,15 +6,19 @@ Settling cases run through `relays.Scripted`, scripted with what a relay says
 (a Report), in-process with no node and no subprocess. Ads cases run the fake
 relay (tests/fake-ads/relay.mjs) under node, with the fake ADS tree and the env
 of `evals.OfflineWorld`; `replay=<dir>` leaves a staged run directory's relay
-files, such as the grok gate-cancel fixture, in the run.
+files, such as the grok gate-cancel fixture, in the run, and the fake relay's
+`argv.json` and `env.json` show what Ads handed it. `Ads.check` runs ads.sh's
+own check in that world.
 Every case checks the Finish against the Run's record contracts:
 `runs.DISPATCH_FIELDS` and `runs.RETURN_FIELDS`.
 
 Run: python3 tests/test_relay.py
 """
+import contextlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -24,10 +28,12 @@ SAMPLES = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 # Relay output copied from real runs, trimmed of paths and signatures. Each
 # directory is a run directory as the relay leaves it.
 RUN_FIXTURES = os.path.join(HERE, "fixtures", "dispatch")
+ADS_SH = os.path.join(SCRIPTS, "ads.sh")
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
 sys.path.insert(0, SCRIPTS)
 import evals  # noqa: E402
+import harnesses  # noqa: E402
 import relays  # noqa: E402
 import runs  # noqa: E402
 
@@ -37,6 +43,8 @@ with open(os.path.join(SAMPLES, "lanes.json"), encoding="utf-8") as _f:
     LANES = json.load(_f)["lanes"]
 
 GATE = "permission gate cancelled the run at run_terminal_command"
+# The sample catalog has no Kiro Lane; this is the one any-harness ticket 15 ran.
+KIRO = {"harness": "kiro", "model": "claude-opus-5.5", "effort": "high", "timeout": "30m"}
 
 
 def record(name, ok, detail=""):
@@ -45,10 +53,11 @@ def record(name, ok, detail=""):
         failures.append(name)
 
 
-def job(lane, prompt="/w/prompt.md", cwd="/w", write=None):
-    """The Job a sample Lane's Run hands its relay."""
-    data = LANES[lane]
-    return relays.Job(harness=data["harness"], model=data["model"], effort=data["effort"],
+def job(lane, prompt="/w/prompt.md", cwd="/w", write=None, effort=None):
+    """The Job a sample Lane's Run hands its relay (or a Lane given as its
+    fields), at `effort` when the Run overrides it."""
+    data = LANES[lane] if isinstance(lane, str) else lane
+    return relays.Job(harness=data["harness"], model=data["model"], effort=effort or data["effort"],
                       timeout=data["timeout"], prompt=prompt, cwd=cwd, write=write)
 
 
@@ -234,6 +243,15 @@ def case_scripted_runs_its_script_in_order(run_dir):
            f"finished={finished} raised={raised} jobs={fake.jobs}")
 
 
+def case_scripted_check_answers_what_it_was_given():
+    ready = relays.Scripted()
+    refusing = relays.Scripted(ready="relays are down for this test")
+    record("s12. Scripted's check answers None, or the line it was given, and runs nothing",
+           ready.check() is None and refusing.check() == "relays are down for this test"
+           and ready.jobs == [] and refusing.jobs == [],
+           f"ready={ready.check()!r} refusing={refusing.check()!r}")
+
+
 # ---------------------------------------------------------------------------
 # Ads, through the fake relay under node
 # ---------------------------------------------------------------------------
@@ -246,20 +264,34 @@ class AdsWorld:
         world = evals.OfflineWorld(self.root)
         self.ads_dir = world.ads_dir
         self.env = world.env
+        self.bin_dir = world.bin_dir
+        self.codex_home = world.codex_home
         self.cwd = os.path.join(self.root, "work")
         self.dir = os.path.join(self.root, "relay-cases")
         os.makedirs(self.cwd)
         os.makedirs(self.dir)
 
-    def run(self, name, lane, directive, env=None, write=None):
-        """(Finish, run_dir) of one Ads run whose prompt carries `directive`."""
+    def run(self, name, lane, directive, env=None, write=None, effort=None):
+        """(Finish, run_dir) of one Ads run whose prompt carries `directive`.
+        A write job works in `write`, as dispatch has it."""
         run_dir = os.path.join(self.dir, name)
         os.makedirs(run_dir)
         prompt = os.path.join(run_dir, "prompt.md")
         with open(prompt, "w", encoding="utf-8") as f:
             f.write(f"fake-relay: {directive}\nBrief {name}.\n")
         relay = relays.Ads(self.ads_dir, env=self.env if env is None else env)
-        return relay.run(job(lane, prompt=prompt, cwd=self.cwd, write=write), run_dir), run_dir
+        the_job = job(lane, prompt=prompt, cwd=write or self.cwd, write=write, effort=effort)
+        return relay.run(the_job, run_dir), run_dir
+
+    def no_node_path(self):
+        """A PATH with everything the world's bin directory holds but node."""
+        no_node = os.path.join(self.dir, "no-node-path")
+        if not os.path.isdir(no_node):
+            os.makedirs(no_node)
+            for name in os.listdir(self.bin_dir):
+                if name != "node":
+                    os.symlink(os.path.join(self.bin_dir, name), os.path.join(no_node, name))
+        return no_node
 
     def stage(self, name, fixture=None, result=None, keep_event=None, final_message=None):
         """A run directory as a relay left it: a fixture's copy, or one holding
@@ -390,6 +422,139 @@ def case_ads_node_missing_at_spawn(w):
            repr(finish))
 
 
+@contextlib.contextmanager
+def process_env(**values):
+    """This process's environment with `values` set, for the length of a
+    block. A harness reads its own settings (codex's home) from it."""
+    saved = {key: os.environ.get(key) for key in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def flags(argv):
+    """argv as {flag: value}, True for a flag with no value."""
+    found = {}
+    for i, arg in enumerate(argv):
+        if arg.startswith("--"):
+            value = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else True
+            found[arg] = value
+    return found
+
+
+def case_ads_argv_and_env_per_harness(w):
+    """What Ads hands each harness's relay: the common flags, the harness's
+    own, and CODEX_HOME only for codex with a home of delegate's own."""
+    worktree = os.path.join(w.root, "worktree")
+    os.makedirs(worktree)
+    home = os.path.join(w.root, "delegate-codex-home")
+    os.makedirs(home)
+    with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as f:
+        f.write('approvals_reviewer = "auto_review"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = []\n')
+    # the relay's env holds no CODEX_HOME of the host's, so only Ads can set one
+    env = {k: v for k, v in w.env.items() if k != "CODEX_HOME"}
+
+    def handed(name, lane, write=None, effort=None, codex_home=w.codex_home):
+        with process_env(DELEGATE_CODEX_HOME=codex_home):
+            finish, run_dir = w.run(name, lane, "status=completed", env=env, write=write, effort=effort)
+        with open(os.path.join(run_dir, "argv.json"), encoding="utf-8") as f:
+            argv = json.load(f)
+        with open(os.path.join(run_dir, "env.json"), encoding="utf-8") as f:
+            seen_env = json.load(f)
+        common = {"--brief": os.path.join(run_dir, "prompt.md"), "--cd": write or w.cwd, "--out-dir": run_dir}
+        return finish, common, flags(argv), seen_env.get("CODEX_HOME"), argv
+
+    rows = (
+        # codex: its own flags; read-only unless it writes; without a home of
+        # delegate's own it ignores the user's config (9a, 9c)
+        ("codex-read", "terra-high@codex", {}, {
+            "--model": "gpt-5.6-terra", "--effort": "high", "--timeout": "25m",
+            "--skip-git-repo-check": True, "--ignore-user-config": True, "--read-only": True}, None),
+        ("codex-write", "terra-high@codex", {"write": worktree}, {
+            "--model": "gpt-5.6-terra", "--effort": "high", "--timeout": "25m",
+            "--skip-git-repo-check": True, "--ignore-user-config": True}, None),
+        # 9a2: with a home of delegate's own, CODEX_HOME points at it and
+        # --ignore-user-config goes: the worker reads that home's one MCP server
+        ("codex-home", "terra-high@codex", {"codex_home": home}, {
+            "--model": "gpt-5.6-terra", "--effort": "high", "--timeout": "25m",
+            "--skip-git-repo-check": True, "--read-only": True}, home),
+        # agy: no effort flag, even when the Run overrides it (24); a print
+        # timeout; read-only, or skip permissions to write (9d, 9e)
+        ("agy-read", "flash-high@agy", {"effort": "low"}, {
+            "--model": "gemini-3.8-flash-high", "--print-timeout": "25m", "--read-only": True}, None),
+        ("agy-write", "flash-high@agy", {"write": worktree}, {
+            "--model": "gemini-3.8-flash-high", "--print-timeout": "25m",
+            "--dangerously-skip-permissions": True}, None),
+        # claude, relayed (9f), grok (9g) and kiro (31f): the effort and the
+        # Lane's timeout
+        ("claude", "fable-xhigh@claude", {}, {
+            "--model": "claude-fable-5-1", "--effort": "xhigh", "--timeout": "60m", "--read-only": True}, None),
+        ("grok", "grok46-high@grok", {}, {
+            "--model": "grok-4.6", "--effort": "high", "--timeout": "40m", "--read-only": True}, None),
+        ("kiro", KIRO, {}, {
+            "--model": "claude-opus-5.5", "--effort": "high", "--timeout": "30m", "--read-only": True}, None),
+    )
+    seen = []
+    for name, lane, kw, own, codex_home in rows:
+        finish, common, got, got_home, argv = handed(f"argv-{name}", lane, **kw)
+        want = dict(common, **own)
+        ok = got == want and got_home == codex_home and not problems(finish) and finish.relay_exit == 0
+        seen.append((name, ok, got if got != want else "", got_home, argv))
+    # 9h: no relay is ever handed a Lane name, a turn cap or a budget
+    forbidden = {"--lane", "--max-turns", "--max-budget-usd"}
+    clean = not any(forbidden.intersection(argv) for _, _, _, _, argv in seen)
+    record("a6. Ads: argv and env per harness, and no argv names a Lane, a turn cap or a budget",
+           all(ok for _, ok, _, _, _ in seen) and clean,
+           repr([s[:4] for s in seen if not s[1]]) + f" clean={clean}")
+
+
+def case_ads_check(w):
+    pinned = relays.Ads(w.ads_dir, env=w.env).check()
+    wrong_pin = relays.Ads(w.ads_dir, env=dict(w.env, ADS_FAKE_GIT_SHA="0" * 40)).check()
+    no_node = relays.Ads(w.ads_dir, env=dict(w.env, PATH=w.no_node_path())).check()
+    # A tree that lost one relay script. The env's ADS_DIR still names the
+    # whole tree, so the check must run on the directory Ads was given.
+    torn = os.path.join(w.root, "torn-ads")
+    shutil.copytree(w.ads_dir, torn)
+    grok = harnesses.get("grok").relay
+    os.remove(os.path.join(torn, "skills", grok, "scripts", "relay.mjs"))
+    missing = relays.Ads(torn, env=w.env).check()
+
+    def one_line(line, *names):
+        return isinstance(line, str) and line and "\n" not in line and all(n in line for n in names)
+
+    record("a7. Ads: check passes the pinned world, and names in one line a wrong pin, no node, a missing relay",
+           pinned is None
+           and one_line(wrong_pin, "commit mismatch", "0" * 40)
+           and one_line(no_node, "node is not on PATH")
+           and one_line(missing, f"missing relay {grok}", torn),
+           f"pinned={pinned!r} wrong_pin={wrong_pin!r} no_node={no_node!r} missing={missing!r}")
+
+
+def case_ads_default_directory():
+    # ads.sh's own default, as its shell expands it: `path` prints
+    # $ADS_DIR/skills/<harness>-delegate/scripts/relay.mjs
+    env = {k: v for k, v in os.environ.items() if k != "ADS_DIR"}
+    env.setdefault("HOME", os.path.expanduser("~"))
+    printed = subprocess.run(["sh", ADS_SH, "path", "probe"], capture_output=True, text=True,
+                             env=env).stdout.strip()
+    suffix = "/skills/probe-delegate/scripts/relay.mjs"
+    shell_default = printed[:-len(suffix)] if printed.endswith(suffix) else printed
+    elsewhere = os.path.join(_ISOLATED_CWD.name, "elsewhere")
+    record("a8. Ads: relays.DEFAULT_DIR is ads.sh's default; the argument, else $ADS_DIR, else it",
+           relays.DEFAULT_DIR == shell_default
+           and relays.Ads("given", env={"ADS_DIR": elsewhere}).ads_dir == os.path.abspath("given")
+           and relays.Ads(env={"ADS_DIR": elsewhere}).ads_dir == elsewhere
+           and relays.Ads(env={}).ads_dir == relays.DEFAULT_DIR,
+           f"DEFAULT_DIR={getattr(relays, 'DEFAULT_DIR', None)!r} ads.sh={shell_default!r}")
+
+
 def main():
     with tempfile.TemporaryDirectory() as run_dir:
         case_a_done_block_is_kept_within_its_caps(run_dir)
@@ -402,6 +567,7 @@ def main():
         case_a_job_that_stopped_short_is_blocked_unless_it_returned(run_dir)
         case_the_tripwire_fires_on_read_only_jobs_only(run_dir)
         case_scripted_runs_its_script_in_order(run_dir)
+        case_scripted_check_answers_what_it_was_given()
         # settling ran nothing: no relay file appeared in the run directory
         record("s11. settling through Scripted runs no relay and writes nothing",
                os.listdir(run_dir) == [], repr(os.listdir(run_dir)))
@@ -413,6 +579,9 @@ def main():
         case_ads_replays_the_grok_gate_cancel_fixture(w)
         case_ads_reads_every_result_key(w)
         case_ads_node_missing_at_spawn(w)
+        case_ads_argv_and_env_per_harness(w)
+        case_ads_check(w)
+        case_ads_default_directory()
     finally:
         w.close()
     sys.exit(1 if failures else 0)
