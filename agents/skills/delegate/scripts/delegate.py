@@ -7,9 +7,10 @@ What a run is:
   The run manages catalog resolution, prompt assembly, ledger accounting, relay execution,
   and child return normalization.
 
-Run directory: `runs.py` owns it (dispatch.json, prompt.md, return.json, and
-the finish line). The relay adds relay.stdout, relay.stderr, result.json,
-brief.txt, final.txt and events.jsonl.
+Run: `runs.execute` runs a relayed Run from its start to its Outcome
+(dispatch.json, prompt.md, return.json, the Ledger, the Meter hold and the
+finish line); dispatch supplies only the work (`relay_work`). The relay adds
+relay.stdout, relay.stderr, result.json, brief.txt, final.txt and events.jsonl.
 
 Status mapping:
   completed:
@@ -31,9 +32,9 @@ CLI:
           [--dry-run] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c]
           [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash] [--json]
 
-  --json prints one JSON object (`runs.summary`, or `runs.native_summary` for a
-  native Lane) in place of the finish and metrics lines; `run --json` sends the
-  ranking to stderr.
+  --json prints one JSON object (`runs.Ended.text(as_json=True)`, or
+  `runs.native_summary` for a native Lane) in place of the finish and metrics
+  lines; `run --json` sends the ranking to stderr.
 """
 import argparse
 import contextlib
@@ -48,7 +49,6 @@ sys.path.insert(0, HERE)
 from catalog import load_catalog, CatalogError, meters_enabled
 from harnesses import NAMES as HARNESSES, EFFORTS
 import catalog
-import events
 import harnesses
 import model_queue
 import orchestrators
@@ -59,18 +59,6 @@ import usage
 # No orchestrator is assumed. A Lane runs in-process only when the orchestrator
 # profile for this run says its harness can (orchestrators.py); otherwise, and
 # for every unknown orchestrator, it is relayed.
-
-
-def parse_timeout_s(timeout_str):
-    if not isinstance(timeout_str, str):
-        raise ValueError(f"invalid timeout: {timeout_str}")
-    if timeout_str.endswith("s"):
-        return int(timeout_str[:-1])
-    elif timeout_str.endswith("m"):
-        return int(timeout_str[:-1]) * 60
-    elif timeout_str.endswith("h"):
-        return int(timeout_str[:-1]) * 3600
-    raise ValueError(f"invalid timeout string: {timeout_str}")
 
 
 def find_return_block(text, max_candidates=200):
@@ -356,21 +344,6 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     return prompt_bytes, prompt_path
 
 
-def ledger_start(thread_id, lane, class_name, effort, timeout_str, child_cwd, brief_path, return_path, write_dir):
-    timeout_s = parse_timeout_s(timeout_str)
-    events.append(events.start_event(
-        thread_id=thread_id,
-        lane=lane,
-        class_=class_name,
-        effort=effort,
-        timeout_s=timeout_s,
-        cwd=child_cwd,
-        brief=brief_path,
-        out=return_path,
-        write=write_dir,
-    ))
-
-
 def probe_meters(no_probe, routing=None):
     if no_probe or (routing is not None and not meters_enabled(routing)):
         return
@@ -408,6 +381,8 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
 
 
 def map_result(run_dir, lane_timeout, relay_exit, write_dir, harness, secs=None):
+    """The relay's files in `run_dir` settled into a `runs.Finish` (the status
+    mapping above). Writes nothing: the Run records it."""
     result_path = os.path.join(run_dir, "result.json")
     stderr_path = os.path.join(run_dir, "relay.stderr")
 
@@ -521,141 +496,45 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir, harness, secs=None)
         if not write_dir and read_only_violation is True:
             open_questions.append("read-only tripwire fired; review the diff")
 
-    runs.Run(run_dir).finish(
+    return runs.Finish(
         {"status": status, "deliverable": deliverable, "evidence": evidence,
          "open_questions": open_questions, "changed_files": changed_files},
         relay_status=relay_status, relay_exit=relay_exit, secs=secs, reason=reason,
         session_id=session_id, usage=usage, touched_files=touched_files,
         read_only_violation=read_only_violation,
     )
-    return_path = runs.Run(run_dir).return_path
-
-    return {
-        "status": status,
-        "reason": reason,
-        "deliverable": deliverable,
-        "evidence": evidence,
-        "open_questions": open_questions,
-        "changed_files": changed_files,
-        "relay_status": relay_status,
-        "session_id": session_id,
-        "usage": usage,
-        "touched_files": touched_files,
-        "read_only_violation": read_only_violation,
-        "return_path": return_path,
-    }
 
 
-def relay_and_map(no_probe, routing, ads_d, harness, model, eff, lane_timeout, prompt_path, child_cwd, write, run_dir, probed=False):
-    """Steps 5-7 of dispatch: probe, run the relay, probe, map its result.
+def relay_work(harness, model, effort, timeout, child_cwd, write, ads_dir, no_probe=False,
+               routing=None, probed=False):
+    """The work of a relayed Run, for `runs.execute`: preflight, probe, run the
+    relay, probe, and settle the relay's files into a `runs.Finish`.
 
     ``probed`` means the caller acquired the Meters just now to rank, so the
     before-probe would only repeat it (and `claude -p /usage` can spend the
     quota it measures).
     """
-    # Step 4b: a harness that cannot start here fails before it spends a Meter
-    reason = harnesses.get(harness).preflight(write)
-    if reason:
-        raise Preflight(reason)
-
-    # Step 5: Probe meters (before)
-    if not probed:
+    def work(run):
+        # a harness that cannot start here fails before it spends a Meter
+        reason = harnesses.get(harness).preflight(write)
+        if reason:
+            return runs.blocked(reason)
+        if not probed:
+            probe_meters(no_probe, routing)
+        try:
+            relay_exit, secs = run_relay(
+                ads_dir=ads_dir, harness=harness, model=model, effort=effort, timeout_str=timeout,
+                prompt_path=run.prompt_path, child_cwd=child_cwd, write_dir=write, run_dir=run.path,
+            )
+        except FileNotFoundError as e:
+            # node passed the ads.sh check, then was gone when the relay started
+            if e.filename != "node":
+                raise
+            return runs.blocked("node is not on PATH; the relay needs Node.js")
         probe_meters(no_probe, routing)
-
-    # Step 6: Run the relay
-    relay_exit, secs = run_relay(
-        ads_dir=ads_d,
-        harness=harness,
-        model=model,
-        effort=eff,
-        timeout_str=lane_timeout,
-        prompt_path=prompt_path,
-        child_cwd=child_cwd,
-        write_dir=write,
-        run_dir=run_dir,
-    )
-
-    # Step 5: Probe meters (after)
-    probe_meters(no_probe, routing)
-
-    # Step 7: Map the result
-    mapped = map_result(
-        run_dir=run_dir,
-        lane_timeout=lane_timeout,
-        relay_exit=relay_exit,
-        write_dir=write,
-        harness=harness,
-        secs=secs,
-    )
-
-    return relay_exit, secs, mapped
-
-
-def note_usage_limit(harness, meter, mapped):
-    """Hold the Meter empty when its harness refused the run for its usage
-    limit, and release it when a run on it finishes (ticket 43). Never raises:
-    the run's own result stands either way."""
-    if not meter:
-        return
-    try:
-        if mapped["status"] == "blocked":
-            text = "\n".join(str(x) for x in (mapped.get("reason"), mapped.get("deliverable")) if x)
-            line = harnesses.get(harness).usage_limit(text)
-            if line:
-                until = usage.mark_limited(meter, line)
-                stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
-                print(f"delegate: {meter} meter held at 0% left until {stamp}: {line}", file=sys.stderr)
-        elif mapped["status"] in ("done", "partial"):
-            usage.clear_limited(meter)
-    except Exception:
-        pass
-
-
-class Preflight(Exception):
-    """The harness said, before its relay ran, that it cannot run here."""
-
-
-def start_failure(exc):
-    """Why a run that the ledger has started could not run, in one line."""
-    if isinstance(exc, Preflight):
-        return str(exc)
-    if isinstance(exc, FileNotFoundError) and exc.filename == "node":
-        return "node is not on PATH; the relay needs Node.js"
-    if isinstance(exc, KeyboardInterrupt):
-        return "dispatch interrupted"
-    return f"dispatch failed: {type(exc).__name__}: {exc}"
-
-
-def fail_run(run_dir, secs, reason):
-    """Finish a run that failed after its start (`runs.Run.fail`). Never
-    raises: the ledger finish comes after it."""
-    _doc, problem = runs.Run(run_dir).fail(secs, reason)
-    if problem:
-        sys.stderr.write(f"delegate: {problem}\n")
-    return {"status": "blocked", "reason": reason, "session_id": None}
-
-
-def ledger_finish(thread_id, lane, class_name, secs, relay_exit, status, session_id, return_path):
-    events.append(events.finish_event(
-        thread_id=thread_id,
-        lane=lane,
-        class_=class_name,
-        secs=secs,
-        rc=relay_exit if relay_exit is not None else 1,
-        status=status,
-        child_session=session_id,
-        out=return_path,
-    ))
-
-
-def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exit, as_json=False):
-    if as_json:
-        print(json.dumps(runs.summary(runs.Run(run_dir), lane, status, secs, class_name, relay_exit), indent=2))
-    else:
-        class_disp = "-" if class_name is None else class_name
-        print(runs.finish_line(lane, status, secs, run_dir))
-        print(f"delegate-metrics: thread={thread_id} status={status} class={class_disp} secs={secs} rc={relay_exit}")
-    sys.exit(0 if status in ("done", "partial") else 1)
+        return map_result(run_dir=run.path, lane_timeout=timeout, relay_exit=relay_exit,
+                          write_dir=write, harness=harness, secs=secs)
+    return work
 
 
 def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None, as_json=False):
@@ -697,19 +576,16 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         routing=resolved["routing"],
     )
 
-    # Step 3: Create the Run
-    run = runs.Run.create(
-        runs_dir, prompt_bytes,
-        lane=lane, harness=harness, model=model, effort=eff, timeout=lane_timeout,
-        class_name=class_, cwd=cwd, write=write, brief=brief, leash=effective_leash,
-        orchestrator=profile["name"] if profile else None,
-    )
-    run_dir, thread_id, prompt_path = run.path, run.thread_id, run.prompt_path
-
-    # The one native-or-relayed decision: a native Lane stops here, with the
+    # The one native-or-relayed decision: a native Lane stops here, with a
     # Run's prompt for the orchestrator's own agent.
     if orchestrators.is_native(profile, harness):
-        abs_prompt = os.path.abspath(prompt_path)
+        run = runs.Run.create(
+            runs_dir, prompt_bytes,
+            lane=lane, harness=harness, model=model, effort=eff, timeout=lane_timeout,
+            class_name=class_, cwd=cwd, write=write, brief=brief, leash=effective_leash,
+            orchestrator=profile["name"] if profile else None,
+        )
+        abs_prompt = os.path.abspath(run.prompt_path)
         agent = orchestrators.agent_name(profile, lane)
         spawn = orchestrators.spawn_line(profile, lane, abs_prompt)
         if as_json:
@@ -719,59 +595,29 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
             print(f"delegate: spawn: {spawn}")
         sys.exit(0)
 
-    return_path = run.return_path
-
-    # Step 4: Ledger start
-    ledger_start(
-        thread_id=thread_id,
-        lane=lane,
-        class_name=class_,
-        effort=eff,
-        timeout_str=lane_timeout,
-        child_cwd=child_cwd,
-        brief_path=brief,
-        return_path=return_path,
-        write_dir=write,
+    # Step 3: the Run, from its start to its Outcome (`runs.execute`); the
+    # relay is its work.
+    request = runs.Request(
+        lane=lane, harness=harness, model=model, effort=eff, timeout=lane_timeout,
+        class_name=class_, cwd=cwd, write=write, brief=brief, leash=effective_leash,
+        orchestrator=profile["name"] if profile else None,
+        meter=resolved["lane_data"].get("meter"),
     )
-
-    # Steps 5-8. Anything that stops them, a missing `node` included, would leave
-    # the start above with no finish: no return.json, and a running glyph in the
-    # statusline until the timeout. So a failure here still finishes the run.
-    t0 = time.time()
+    work = relay_work(
+        harness=harness, model=model, effort=eff, timeout=lane_timeout, child_cwd=child_cwd,
+        write=write, ads_dir=ads_d, no_probe=no_probe, routing=resolved.get("routing"), probed=probed,
+    )
     try:
-        relay_exit, secs, mapped = relay_and_map(
-            no_probe=no_probe, routing=resolved.get("routing"), ads_d=ads_d, harness=harness,
-            model=model, eff=eff, lane_timeout=lane_timeout, prompt_path=prompt_path,
-            child_cwd=child_cwd, write=write, run_dir=run_dir, probed=probed,
-        )
-    except (Exception, KeyboardInterrupt) as e:
-        relay_exit, secs = None, int(time.time() - t0)
-        mapped = fail_run(run_dir, secs, start_failure(e))
-    note_usage_limit(harness, resolved["lane_data"].get("meter"), mapped)
+        ended = runs.execute(request, prompt_bytes, work, runs_dir)
+    except runs.StartError as e:
+        sys.stderr.write(f"delegate: {e}\n")
+        sys.exit(2)
 
-    # Step 8: Ledger finish
-    ledger_finish(
-        thread_id=thread_id,
-        lane=lane,
-        class_name=class_,
-        secs=secs,
-        relay_exit=relay_exit,
-        status=mapped["status"],
-        session_id=mapped["session_id"],
-        return_path=return_path,
-    )
-
-    # Step 9: Print and exit
-    print_and_exit(
-        lane=lane,
-        status=mapped["status"],
-        secs=secs,
-        run_dir=run_dir,
-        thread_id=thread_id,
-        class_name=class_,
-        relay_exit=relay_exit,
-        as_json=as_json,
-    )
+    # Step 4: Print and exit
+    for note in ended.notes:
+        sys.stderr.write(f"delegate: {note}\n")
+    print(ended.text(as_json))
+    sys.exit(ended.exit_code)
 
 
 def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, present_harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False, harness=None, orchestrator=None, as_json=False):

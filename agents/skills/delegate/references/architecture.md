@@ -98,9 +98,14 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   records the orchestrator. `--json` on either prints one object in place of the finish and
   metrics lines (`run --json` sends the ranking to stderr); the courier, the evals and the
   browser probes read that or `runs.parse_finish_line`, never a regex of their own.
-- `scripts/runs.py`: the run directory's one owner (ticket 24). A `Run` is created, finished or
-  failed here, and only here are `dispatch.json` and `return.json` written; it spells and parses
-  the finish and native lines. Run directories under `~/.cache/delegate/runs/`, never reused.
+- `scripts/runs.py`: the Run module (ticket 24; delegate-deepening 01). `execute(request, prompt,
+  work)` runs a relayed Run from its start to its Outcome: the run directory, `prompt.md`,
+  `dispatch.json` and the Ledger start, then the work (`delegate.relay_work`, which returns a
+  `Finish`), then `return.json`, the outcome, the Usage-limit hold and the Ledger finish. Anything
+  that stops the work, SIGTERM included, ends the Run blocked with why; a write that fails becomes
+  a note and never stops the Run ending. Only here are `dispatch.json` and `return.json` written;
+  `Ended.text` spells the finish lines and `parse_finish_line` reads them. Run directories under
+  `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is

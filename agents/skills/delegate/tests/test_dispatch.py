@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -581,30 +582,6 @@ def main():
                all(r[0] for r in refusals) and runs_after10b == runs_before10b, str(refusals))
 
         # -------------------------------------------------------------
-        # 11. Ledger: start and finish events
-        # -------------------------------------------------------------
-        ledger_path = t_env["ledger_path"]
-        if os.path.exists(ledger_path):
-            os.remove(ledger_path)
-        b11 = make_brief("b11.md", f"fake-relay: status=completed final={done_final}\nBrief 11.")
-        res11 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b11, "--cwd", cwd])
-        run_dir11 = parse_run_dir_from_stdout(res11.stdout)
-        with open(ledger_path, "r", encoding="utf-8") as f:
-            lines = [json.loads(l) for l in f if l.strip()]
-        ok11 = (len(lines) == 2)
-        if ok11:
-            start_ev, fin_ev = lines[0], lines[1]
-            ok11 = (
-                start_ev.get("v") == 1 and fin_ev.get("v") == 1 and
-                start_ev.get("kind") == "dispatch.start" and fin_ev.get("kind") == "dispatch.finish" and
-                start_ev.get("thread_id") == fin_ev.get("thread_id") and
-                start_ev.get("timeout_s") == 1500 and
-                start_ev.get("out") == os.path.join(run_dir11, "return.json") and
-                fin_ev.get("status") == "done"
-            )
-        record("11. ledger start and finish", ok11, f"lines_count={len(lines)} lines={lines}")
-
-        # -------------------------------------------------------------
         # 12. Errors before run dir: unknown lane, relative brief, ads check failure
         # -------------------------------------------------------------
         b12 = make_brief("b12.md", "Brief 12.")
@@ -633,6 +610,7 @@ def main():
             if name != "node":
                 os.symlink(os.path.join(t_env["fake_bin"], name), os.path.join(no_node_bin, name))
         no_node_env = {"PATH": no_node_bin}
+        ledger_path = t_env["ledger_path"]
 
         def ledger_lines():
             with open(ledger_path, "r", encoding="utf-8") as f:
@@ -651,60 +629,25 @@ def main():
         record("12d. ads.sh check reports a missing node before the ledger records a start", ok12d_check,
                f"rc={res12d.returncode} err={res12d.stderr}")
 
-        # node passes the check, then is gone when the relay starts
-        drop_node = (
-            f"import os, sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; "
-            "real = delegate.run_relay\n"
-            "def no_node(**kw):\n"
-            f"    os.environ['PATH'] = {no_node_bin!r}\n"
-            "    return real(**kw)\n"
-            "delegate.run_relay = no_node; sys.exit(delegate.main())"
-        )
-        res12e = subprocess.run(
-            [sys.executable, "-c", drop_node, "dispatch", "--config-dir", t_env["config_dir"],
-             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
-             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
-            capture_output=True, text=True, env=t_env["env"])
-        dir12e = parse_run_dir_from_stdout(res12e.stdout)
-        new12e = ledger_lines()[ledger_before12d:]
-        ret12e = json.load(open(os.path.join(dir12e, "return.json"))) if dir12e else {}
-        disp12e = json.load(open(os.path.join(dir12e, "dispatch.json"))) if dir12e else {}
-        ok12e = (
-            res12e.returncode == 1 and dir12e is not None and
-            [e.get("kind") for e in new12e] == ["dispatch.start", "dispatch.finish"] and
-            new12e[0].get("thread_id") == new12e[1].get("thread_id") and
-            new12e[1].get("status") == "blocked" and new12e[1].get("rc") == 1 and
-            ret12e.get("status") == "blocked" and "node is not on PATH" in ret12e.get("deliverable", "") and
-            disp12e.get("status") == "blocked" and "node" in (disp12e.get("reason") or "")
-        )
-        record("12e. an exception after the ledger start still writes a finish and a return.json", ok12e,
-               f"rc={res12e.returncode} out={res12e.stdout} err={res12e.stderr[-400:]} ledger={new12e} ret={ret12e}")
-
-        # 12f. return.json cannot be written either (here it is a directory):
-        # the ledger still gets its finish, so the run is never left running.
-        blocked_return = (
-            f"import os, sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate\n"
-            "def no_relay(**kw):\n"
-            "    os.mkdir(os.path.join(kw['run_dir'], 'return.json'))\n"
-            "    raise FileNotFoundError(2, 'No such file or directory', 'node')\n"
-            "delegate.run_relay = no_relay; sys.exit(delegate.main())"
-        )
-        ledger_before12f = len(ledger_lines())
-        res12f = subprocess.run(
-            [sys.executable, "-c", blocked_return, "dispatch", "--config-dir", t_env["config_dir"],
-             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
-             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12d, "--cwd", cwd],
-            capture_output=True, text=True, env=t_env["env"])
-        new12f = ledger_lines()[ledger_before12f:]
-        ok12f = (
-            res12f.returncode == 1 and
-            [e.get("kind") for e in new12f] == ["dispatch.start", "dispatch.finish"] and
-            new12f[1].get("status") == "blocked" and
-            "could not write return.json" in res12f.stderr and
-            "Traceback" not in res12f.stderr
-        )
-        record("12f. a return.json that cannot be written still leaves a ledger finish", ok12f,
-               f"rc={res12f.returncode} err={res12f.stderr[-400:]} ledger={new12f}")
+        # 12e. node passes the check, then is gone when the relay starts: the
+        # relay work ends blocked and names node. In-process, with PATH lacking
+        # node; test_runs proves any blocked work still ends the Run.
+        dir12e = os.path.join(tmpdir, "run-12e")
+        os.makedirs(dir12e)
+        with open(os.path.join(dir12e, "prompt.md"), "w", encoding="utf-8") as f:
+            f.write("Brief 12e.\n")
+        path12e = os.environ.get("PATH", "")
+        os.environ["PATH"] = no_node_bin
+        try:
+            work12e = delegate.relay_work(harness="codex", model="gpt-5.6-terra", effort="high", timeout="25m",
+                                          child_cwd=cwd, write=None, ads_dir=t_env["ads_dir"], no_probe=True)
+            finish12e = work12e(runs.Run(dir12e))
+        except Exception as e:
+            finish12e = e
+        finally:
+            os.environ["PATH"] = path12e
+        record("12e. the relay work ends blocked naming node when node is gone after the check",
+               finish12e == runs.blocked("node is not on PATH; the relay needs Node.js"), repr(finish12e))
 
         # 12g. Inside a Seatbelt sandbox that refuses a nested one, a codex lane
         # is blocked before its relay runs and says why; a lane on a harness
@@ -736,6 +679,49 @@ def main():
         finally:
             with open(seatbelt, "w") as f:
                 f.write("#!/bin/sh\nexit 0\n")
+
+        # 12i. A dispatch terminated by SIGTERM (as `claude -p` ends a background
+        # job at the end of its turn) still ends its Run, and its relay stops:
+        # the fake relay waits for a hold file that only appears after dispatch
+        # has exited, and must never get to write its result.
+        hold12i = os.path.join(tmpdir, "never-12i")
+        b12i = make_brief("b12i.md", f"fake-relay: status=completed final={done_final} hold={hold12i}\nBrief 12i.")
+        ledger_before12i = len(ledger_lines())
+        runs_before12i = set(os.listdir(t_env["runs_dir"]))
+        proc12i = subprocess.Popen(
+            [sys.executable, DELEGATE_PY, "dispatch", "--config-dir", t_env["config_dir"],
+             "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"], "--no-probe",
+             "--lane", "terra-high@codex", "--class", "impl", "--brief", b12i, "--cwd", cwd],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=t_env["env"])
+        started12i = False
+        for _ in range(400):
+            try:
+                started12i = any(e.get("kind") == "dispatch.start" for e in ledger_lines()[ledger_before12i:])
+            except ValueError:
+                started12i = False
+            if started12i or proc12i.poll() is not None:
+                break
+            time.sleep(0.05)
+        proc12i.send_signal(signal.SIGTERM)
+        out12i, err12i = proc12i.communicate(timeout=60)
+        new12i = ledger_lines()[ledger_before12i:]
+        dirs12i = sorted(set(os.listdir(t_env["runs_dir"])) - runs_before12i)
+        dir12i = os.path.join(t_env["runs_dir"], dirs12i[0]) if len(dirs12i) == 1 else None
+        disp12i = json.load(open(os.path.join(dir12i, "dispatch.json"))) if dir12i else {}
+        open(hold12i, "w").close()
+        time.sleep(1.5)
+        ok12i = (
+            started12i and proc12i.returncode == 1 and dir12i is not None and
+            parse_run_dir_from_stdout(out12i) == dir12i and
+            disp12i.get("status") == "blocked" and disp12i.get("reason") == "dispatch terminated (SIGTERM)" and
+            [e.get("kind") for e in new12i] == ["dispatch.start", "dispatch.finish"] and
+            new12i[1].get("status") == "blocked" and
+            not os.path.exists(os.path.join(dir12i, "result.json"))
+        )
+        record("12i. a dispatch terminated by SIGTERM still ends its Run and stops its relay", ok12i,
+               f"started={started12i} rc={proc12i.returncode} out={out12i!r} err={err12i[-400:]!r} "
+               f"dispatch={disp12i} ledger={new12i} "
+               f"result={dir12i and os.path.exists(os.path.join(dir12i, 'result.json'))}")
 
 
         # -------------------------------------------------------------
@@ -1064,8 +1050,6 @@ def main():
         def stage_run(fixture, name, keep_event=None, final_message=None):
             run_dir = os.path.join(tmpdir, "map_result", name)
             shutil.copytree(os.path.join(RUN_FIXTURES_DIR, fixture), run_dir)
-            with open(os.path.join(run_dir, "dispatch.json"), "w", encoding="utf-8") as f:
-                json.dump({"lane": "grok46-high@grok"}, f)
             if keep_event is not None:
                 events_path = os.path.join(run_dir, "events.jsonl")
                 with open(events_path, encoding="utf-8") as f:
@@ -1083,16 +1067,17 @@ def main():
 
         gate_reason = "permission gate cancelled the run at run_terminal_command"
 
+        # map_result settles the relay's files into a Finish and writes nothing.
         dir28a = stage_run("grok-gate-cancel", "28a")
+        files28a = sorted(os.listdir(dir28a))
         out28a = delegate.map_result(dir28a, "40m", 0, None, "grok")
-        ret28a = json.load(open(os.path.join(dir28a, "return.json")))
-        disp28a = json.load(open(os.path.join(dir28a, "dispatch.json")))
         ok28a = (
-            out28a["status"] == "blocked" and
-            out28a["reason"] == gate_reason and
-            ret28a.get("status") == "blocked" and
-            ret28a.get("deliverable") == f"blocked: {gate_reason}" and
-            disp28a.get("reason") == gate_reason
+            isinstance(out28a, runs.Finish) and
+            out28a.returned["status"] == "blocked" and
+            out28a.reason == gate_reason and
+            out28a.returned["deliverable"] == f"blocked: {gate_reason}" and
+            out28a.relay_status == "completed" and out28a.relay_exit == 0 and
+            sorted(os.listdir(dir28a)) == files28a
         )
         record("28a. gate-cancelled tool call -> blocked naming the gate", ok28a, f"out={out28a}")
 
@@ -1102,15 +1087,17 @@ def main():
                            keep_event=lambda ev: not (ev.get("type") == "tool_call_update" and ev.get("status") == "failed"))
         out28b = delegate.map_result(dir28b, "40m", 0, None, "grok")
         ok28b = (
-            out28b["status"] == "partial" and
-            out28b["open_questions"] == ["no return block in final message"]
+            isinstance(out28b, runs.Finish) and
+            out28b.returned["status"] == "partial" and
+            out28b.returned["open_questions"] == ["no return block in final message"]
         )
         record("28b. stopReason=cancelled without a cancelled tool stays partial", ok28b, f"out={out28b}")
 
         # The gate is the better reason than an empty final message.
         dir28c = stage_run("grok-gate-cancel", "28c", final_message="")
         out28c = delegate.map_result(dir28c, "40m", 0, None, "grok")
-        ok28c = (out28c["status"] == "blocked" and out28c["reason"] == gate_reason)
+        ok28c = (isinstance(out28c, runs.Finish) and out28c.returned["status"] == "blocked" and
+                 out28c.reason == gate_reason)
         record("28c. gate cancel with an empty final message names the gate", ok28c, f"out={out28c}")
 
         # -------------------------------------------------------------
@@ -1552,31 +1539,22 @@ def main():
         record("35. run --dry-run prints the overflow header and a Tier 3 pick", ok35,
                f"rc={res35.returncode} stdout={res35.stdout} stderr={res35.stderr}")
 
-    # 36. Ticket 43: a blocked run whose harness says its usage limit is
-    # reached holds the Lane's Meter; a finished run on it releases it.
-    with tempfile.TemporaryDirectory() as td36:
-        prev_cache = os.environ.get("DELEGATE_CACHE")
-        os.environ["DELEGATE_CACHE"] = os.path.join(td36, "usage.json")
-        try:
-            limited = {"status": "blocked", "reason": "relay status failed",
-                       "deliverable": "blocked: You've reached your free Grok Build usage limit for now"}
-            delegate.note_usage_limit("grok", "grok", limited)
-            held = "grok" in usage.read_limits()
-            delegate.note_usage_limit("grok", "grok", {"status": "blocked", "reason": "timeout after 10m",
-                                                       "deliverable": "blocked: timeout"})
-            still = "grok" in usage.read_limits()
-            delegate.note_usage_limit("grok", "grok", {"status": "done"})
-            released = usage.read_limits() == {}
-            delegate.note_usage_limit("codex", "codex", limited)
-            other = usage.read_limits() == {}
-        finally:
-            if prev_cache is None:
-                os.environ.pop("DELEGATE_CACHE", None)
-            else:
-                os.environ["DELEGATE_CACHE"] = prev_cache
-        record("36. a usage-limit refusal holds the Meter, a finished run releases it",
-               held and still and released and other,
-               f"held={held} still={still} released={released} other={other}")
+        # -------------------------------------------------------------
+        # 37. A relayed Run refused for its usage limit holds that Lane's
+        # Meter. test_runs proves the Run settles the hold; this proves
+        # dispatch hands the Run its Lane's meter.
+        limits37 = os.path.join(os.path.dirname(t_env["cache_path"]), "limits.json")
+        if os.path.exists(limits37):
+            os.remove(limits37)
+        b37 = make_brief("b37.md", 'fake-relay: status=failed error="You\'ve reached your free Grok Build usage limit for now" exit=1\nBrief 37.')
+        res37 = run_dispatch(t_env, ["--lane", "grok46-high@grok", "--class", "impl", "--brief", b37, "--cwd", cwd])
+        held37 = json.load(open(limits37)) if os.path.exists(limits37) else {}
+        record("37. a relayed Run refused for its usage limit holds that Lane's Meter",
+               res37.returncode == 1 and list(held37) == ["grok"] and
+               "delegate: grok meter held at 0% left until " in res37.stderr,
+               f"rc={res37.returncode} limits={held37} out={res37.stdout} err={res37.stderr[-400:]}")
+        if os.path.exists(limits37):
+            os.remove(limits37)
 
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)

@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
-"""test_runs.py — the run directory's one owner (runs.py)."""
+"""test_runs.py — the Run module (runs.py): a started Run always finishes.
+
+Every case drives `runs.execute` in-process against a temp runs root, a temp
+$DELEGATE_LEDGER and a temp $DELEGATE_CACHE. The work is a plain function.
+"""
+import contextlib
 import json
 import os
+import signal
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
 import runs  # noqa: E402
+import usage  # noqa: E402
 
 failures = []
+
+RETURNED = {"status": "done", "deliverable": "pong", "evidence": [], "open_questions": [],
+            "changed_files": []}
+# The outcome half of dispatch.json, null until the Run ends.
+OUTCOME = runs.DISPATCH_FIELDS[runs.DISPATCH_FIELDS.index("relay_status"):]
+GROK_LIMIT = "You've reached your free Grok Build usage limit for now"
 
 
 def record(name, ok, detail=""):
@@ -20,81 +34,315 @@ def record(name, ok, detail=""):
         failures.append(name)
 
 
-def create(root):
-    return runs.Run.create(root, b"the prompt\n", lane="sol-high@codex", harness="codex",
-                           model="gpt-6-sol", effort="high", timeout="30m", class_name="impl",
-                           cwd="/w", write=None, brief="/w/b.md", leash=False, orchestrator=None)
+def request(**fields):
+    base = dict(lane="sol-high@codex", harness="codex", model="gpt-6-sol", effort="high",
+                timeout="30m", class_name="impl", cwd="/w", write=None, brief="/w/b.md",
+                leash=False)
+    base.update(fields)
+    return runs.Request(**base)
+
+
+class World:
+    """A temp runs root, Ledger and usage cache, set in the environment."""
+
+    def __init__(self, path):
+        self.dir = path
+        self.root = os.path.join(path, "runs")
+        self.ledger = os.path.join(path, "ledger.jsonl")
+        self.cache = os.path.join(path, "usage.json")
+
+    def lines(self):
+        try:
+            with open(self.ledger, encoding="utf-8") as f:
+                return [json.loads(line) for line in f if line.strip()]
+        except OSError:
+            return []
+
+
+@contextlib.contextmanager
+def world():
+    saved = {k: os.environ.get(k) for k in ("DELEGATE_LEDGER", "DELEGATE_CACHE")}
+    with tempfile.TemporaryDirectory() as td:
+        w = World(td)
+        os.environ["DELEGATE_LEDGER"] = w.ledger
+        os.environ["DELEGATE_CACHE"] = w.cache
+        try:
+            yield w
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def case_a_run_that_returns():
+    with world() as w:
+        seen = {}
+
+        def work(run):
+            seen["path"] = run.path
+            seen["dispatch"] = run.read()["dispatch"]
+            seen["ledger"] = w.lines()
+            return runs.Finish(dict(RETURNED, extra="dropped"), relay_status="completed",
+                               relay_exit=0, secs=12, session_id="s-1", usage={"in": 1})
+
+        ended = runs.execute(request(), b"the prompt\n", work, w.root)
+        run = runs.Run(ended.run)
+        read = run.read()
+        disp = read["dispatch"]
+        lines = w.lines()
+        start, finish = (lines + [{}, {}])[:2]
+        thread = disp.get("thread_id")
+        with open(run.prompt_path, "rb") as f:
+            prompt = f.read()
+        text = (f"delegate: sol-high@codex status=done secs=12 run={ended.run}\n"
+                f"delegate-metrics: thread={thread} status=done class=impl secs=12 rc=0")
+        summary = {"lane": "sol-high@codex", "status": "done", "secs": 12, "run": ended.run,
+                   "thread": thread, "class": "impl", "rc": 0, "return": RETURNED}
+        stamped = ("thread_id", "started_at", "finished_at")
+        record("1. a Run that returns ends with that return in every record",
+               ended.run == seen.get("path") and os.path.dirname(ended.run) == w.root
+               and os.path.basename(ended.run).split("-", 1)[1].startswith("sol-high@codex-")
+               and prompt == b"the prompt\n"
+               # before the work: the request with a null outcome, and the Ledger start
+               and tuple(seen["dispatch"]) == runs.DISPATCH_FIELDS
+               and all(seen["dispatch"][k] is None for k in OUTCOME)
+               and [e.get("kind") for e in seen["ledger"]] == ["dispatch.start"]
+               # after: the five fields, the outcome in order, the session under both names
+               and read["return"] == RETURNED
+               and tuple(disp) == runs.DISPATCH_FIELDS
+               and {k: disp[k] for k in runs.DISPATCH_FIELDS if k not in stamped} == {
+                   "lane": "sol-high@codex", "harness": "codex", "model": "gpt-6-sol",
+                   "effort": "high", "timeout": "30m", "class": "impl", "leash": False,
+                   "orchestrator": None, "cwd": "/w", "write": None, "brief": "/w/b.md",
+                   "prompt": run.prompt_path, "relay_status": "completed", "relay_exit": 0,
+                   "secs": 12, "status": "done", "reason": None, "session_id": "s-1",
+                   "session": "s-1", "usage": {"in": 1}, "touched_files": None,
+                   "read_only_violation": None}
+               and thread and disp["started_at"] and disp["finished_at"]
+               # the Ledger: one start and one finish on one thread
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and start.get("thread_id") == thread == finish.get("thread_id")
+               and start.get("timeout_s") == 1800 and start.get("cwd") == "/w"
+               and start.get("out") == run.return_path and start.get("class") == "impl"
+               and finish.get("status") == "done" and finish.get("rc") == 0
+               and finish.get("secs") == 12 and finish.get("child_session") == "s-1"
+               # what dispatch prints and exits with
+               and ended.lane == "sol-high@codex" and ended.status == "done"
+               and ended.exit_code == 0 and ended.notes == ()
+               and ended.text() == text
+               and ended.text(as_json=True) == json.dumps(summary, indent=2),
+               f"ended={vars(ended)} read={read} ledger={lines} seen={seen}")
+
+
+def case_work_that_raises_ends_the_run_blocked():
+    seen = []
+    for name, exc, reason, nap in (
+            ("RuntimeError", RuntimeError("boom"), "dispatch failed: RuntimeError: boom", 1.05),
+            ("KeyboardInterrupt", KeyboardInterrupt(), "dispatch interrupted", 0)):
+        with world() as w:
+            def work(run, exc=exc, nap=nap):
+                time.sleep(nap)
+                raise exc
+
+            ended = runs.execute(request(), b"p", work, w.root)
+            read = runs.Run(ended.run).read()
+            disp = read["dispatch"]
+            lines = w.lines()
+            finish = lines[-1] if lines else {}
+            ok = (ended.status == "blocked" and ended.exit_code == 1 and ended.notes == ()
+                  and disp["status"] == "blocked" and disp["reason"] == reason
+                  and disp["relay_exit"] is None and disp["finished_at"]
+                  # secs are measured by the Run, since the work gave none
+                  and disp["secs"] == int(nap)
+                  and read["return"] == {"status": "blocked", "deliverable": f"blocked: {reason}",
+                                         "evidence": [], "open_questions": [], "changed_files": []}
+                  and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+                  and finish.get("status") == "blocked" and finish.get("rc") == 1
+                  and ended.text().endswith(f"status=blocked class=impl secs={int(nap)} rc=None"))
+            seen.append((name, ok, disp, ended.text()))
+    record("2. work that raises ends the Run blocked with why",
+           all(ok for _, ok, _, _ in seen), repr([s for s in seen if not s[1]]))
+
+
+def case_sigterm_during_work_ends_the_run_blocked_as_terminated():
+    with world() as w:
+        def previous(signum, frame):
+            pass
+
+        def work(run):
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(5)
+            except Exception:
+                # a work that swallows every Exception still cannot swallow SIGTERM
+                return runs.Finish(RETURNED)
+            return runs.Finish(RETURNED)
+
+        before = signal.signal(signal.SIGTERM, previous)
+        try:
+            t0 = time.monotonic()
+            ended = runs.execute(request(), b"p", work, w.root)
+            took = time.monotonic() - t0
+            restored = signal.getsignal(signal.SIGTERM) is previous
+        finally:
+            signal.signal(signal.SIGTERM, before)
+        read = runs.Run(ended.run).read()
+        lines = w.lines()
+        record("3. SIGTERM during work ends the Run blocked as terminated",
+               ended.status == "blocked" and ended.exit_code == 1 and took < 4
+               and read["dispatch"]["reason"] == "dispatch terminated (SIGTERM)"
+               and read["dispatch"]["finished_at"]
+               and read["return"]["deliverable"] == "blocked: dispatch terminated (SIGTERM)"
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and lines[-1].get("status") == "blocked"
+               # the previous handler comes back
+               and restored,
+               f"took={took:.1f} restored={restored} ended={vars(ended)} read={read} ledger={lines}")
+
+
+def case_a_return_json_that_cannot_be_written_still_ends_the_run():
+    with world() as w:
+        def work(run):
+            os.mkdir(run.return_path)
+            return runs.Finish(RETURNED, relay_status="completed", relay_exit=0, secs=3,
+                               session_id="s-4")
+
+        ended = runs.execute(request(), b"p", work, w.root)
+        disp = runs.Run(ended.run).read()["dispatch"]
+        lines = w.lines()
+        record("4. a return.json that cannot be written still ends dispatch.json and the Ledger",
+               ended.status == "blocked" and ended.exit_code == 1
+               and disp["status"] == "blocked"
+               and (disp["reason"] or "").startswith("could not write return.json: ")
+               and disp["finished_at"] and disp["secs"] == 3
+               # the relay's facts stay recorded
+               and disp["relay_status"] == "completed" and disp["session_id"] == "s-4"
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and lines[-1].get("status") == "blocked"
+               and len(ended.notes) == 1 and "return.json" in ended.notes[0]
+               and "status=blocked secs=3" in ended.text(),
+               f"ended={vars(ended)} dispatch={disp} ledger={lines}")
+
+
+def case_a_ledger_that_cannot_be_written_never_stops_a_run_ending():
+    def ended_done(ended):
+        read = runs.Run(ended.run).read()
+        return (ended.status == "done" and ended.exit_code == 0
+                and read["return"] == RETURNED and read["dispatch"]["status"] == "done"
+                and read["dispatch"]["finished_at"]
+                and ended.text().startswith("delegate: sol-high@codex status=done secs=2 run="))
+
+    # the Ledger's directory is a regular file: neither line can be written
+    with world() as w:
+        blocker = os.path.join(w.dir, "blocker")
+        open(blocker, "w").close()
+        os.environ["DELEGATE_LEDGER"] = os.path.join(blocker, "ledger.jsonl")
+        ended_a = runs.execute(request(), b"p", lambda run: runs.Finish(RETURNED, relay_exit=0, secs=2),
+                               w.root)
+        ok_a = (ended_done(ended_a) and len(ended_a.notes) == 2
+                and ended_a.notes[0].startswith("could not write the Ledger start: ")
+                and ended_a.notes[1].startswith("could not write the Ledger finish: "))
+
+    # the work swaps the Ledger for a directory: the start is written, the finish lost
+    with world() as w:
+        def work(run):
+            os.remove(w.ledger)
+            os.mkdir(w.ledger)
+            return runs.Finish(RETURNED, relay_exit=0, secs=2)
+
+        ended_b = runs.execute(request(), b"p", work, w.root)
+        ok_b = (ended_done(ended_b) and len(ended_b.notes) == 1
+                and ended_b.notes[0].startswith("could not write the Ledger finish: "))
+    record("5. a Ledger that cannot be written never stops a Run ending", ok_a and ok_b,
+           f"a={vars(ended_a)} b={vars(ended_b)}")
+
+
+def case_a_usage_limit_refusal_holds_the_lanes_meter():
+    grok = request(lane="grok46-high@grok", harness="grok", model="grok-4.6", meter="grok")
+
+    def held():
+        return sorted(usage.read_limits())
+
+    with world() as w:
+        refused = runs.execute(grok, b"p", lambda run: runs.blocked(GROK_LIMIT), w.root)
+        after_refusal = held()
+        timed_out = runs.execute(grok, b"p", lambda run: runs.blocked("timeout after 40m"), w.root)
+        after_timeout = held()
+        runs.execute(grok, b"p", lambda run: runs.Finish(RETURNED), w.root)
+        after_done = held()
+        runs.execute(grok, b"p", lambda run: runs.blocked(GROK_LIMIT), w.root)
+        runs.execute(grok, b"p", lambda run: runs.Finish(dict(RETURNED, status="partial")), w.root)
+        after_partial = held()
+        # another harness's Meter is never held by grok's words
+        codex = runs.execute(request(meter="codex"), b"p", lambda run: runs.blocked(GROK_LIMIT), w.root)
+        after_codex = held()
+        # a Request without a meter holds nothing
+        runs.execute(grok._replace(meter=None), b"p", lambda run: runs.blocked(GROK_LIMIT), w.root)
+        after_none = held()
+        note = refused.notes[0] if refused.notes else ""
+        record("6. a usage-limit refusal holds the Lane's Meter, and a done or partial Run releases it",
+               after_refusal == ["grok"] and note.startswith("grok meter held at 0% left until ")
+               and note.endswith(f": {GROK_LIMIT}")
+               and after_timeout == ["grok"] and timed_out.notes == ()
+               and after_done == [] and after_partial == []
+               and after_codex == [] and codex.notes == () and after_none == [],
+               f"refusal={after_refusal} {refused.notes} timeout={after_timeout} done={after_done} "
+               f"partial={after_partial} codex={after_codex} none={after_none}")
+
+
+def case_a_runs_root_that_cannot_be_made_starts_nothing():
+    with world() as w:
+        blocker = os.path.join(w.dir, "blocker")
+        open(blocker, "w").close()
+        called = []
+        try:
+            runs.execute(request(), b"p", called.append, os.path.join(blocker, "runs"))
+            raised = None
+        except runs.StartError as e:
+            raised = e
+        record("7. a runs root that cannot be made starts nothing",
+               raised is not None and "blocker" in str(raised) and called == []
+               and not os.path.exists(w.ledger),
+               f"raised={raised!r} called={called} ledger={w.lines()}")
+
+
+def case_parse_finish_line():
+    with world() as w:
+        ended = runs.execute(request(lane="flash-high@agy", harness="agy"), b"p",
+                             lambda run: runs.Finish(RETURNED, relay_exit=0, secs=4),
+                             os.path.join(w.dir, "a dir"))
+        out = "\n".join([
+            "delegate: effort override ignored on flash-high@agy; agy carries effort in the model name",
+            ended.text(),
+        ])
+        record("p6. parse_finish_line skips other delegate: lines and keeps a path with a space",
+               " " in ended.run
+               and runs.parse_finish_line(out) == {"lane": "flash-high@agy", "status": "done",
+                                                   "secs": "4", "run": ended.run}
+               and runs.parse_finish_line("delegate: dispatching x") is None,
+               runs.parse_finish_line(out))
 
 
 def main():
-    with tempfile.TemporaryDirectory() as root:
-        run = create(root)
-        read = run.read()
-        record("1. create writes the prompt and a dispatch.json with every field, outcome null",
-               os.path.basename(run.path).split("-", 1)[1].startswith("sol-high@codex-")
-               and open(run.prompt_path, "rb").read() == b"the prompt\n"
-               and tuple(read["dispatch"]) == runs.DISPATCH_FIELDS
-               and read["dispatch"]["leash"] is False and read["dispatch"]["prompt"] == run.prompt_path
-               and read["dispatch"]["thread_id"] == run.thread_id
-               and all(read["dispatch"][k] is None for k in ("status", "secs", "finished_at"))
-               and read["return"] is None,
-               read)
+    case_a_run_that_returns()
+    case_work_that_raises_ends_the_run_blocked()
+    case_sigterm_during_work_ends_the_run_blocked_as_terminated()
+    case_a_return_json_that_cannot_be_written_still_ends_the_run()
+    case_a_ledger_that_cannot_be_written_never_stops_a_run_ending()
+    case_a_usage_limit_refusal_holds_the_lanes_meter()
+    case_a_runs_root_that_cannot_be_made_starts_nothing()
+    case_parse_finish_line()
 
-        returned = {"status": "done", "deliverable": "pong", "evidence": [], "open_questions": [],
-                    "changed_files": [], "extra": "dropped"}
-        run.finish(returned, relay_status="completed", relay_exit=0, secs=12, reason=None,
-                   session_id="s-1", usage={"in": 1})
-        read = run.read()
-        record("2. finish writes the return's five fields and the outcome, the session under both names",
-               read["return"] == {k: returned[k] for k in runs.RETURN_FIELDS}
-               and read["dispatch"]["status"] == "done" and read["dispatch"]["secs"] == 12
-               and read["dispatch"]["session_id"] == "s-1" and read["dispatch"]["session"] == "s-1"
-               and read["dispatch"]["touched_files"] is None and read["dispatch"]["finished_at"]
-               and read["dispatch"]["lane"] == "sol-high@codex",
-               read)
-
-        failed = create(root)
-        doc, problem = failed.fail(3, "node is not on PATH; the relay needs Node.js")
-        read = failed.read()
-        record("3. fail records a blocked run with its reason",
-               problem is None and doc["status"] == "blocked"
-               and read["return"]["deliverable"] == "blocked: node is not on PATH; the relay needs Node.js"
-               and read["dispatch"]["status"] == "blocked" and read["dispatch"]["secs"] == 3,
-               read)
-
-        bare = runs.Run(os.path.join(root, "bare"))
-        os.makedirs(bare.path)
-        bare.finish(returned, relay_status="completed")
-        record("4. finish on a directory with no dispatch.json writes the return only",
-               bare.read() == {"dispatch": {}, "return": {k: returned[k] for k in runs.RETURN_FIELDS}},
-               bare.read())
-
-        summary = runs.summary(run, "sol-high@codex", "done", 12, "impl", 0)
-        record("5. summary carries the finish and metrics lines' facts and the return",
-               summary == {"lane": "sol-high@codex", "status": "done", "secs": 12, "run": run.path,
-                           "thread": run.thread_id, "class": "impl", "rc": 0,
-                           "return": run.read()["return"]}
-               and json.loads(json.dumps(summary)) == summary,
-               summary)
-
-    out = "\n".join([
-        "delegate: effort override ignored on flash-high@agy; agy carries effort in the model name",
-        runs.finish_line("flash-high@agy", "done", 4, "/runs/a dir"),
-        "delegate-metrics: thread=t status=done class=impl secs=4 rc=0",
-    ])
-    record("6. parse_finish_line skips other delegate: lines and keeps a path with a space",
-           runs.parse_finish_line(out) == {"lane": "flash-high@agy", "status": "done", "secs": "4",
-                                           "run": "/runs/a dir"}
-           and runs.parse_finish_line("delegate: dispatching x") is None,
-           runs.parse_finish_line(out))
     native = runs.native_line("opus-high@claude", "lane-opus-high", "/runs/p/prompt.md")
-    record("7. the native line is not a finish line, and parses as its own",
+    record("p7. the native line is not a finish line, and parses as its own",
            runs.parse_finish_line(native) is None
            and runs.parse_native_line(native + "\ndelegate: spawn: x") == {
                "lane": "opus-high@claude", "agent": "lane-opus-high", "prompt": "/runs/p/prompt.md"},
            native)
     os.environ["DELEGATE_RUNS_DIR"] = "/tmp/delegate-runs-test"
-    record("8. the runs root is the argument, else $DELEGATE_RUNS_DIR",
+    record("p8. the runs root is the argument, else $DELEGATE_RUNS_DIR",
            runs.root("/x") == "/x" and runs.root() == "/tmp/delegate-runs-test")
     sys.exit(1 if failures else 0)
 

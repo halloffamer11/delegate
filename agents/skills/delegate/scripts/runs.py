@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""runs.py — the run directory's one owner.
+"""runs.py — the Run module: a started Run always finishes.
 
 A Run is one directory under the runs root, and the contract every
 orchestrator reads:
@@ -10,25 +10,40 @@ orchestrator reads:
     return.json     the normalized child return (RETURN_FIELDS)
     ...             what the relay itself writes (result.json, events.jsonl)
 
-Only this module writes dispatch.json and return.json. `delegate.py` creates
-a Run, and finishes or fails it; everything else reads one with `Run.read`.
+`execute(request, prompt, work)` runs a relayed Run from its start to its
+Outcome. The caller supplies only the work, a function of the `Run` that
+returns a `Finish`. Before the work: the run directory, prompt.md,
+dispatch.json with a null outcome, and the Ledger start. After it, whatever
+stopped it: return.json, the outcome in dispatch.json, the Meter hold, and the
+Ledger finish. A write that fails becomes a note; nothing raises after the
+start. Only this module writes dispatch.json and return.json, and only it
+appends a Run's Ledger lines; everything else reads a Run with `Run.read`.
 
-Dispatch prints one finish line per relayed run, and one native line for a
-Lane the orchestrator runs itself. `finish_line` and `native_line` spell them,
-and `parse_finish_line` and `parse_native_line` read them back, so no reader
-keeps a regex of its own. `delegate dispatch --json` and `delegate run --json`
-print `summary` instead, for a reader that would rather not parse text.
+`Ended.text` spells the finish and metrics lines, or with `as_json` the one
+object `delegate dispatch --json` and `delegate run --json` print.
+`parse_finish_line` and `parse_native_line` read the lines back, so no reader
+keeps a regex of its own.
 """
+from __future__ import annotations
+
 from datetime import datetime, timezone
 import json
 import os
 import re
+import signal
+import threading
+import time
+from typing import NamedTuple, Optional
 import uuid
+
+import events
+import harnesses
+import usage
 
 DEFAULT_ROOT = "~/.cache/delegate/runs"
 
 # Every key dispatch.json carries, in the order it is written. A Run starts
-# with the request filled and the outcome null; `finish` and `fail` fill it.
+# with the request filled and the outcome null; `execute` fills the outcome.
 DISPATCH_FIELDS = (
     "lane", "harness", "model", "effort", "timeout", "class", "leash", "orchestrator",
     "cwd", "write", "brief", "prompt", "thread_id", "started_at",
@@ -37,9 +52,50 @@ DISPATCH_FIELDS = (
 )
 # The child return contract (assets/schemas/return.json).
 RETURN_FIELDS = ("status", "deliverable", "evidence", "open_questions", "changed_files")
+_STATUSES = ("done", "partial", "blocked")
 
 FINISH_LINE = re.compile(r"^delegate: (?P<lane>\S+) status=(?P<status>\S+) secs=(?P<secs>\S+) run=(?P<run>.+)$")
 NATIVE_LINE = re.compile(r"^delegate: native lane=(?P<lane>\S+) agent=(?P<agent>\S+) prompt=(?P<prompt>.+)$")
+
+
+class Request(NamedTuple):
+    """What dispatch asks for: the request half of dispatch.json."""
+    lane: str
+    harness: str
+    model: str
+    effort: str
+    timeout: str                       # the Lane's timeout, ^[0-9]+[smh]$
+    class_name: Optional[str]
+    cwd: str
+    write: Optional[str]
+    brief: str
+    leash: bool = True
+    orchestrator: Optional[str] = None
+    meter: Optional[str] = None        # the Lane's Meter; the Outcome holds or releases it (not recorded)
+
+
+class Finish(NamedTuple):
+    """How relayed work ended, normalized: the one type for it. Every field
+    except `returned` is a DISPATCH_FIELDS outcome key."""
+    returned: dict                     # the five RETURN_FIELDS
+    relay_status: Optional[str] = None
+    relay_exit: Optional[int] = None
+    secs: Optional[int] = None         # None: the Run records how long the work took
+    reason: Optional[str] = None
+    session_id: Optional[str] = None
+    usage: Optional[dict] = None
+    touched_files: Optional[list] = None
+    read_only_violation: Optional[bool] = None
+
+
+def blocked(reason, secs=None):
+    """A Run that did no work: status blocked, deliverable 'blocked: <reason>'."""
+    return Finish({"status": "blocked", "deliverable": f"blocked: {reason}", "evidence": [],
+                   "open_questions": [], "changed_files": []}, secs=secs, reason=reason)
+
+
+class StartError(Exception):
+    """The run directory could not be made. Nothing started."""
 
 
 def root(runs_dir=None):
@@ -67,7 +123,7 @@ def _read_json(path):
 
 
 class Run:
-    """One run directory."""
+    """A handle on one run directory."""
 
     def __init__(self, path):
         self.path = path
@@ -88,26 +144,10 @@ class Run:
     def create(cls, runs_dir, prompt_bytes, *, lane, harness, model, effort, timeout, class_name,
                cwd, write, brief, leash=True, orchestrator=None):
         """A new Run under the runs root, holding the prompt and a dispatch.json
-        with the request filled and the outcome null."""
-        base = root(runs_dir)
-        os.makedirs(base, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        run = cls(os.path.join(base, f"{stamp}-{lane}-{uuid.uuid4().hex[:8]}"))
-        os.makedirs(run.path, exist_ok=False)
-        with open(run.prompt_path, "wb") as f:
-            f.write(prompt_bytes)
-        doc = dict.fromkeys(DISPATCH_FIELDS)
-        doc.update({
-            "lane": lane, "harness": harness, "model": model, "effort": effort,
-            "timeout": timeout, "class": class_name, "leash": leash,
-            # the orchestrator profile this run was resolved under; null is the
-            # default path, where every Lane is relayed
-            "orchestrator": orchestrator,
-            "cwd": cwd, "write": write, "brief": brief, "prompt": run.prompt_path,
-            "thread_id": str(uuid.uuid4()), "started_at": _now(),
-        })
-        _write_json(run.dispatch_path, doc)
-        return run
+        with the request filled and the outcome null. Only a native Lane's
+        dispatch still calls it; a relayed Run starts inside `execute`."""
+        return _start(Request(lane, harness, model, effort, timeout, class_name, cwd, write, brief,
+                              leash=leash, orchestrator=orchestrator), prompt_bytes, runs_dir)[0]
 
     def read(self):
         """{"dispatch": dispatch.json or {}, "return": return.json or None}."""
@@ -118,54 +158,209 @@ class Run:
     def thread_id(self):
         return self.read()["dispatch"].get("thread_id")
 
-    def _update(self, fields, create=False):
-        doc = _read_json(self.dispatch_path)
-        if doc is None:
-            if not create and not os.path.isfile(self.dispatch_path):
-                return
-            doc = {}
-        doc.update(fields)
-        _write_json(self.dispatch_path, doc)
 
-    def finish(self, returned, **outcome):
-        """Write the child return and record the outcome in dispatch.json.
+class Ended:
+    """How `execute` left a Run: what dispatch prints and exits with."""
 
-        `returned` holds RETURN_FIELDS; `outcome` the dispatch.json outcome
-        keys the relay gave (relay_status, relay_exit, secs, reason, ...).
-        The status is the return's, and the session is recorded under both of
-        its names.
-        """
-        doc = {key: returned[key] for key in RETURN_FIELDS}
-        _write_json(self.return_path, doc)
-        fields = {key: None for key in DISPATCH_FIELDS[DISPATCH_FIELDS.index("relay_status"):]}
-        fields.update(outcome)
-        fields["status"] = doc["status"]
-        fields["session"] = fields.get("session_id")
-        fields["finished_at"] = _now()
-        self._update(fields)
-        return doc
+    def __init__(self, run, lane, status, exit_code, notes, summary):
+        self.run = run                 # the run directory
+        self.lane = lane
+        self.status = status           # done | partial | blocked
+        self.exit_code = exit_code     # 0 for done and partial; else 1
+        self.notes = tuple(notes)      # one line each for stderr
+        self._summary = summary
 
-    def fail(self, secs, reason):
-        """Record a run that failed after its start: blocked, as for a relay
-        that fails, since return.json has no other word for a run that did no
-        work. Never raises: the ledger finish comes after it, and a file that
-        cannot be written must not leave the run running."""
-        doc = {"status": "blocked", "deliverable": f"blocked: {reason}", "evidence": [],
-               "open_questions": [], "changed_files": []}
-        try:
-            _write_json(self.return_path, doc)
-        except OSError as e:
-            return doc, f"could not write return.json: {e}"
-        try:
-            self._update({"status": "blocked", "reason": reason, "secs": secs,
-                          "finished_at": _now()}, create=True)
-        except OSError as e:
-            return doc, f"could not write dispatch.json: {e}"
-        return doc, None
+    def text(self, as_json=False):
+        """The finish and metrics lines, or with `as_json` the one object
+        that carries their facts and the child return."""
+        s = self._summary
+        if as_json:
+            return json.dumps(s, indent=2)
+        class_disp = "-" if s["class"] is None else s["class"]
+        return (f"delegate: {s['lane']} status={s['status']} secs={s['secs']} run={s['run']}\n"
+                f"delegate-metrics: thread={s['thread']} status={s['status']} class={class_disp} "
+                f"secs={s['secs']} rc={s['rc']}")
 
 
-def finish_line(lane, status, secs, run_dir):
-    return f"delegate: {lane} status={status} secs={secs} run={run_dir}"
+def execute(request, prompt, work, runs_dir=None):
+    """Run one relayed Run from its start to its Outcome.
+
+    Raises StartError before the Ledger has a start, or returns an `Ended`;
+    never raises after the start. Anything that stops `work` ends the Run
+    blocked with why, SIGTERM included.
+    """
+    run, doc = _start(request, prompt, runs_dir)
+    notes = []
+    t0 = time.monotonic()
+    # Trapped before the Ledger start, so a SIGTERM that lands between the
+    # start and the work still ends the Run.
+    previous = _trap_sigterm()
+    try:
+        _attempt(notes, "could not write the Ledger start", lambda: events.append(events.start_event(
+            thread_id=doc["thread_id"], lane=request.lane, class_=request.class_name,
+            effort=request.effort, timeout_s=_timeout_s(request.timeout),
+            cwd=request.write or request.cwd, brief=request.brief, out=run.return_path,
+            write=request.write)))
+        result = work(run)
+    except BaseException as e:
+        result = blocked(_why(e))
+    finally:
+        _release_sigterm(previous)
+
+    finish = _settled(result)
+    secs = finish.secs if finish.secs is not None else int(time.monotonic() - t0)
+    returned = {key: finish.returned[key] for key in RETURN_FIELDS}
+    outcome = {
+        "relay_status": finish.relay_status, "relay_exit": finish.relay_exit, "secs": secs,
+        "status": returned["status"], "reason": finish.reason,
+        # the session under both of its names
+        "session_id": finish.session_id, "session": finish.session_id,
+        "usage": finish.usage, "touched_files": finish.touched_files,
+        "read_only_violation": finish.read_only_violation,
+    }
+    if not _attempt(notes, "could not write return.json", lambda: _write_json(run.return_path, returned)):
+        # The worker's answer stays in result.json and final.txt.
+        outcome.update(status="blocked", reason=notes[-1])
+        returned = None
+    outcome["finished_at"] = _now()
+    doc.update(outcome)
+    _attempt(notes, "could not write dispatch.json", lambda: _write_json(run.dispatch_path, doc))
+    text = "\n".join(str(x) for x in (outcome["reason"], finish.returned["deliverable"]) if x)
+    held = _settle_meter(request, outcome["status"], text)
+    if held:
+        notes.append(held)
+    _attempt(notes, "could not write the Ledger finish", lambda: events.append(events.finish_event(
+        thread_id=doc["thread_id"], lane=request.lane, class_=request.class_name, secs=secs,
+        rc=finish.relay_exit if finish.relay_exit is not None else 1, status=outcome["status"],
+        child_session=finish.session_id, out=run.return_path)))
+
+    status = outcome["status"]
+    return Ended(run.path, request.lane, status, 0 if status in ("done", "partial") else 1, notes, {
+        "lane": request.lane, "status": status, "secs": secs, "run": run.path,
+        "thread": doc["thread_id"], "class": request.class_name, "rc": finish.relay_exit,
+        "return": returned})
+
+
+def _start(request, prompt, runs_dir):
+    """The run directory, prompt.md and dispatch.json with a null outcome:
+    (Run, the dispatch.json document). Raises StartError."""
+    base = root(runs_dir)
+    try:
+        os.makedirs(base, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run = Run(os.path.join(base, f"{stamp}-{request.lane}-{uuid.uuid4().hex[:8]}"))
+        os.makedirs(run.path, exist_ok=False)
+        with open(run.prompt_path, "wb") as f:
+            f.write(prompt)
+        doc = dict.fromkeys(DISPATCH_FIELDS)
+        doc.update({
+            "lane": request.lane, "harness": request.harness, "model": request.model,
+            "effort": request.effort, "timeout": request.timeout, "class": request.class_name,
+            "leash": request.leash,
+            # the orchestrator profile this run was resolved under; null is the
+            # default path, where every Lane is relayed
+            "orchestrator": request.orchestrator,
+            "cwd": request.cwd, "write": request.write, "brief": request.brief,
+            "prompt": run.prompt_path, "thread_id": str(uuid.uuid4()), "started_at": _now(),
+        })
+        _write_json(run.dispatch_path, doc)
+    except OSError as e:
+        raise StartError(f"could not start a run under {base}: {e}") from e
+    return run, doc
+
+
+def _attempt(notes, what, write):
+    """Run one write after the start. A failure becomes a note, never an
+    exception: the writes after it still happen. True when it succeeded."""
+    try:
+        write()
+        return True
+    except Exception as e:
+        notes.append(f"{what}: {e}")
+        return False
+
+
+def _settled(result):
+    """The work's result as a Finish whose return has the five fields and a
+    known status, else a blocked one that says what was wrong."""
+    if not isinstance(result, Finish):
+        return blocked(f"dispatch failed: the work returned {type(result).__name__}, not a Finish")
+    returned = result.returned if isinstance(result.returned, dict) else {}
+    lacks = [key for key in RETURN_FIELDS if key not in returned]
+    if lacks:
+        why = f"dispatch failed: the return lacks {', '.join(lacks)}"
+    elif returned["status"] not in _STATUSES:
+        why = f"dispatch failed: the return's status is {returned['status']!r}"
+    else:
+        return result
+    return result._replace(returned=blocked(why).returned, reason=why)
+
+
+class _Terminated(BaseException):
+    """SIGTERM during the work. A BaseException, as KeyboardInterrupt is, so
+    no `except Exception` inside the work can swallow it."""
+
+
+def _raise_terminated(signum, frame):
+    raise _Terminated()
+
+
+def _trap_sigterm():
+    """Make SIGTERM raise _Terminated. Returns the handler to restore, or None
+    off the main thread, where Python cannot install one."""
+    if threading.current_thread() is not threading.main_thread():
+        return None
+    previous = signal.signal(signal.SIGTERM, _raise_terminated)
+    # None: the previous handler was not installed from Python
+    return signal.SIG_DFL if previous is None else previous
+
+
+def _release_sigterm(previous):
+    if previous is not None:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _why(exc):
+    """Why the work stopped, as a blocked Run's reason."""
+    if isinstance(exc, _Terminated):
+        return "dispatch terminated (SIGTERM)"
+    if isinstance(exc, KeyboardInterrupt):
+        return "dispatch interrupted"
+    return f"dispatch failed: {type(exc).__name__}: {exc}"
+
+
+def _timeout_s(timeout):
+    if not isinstance(timeout, str):
+        raise ValueError(f"invalid timeout: {timeout}")
+    if timeout.endswith("s"):
+        return int(timeout[:-1])
+    if timeout.endswith("m"):
+        return int(timeout[:-1]) * 60
+    if timeout.endswith("h"):
+        return int(timeout[:-1]) * 3600
+    raise ValueError(f"invalid timeout string: {timeout}")
+
+
+def _settle_meter(request, status, text):
+    """The Run's one touch of its Lane's Meter (ticket 43). A blocked Run whose
+    harness says, in `text`, that its usage limit is reached holds the Meter at
+    nothing left; a done or partial Run releases it; any other Run leaves it.
+    Returns the hold's note, or why the settle failed; never raises."""
+    meter = request.meter
+    if not meter:
+        return None
+    try:
+        if status == "blocked":
+            line = harnesses.get(request.harness).usage_limit(text)
+            if line:
+                until = usage.mark_limited(meter, line)
+                stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
+                return f"{meter} meter held at 0% left until {stamp}: {line}"
+        elif status in ("done", "partial"):
+            usage.clear_limited(meter)
+    except Exception as e:
+        return f"could not settle the {meter} meter: {e}"
+    return None
 
 
 def native_line(lane, agent, prompt):
@@ -193,15 +388,6 @@ def parse_finish_line(text):
 def parse_native_line(text):
     """{lane, agent, prompt} from the native line in dispatch's output, or None."""
     return _first(NATIVE_LINE, text)
-
-
-def summary(run, lane, status, secs, class_name, relay_exit):
-    """What `--json` prints for a relayed run: the finish and metrics lines'
-    facts and the child return."""
-    read = run.read()
-    return {"lane": lane, "status": status, "secs": secs, "run": run.path,
-            "thread": read["dispatch"].get("thread_id"), "class": class_name,
-            "rc": relay_exit, "return": read["return"]}
 
 
 def native_summary(lane, agent, prompt, spawn):
