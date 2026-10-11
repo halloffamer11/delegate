@@ -2,15 +2,14 @@
 """Interactive catalog setup wizard for delegate."""
 import argparse
 import copy
-import json
 import os
 import sys
 import tempfile
 import threading
-import time
 
 import bench
 import bench_page
+import bench_snapshot
 import catalog
 import catalog_commit
 import catalog_draft
@@ -20,13 +19,6 @@ import effort
 import setup_tui
 from catalog import CatalogError, load_json
 from harnesses import NAMES as HARNESSES
-
-# The wizard refreshes the Artificial Analysis rows itself, so that one command
-# is one command (ticket 33). The fetch goes where `effort.py aa` would put it.
-AA_CACHE_DIR = os.path.expanduser("~/.cache/delegate/bench/aa")
-AA_MAX_AGE = 24 * 60 * 60
-# The rows a fixture run reads instead of fetching, beside the harness fixtures.
-AA_FIXTURE = "aa-accepted.json"
 
 
 class SetupAbort(Exception):
@@ -176,11 +168,10 @@ def note_undiscovered_lanes(lanes_doc, discovery_data):
             print(f"{name}: {lane['harness']} discovery error ({err}); the lane stays")
 
 
-def show_bench(args, draft, rows=None):
-    """The benchmark report on the Lanes as `draft`, a `CatalogDraft`, holds
-    them. `rows` is the `(rows, message)` pair `load_effort_rows` gives,
-    already read from the refreshed list; without one this reads the list on
-    `args`."""
+def show_bench(args, draft, snapshot):
+    """The report, in process, on the Lanes as `draft`, a `CatalogDraft`,
+    holds them, from the rows the launch scrub's Benchmark snapshot holds. A
+    source with no rows is skipped in it, never a stop."""
     if args.no_bench:
         return
     if args.bench_report:
@@ -190,21 +181,8 @@ def show_bench(args, draft, rows=None):
         except OSError as e:
             print(f"bench: {e}")
         return
-
-    effort_rows, effort_message = rows if rows is not None else load_effort_rows(args.effort_rows)
-    if effort_message:
-        print(effort_message)
-        return
-    try:
-        data = bench.collect(
-            draft.documents()["lanes"],
-            epoch_csv=args.epoch_csv,
-            effort_rows=effort_rows,
-        )
-    except bench.BenchError as e:
-        print(f"bench: {e}")
-        return
-    print(bench.format_collection(data, effort_rows=effort_rows), end="")
+    data = collect_bench(args, draft.documents()["lanes"], snapshot)
+    print(bench.format_collection(data, snapshot), end="")
 
 
 def read_answer(prompt):
@@ -291,114 +269,47 @@ def ask_routing(draft):
         draft.set_routing("meters", True)
 
 
-def aa_rows_path(paths):
-    """The `--effort-rows` file that holds Artificial Analysis rows, or None."""
-    for path in paths or ():
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(data, list) and any(
-            isinstance(row, dict) and row.get("source") == effort.AA_SOURCE for row in data
-        ):
-            return path
-    return None
+def read_benchmarks(args, renew=False):
+    """The Benchmark snapshot this run reads. `--no-discover` skips every live
+    acquisition, so it reads only named files; a fixture run reads the rows
+    beside the harness fixtures; any other run reads the web through the
+    cache. `--epoch-csv` names Epoch's file; else Epoch comes from where
+    Artificial Analysis does. `renew` is the harnesses page's `r`."""
+    live = None if args.no_discover else (
+        bench_snapshot.fixture(args.fixture_dir) if args.fixture_dir else bench_snapshot.web())
+    epoch = bench_snapshot.local(args.epoch_csv) if args.epoch_csv else live
+    return bench_snapshot.snapshot(args.effort_rows or (), aa=live, epoch=epoch, renew=renew)
 
 
-def _with_aa_rows(paths, refreshed):
-    """`paths` with the Artificial Analysis file replaced by `refreshed`."""
-    here = aa_rows_path(paths)
-    if here is None:
-        return list(paths) + [refreshed]
-    return [refreshed if path == here else path for path in paths]
-
-
-def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
-                        max_age=AA_MAX_AGE, fetch=None, force=False, fallback=None):
-    """(the `--effort-rows` list with the Artificial Analysis rows refreshed,
-    one line saying where they came from).
-
-    `make delegate-wizard` is the one command (ticket 33), so the wizard reads
-    the rows itself rather than asking for `effort.py aa` first. A fetch from
-    the last 24 hours is reused, unless `force` — the harnesses page's `r`,
-    which asks for the rows as they are now — and a fetch that fails keeps
-    the repo's rows and says why: a leaderboard that is down must never stop
-    a catalog edit. `fallback` is the paths launch used, which the `r` passes:
-    a rescan whose fetch fails keeps the rows the pages already show, not the
-    repo's, which may be older than the cache launch read. Terminal-Bench rows
-    stay as they are, because extracting them needs a worker. `fixture_dir`
-    reads a saved rows file beside the harness fixtures, so a test and a
-    fixture run touch no network and no cache.
-    """
-    paths = list(paths or [])
-    if fixture_dir is not None:
-        fixture = os.path.join(fixture_dir, AA_FIXTURE)
-        if not os.path.isfile(fixture):
-            return paths, f"Benchmark rows: repo rows; no {AA_FIXTURE} in {fixture_dir}"
-        return _with_aa_rows(paths, fixture), f"Benchmark rows: Artificial Analysis from {fixture}"
-    cache_dir = cache_dir or AA_CACHE_DIR
-    accepted = os.path.join(cache_dir, "accepted.json")
-    now = time.time() if now is None else now
-    if os.path.isfile(accepted) and not force:
-        age = now - os.path.getmtime(accepted)
-        if 0 <= age < max_age:
-            return (_with_aa_rows(paths, accepted),
-                    f"Benchmark rows: Artificial Analysis fetched {int(age // 3600)}h ago, "
-                    "still fresh")
-    try:
-        (fetch or effort.run_aa)(cache_dir, quiet=True)
-    except Exception as e:
-        # Every failure here is the same failure to the operator: the rows are
-        # the repo's, or on a rescan launch's, and the reason is on the start
-        # page.
-        if fallback is not None:
-            return (list(fallback),
-                    f"Benchmark rows: the rows launch used; the Artificial Analysis fetch failed: {e}")
-        return paths, f"Benchmark rows: repo rows; the Artificial Analysis fetch failed: {e}"
-    return _with_aa_rows(paths, accepted), "Benchmark rows: Artificial Analysis fetched just now"
-
-
-def scan(args, lanes_doc, force=False, fallback=None):
+def scan(args, lanes_doc, force=False):
     """The scrub that runs at launch, and again on the harnesses page's `r`:
     the benchmark rows and each harness's models, acquired together.
 
-    Returns (discovered, discovery_data, rows, rows_note, row_paths): the
-    rows as `load_effort_rows` gives them and the refreshed paths they came
-    from. The rows come off a web page and the models come off three CLIs;
-    neither waits on the other (ticket 33). `force` fetches the rows even
-    when the cache is fresh, and `fallback` is the row paths to keep if
-    that fetch fails (`refresh_effort_rows`). Nothing here writes a file but
-    the rows cache, and no failure raises: a fetch that fails is a note, and a probe that
-    fails is a notice.
+    Returns (discovered, discovery_data, snapshot): the Benchmark snapshot is
+    one `read_benchmarks` on a thread beside discovery, because the rows come
+    off the web and the models off the harness CLIs, and neither waits on the
+    other (ticket 33). `force` renews the Artificial Analysis rows; Epoch
+    comes from the cache launch read or wrote. Nothing here writes a file but
+    the benchmark cache, and no failure raises: a fetch that fails is a note,
+    and a probe that fails is a notice.
     """
-    rows_box = {}
+    box = {}
 
-    def fetch_rows():
-        # --no-discover skips every live acquisition, the benchmark rows
-        # included; a fixture run reads them beside the harness fixtures
+    def read_rows():
         try:
-            rows_box["value"] = (
-                (list(args.effort_rows or []), "") if args.no_discover
-                else refresh_effort_rows(args.effort_rows, fixture_dir=args.fixture_dir,
-                                         force=force, fallback=fallback)
-            )
+            box["snapshot"] = read_benchmarks(args, renew=force)
         except Exception as e:
             # a thread that raises would print a traceback over the wizard
-            rows_box["value"] = (
-                (list(fallback), f"Benchmark rows: the rows launch used; the refresh failed: {e}")
-                if fallback is not None
-                else (args.effort_rows, f"Benchmark rows: repo rows; the refresh failed: {e}"))
+            box["snapshot"] = bench_snapshot.Snapshot(None, None, {}, (f"benchmark rows: {e}",), "")
 
-    fetcher = threading.Thread(target=fetch_rows, daemon=True)
-    fetcher.start()
+    reader = threading.Thread(target=read_rows, daemon=True)
+    reader.start()
     discovered, discovery_data = acquire_discovery(lanes_doc, args)
-    fetcher.join()
-    effort_row_paths, rows_note = rows_box.get("value", (args.effort_rows, ""))
-    return discovered, discovery_data, load_effort_rows(effort_row_paths), rows_note, effort_row_paths
+    reader.join()
+    return discovered, discovery_data, box["snapshot"]
 
 
-def propose_generation(lanes_doc, discovery_data, rows):
+def propose_generation(lanes_doc, discovery_data, effort_rows):
     """The current generation, proposed in memory (ticket 33): (the refreshed
     catalog, the refresh plan or None, the discovery with its lane mapping
     read against that catalog). Nothing is written until the confirm, and
@@ -406,19 +317,19 @@ def propose_generation(lanes_doc, discovery_data, rows):
     if not (isinstance(discovery_data, dict) and discovery_data.get("models")):
         return lanes_doc, None, discovery_data
     lanes_doc, refresh = discover.refresh_catalog(
-        lanes_doc, discovery_data, published_models=published_model_names(rows[0])
+        lanes_doc, discovery_data, published_models=published_model_names(effort_rows)
     )
     return lanes_doc, refresh, discover.map_lanes(discovery_data, lanes_doc)
 
 
-def collect_bench(args, lanes_doc, effort_rows):
-    """(the benchmark data or None, a message saying why not)."""
+def collect_bench(args, lanes_doc, snapshot):
+    """The benchmark data from the snapshot's rows, or None with `--no-bench`.
+    It acquires nothing, so it cannot fail for a source: one with no rows is
+    skipped in the data, and why is on the snapshot's rows line."""
     if args.no_bench:
-        return None, ""
-    try:
-        return bench.collect(lanes_doc, epoch_csv=args.epoch_csv, effort_rows=effort_rows), ""
-    except bench.BenchError as e:
-        return None, f"bench: {e}"
+        return None
+    return bench.collect(lanes_doc, epoch_rows=snapshot.epoch_rows,
+                         effort_rows=snapshot.effort_rows)
 
 
 def published_model_names(rows):
@@ -433,28 +344,6 @@ def published_model_names(rows):
         if isinstance(row, dict) and row.get("source") == effort.AA_SOURCE
         and isinstance(row.get("model"), str)
     })
-
-
-def load_effort_rows(paths):
-    """Every row from one file or several, in order. The pre-screen judges each
-    source on its own rows, so files from different sources combine safely."""
-    if not paths:
-        return None, ""
-    if isinstance(paths, str):
-        paths = [paths]
-    rows = []
-    for path in paths:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except OSError as e:
-            return None, f"effort-rows: {e}"
-        except json.JSONDecodeError as e:
-            return None, f"effort-rows: {path}: invalid JSON: {e}"
-        if not isinstance(data, list):
-            return None, f"effort-rows: {path}: expected a JSON list"
-        rows.extend(data)
-    return rows, ""
 
 
 def read_tier_lines(path):
@@ -506,7 +395,8 @@ def main(argv=None):
     bench_group = parser.add_mutually_exclusive_group()
     bench_group.add_argument("--bench-report", default=None, help="existing benchmark report to display")
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
-    parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
+    parser.add_argument("--epoch-csv", default=None,
+                        help="a saved Epoch CSV, read instead of the cached or fetched one")
     parser.add_argument("--effort-rows", action="append", default=None,
                         help="effort.py accepted rows for the pre-screen, the benchmark page and "
                              "the Artificial Analysis columns; repeat to put several sources on one page")
@@ -546,7 +436,9 @@ def main(argv=None):
         # Start from the editable catalog, acquire once, then filter only a
         # first-time proposal. Existing catalog decisions survive probe errors.
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(snap, set(HARNESSES))
-        discovered, discovery_data, rows, rows_note, effort_row_paths = scan(args, lanes_doc)
+        # the Benchmark snapshot, read beside discovery; `snap` stays the
+        # catalog as read, which every save commits through
+        discovered, discovery_data, benchmarks = scan(args, lanes_doc)
         if not existing:
             lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(snap, discovered)
         else:
@@ -561,7 +453,8 @@ def main(argv=None):
         # writes only the change made on it (deepening D.6).
         refresh = None
         if focus is None:
-            lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data, rows)
+            lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data,
+                                                                    benchmarks.effort_rows)
         # Discovery reports drift at the moment the human is already deciding
         # tiers, and it must never be able to stop them getting there: any
         # failure becomes the reason string the start facts print. Both
@@ -575,8 +468,10 @@ def main(argv=None):
             # the report instead, so the page line says (not written)
             for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
                                               width=10_000, refresh=refresh,
-                                              rows_note=rows_note, queued=snap.queued,
+                                              rows_note=benchmarks.note, queued=snap.queued,
                                               applied=snap.applied):
+                print(line)
+            for line in benchmarks.errors:
                 print(line)
             if tier_lines is not None:
                 # the same parser and summary as the review page's `v`; the
@@ -586,7 +481,7 @@ def main(argv=None):
                 parsed = tier_line_rules.parse_tier_lines(tier_lines, lanes_doc)
                 dropped = draft.apply(parsed["decided"], "off")
                 print(tier_line_rules.tier_lines_summary(parsed, dropped))
-            if effort_row_paths:
+            if args.effort_rows or benchmarks.effort_rows:
                 # The pre-screen is a selectable screen; there is no prompt-driven
                 # form of it yet. Saying so is the point: the instruction a human
                 # is given names --effort-rows, and a flag that reads as accepted
@@ -594,37 +489,36 @@ def main(argv=None):
                 print("note: --effort-rows drives the pre-screen, which the prompt-driven "
                       "interface does not have; no lane will be proposed off. Run on a "
                       "terminal without --plain to use it.")
-            show_bench(args, draft, rows=rows)
+            show_bench(args, draft, benchmarks)
             ask_lanes(lanes_doc, draft)
             ask_routing(draft)
             confirm_and_write(draft, snap)
         else:
             if args.bench_report:
                 print("note: --bench-report is ignored in TUI mode")
-            effort_rows, effort_message = rows
-            bench_data, initial_message = collect_bench(args, lanes_doc, effort_rows)
-            if effort_message:
-                initial_message = f"{initial_message}; {effort_message}" if initial_message else effort_message
+            effort_rows = benchmarks.effort_rows
+            bench_data = collect_bench(args, lanes_doc, benchmarks)
+            initial_message = "; ".join(benchmarks.errors)
 
             def rescan():
                 # `r` on the harnesses page: the launch scrub again, from the
-                # catalog as read, the rows fetched afresh. The same steps in
-                # the same order, so what it returns is what launch built.
-                found, data, rows_again, note, _paths = scan(args, base_lanes, force=True,
-                                                             fallback=effort_row_paths)
-                doc, plan, data = propose_generation(copy.deepcopy(base_lanes), data, rows_again)
-                effort_rows_again, message = rows_again
-                data_again, bench_message = collect_bench(args, doc, effort_rows_again)
-                if bench_message:
-                    message = f"{message}; {bench_message}" if message else bench_message
+                # catalog as read, the Artificial Analysis rows renewed. The
+                # same steps in the same order, so what it returns is what
+                # launch built.
+                found, data, again = scan(args, base_lanes, force=True)
+                doc, plan, data = propose_generation(copy.deepcopy(base_lanes), data,
+                                                     again.effort_rows)
                 return {"lanes_doc": doc, "discovered": found, "discovery": data, "refresh": plan,
-                        "rows_note": note, "effort_rows": effort_rows_again, "bench": data_again,
-                        "message": message}
+                        "rows_note": again.note, "effort_rows": again.effort_rows,
+                        "epoch_rows": again.epoch_rows,
+                        "bench": collect_bench(args, doc, again),
+                        "message": "; ".join(again.errors)}
 
             fd, page_path = tempfile.mkstemp(prefix="delegate-bench-", suffix=".html")
             os.close(fd)
             try:
-                bench_page.write(page_path, bench_data, lanes_doc, effort_rows)
+                bench_page.write(page_path, bench_data, lanes_doc, effort_rows,
+                                 benchmarks.epoch_rows)
             except OSError as e:
                 page_path = None
                 page_message = f"benchmark page: {e}"
@@ -637,11 +531,12 @@ def main(argv=None):
                 discovery=discovery_data,
                 focus=focus,
                 refresh=refresh,
-                rows_note=rows_note,
+                rows_note=benchmarks.note,
                 rescan=rescan if focus is None else None,
                 tier_lines=tier_lines,
                 queued=snap.queued,
                 applied=snap.applied,
+                epoch_rows=benchmarks.epoch_rows,
             )
             if tier_lines is not None:
                 summary = wizard.apply_start_lines()

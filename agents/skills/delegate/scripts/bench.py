@@ -4,12 +4,17 @@
 Evidence for the human's tier decisions; never read by routing
 or any other script, skill, or hook.
 
-Sources:
-  Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0
+Sources, read through the Benchmark snapshot (bench_snapshot.py):
+  Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0:
+    the report reads `--epoch-csv`, else the web through the snapshot's 24-hour
+    cache; an Epoch that cannot be fetched is skipped with the reason, and the
+    report is still written. `bench.py model` reads `--epoch-csv` only.
   Artificial Analysis, https://artificialanalysis.ai, the per-effort rows that
-    `effort.py aa` reads out of a /models/<slug> page and accepts (ticket 19).
+    `effort.py aa` reads out of a /models/<slug> page and accepts (ticket 19),
+    only from `--effort-rows`; the wizard is the one command that fetches them.
     No API and no key: the free API held one entry per model on a first page
     of 200, so most lanes had no figure at their own effort.
+  A named file that cannot be read exits 1 with "bench: <reason>".
 
   python3 bench.py [--config-dir DIR] [--out-dir DIR] [--date YYYY-MM-DD]
                    [--epoch-csv FILE] [--effort-rows FILE ...]
@@ -17,40 +22,30 @@ Sources:
                                [--epoch-csv FILE] [--json]
 """
 import argparse
-import csv
-import io
 import json
 import os
 import re
 import sys
-import urllib.request
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
+import bench_snapshot
 import catalog
-import published_names
+import lane_evidence
 import carry  # noqa: E402
-# Reconciling a source's printed model name against a lane model is
-# `published_names`'s; both this report and the carry pre-screen read it from
-# there rather than keeping a second copy.
+# Which benchmark rows belong to which Lane is `lane_evidence`'s; this report,
+# the carry pre-screen and the Tier proposal read it from there rather than
+# keeping a second copy.
 from catalog import CatalogError
 from harnesses import EFFORTS
-from published_names import resolve_published_model, strip_effort_suffix
 
-EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
+# Where the Epoch rows come from and which benchmarks they keep are the
+# Benchmark snapshot's (bench_snapshot.py); the names stay here for the readers
+# that import them from this module.
+from bench_snapshot import EPOCH_BENCHMARKS, EPOCH_URL  # noqa: E402
+
 DEFAULT_OUT_DIR = "~/.cache/delegate/bench/"
-EXPECTED_HEADER = (
-    "model_id,benchmark_id,performance,benchmark,benchmark_release_date,"
-    "model,model_version,Model,date,source"
-)
-EXPECTED_FIELDS = EXPECTED_HEADER.split(",")
-EPOCH_BENCHMARKS = (
-    "DeepSWE",
-    "FrontierCode",
-    "APEX-Agents",
-    "Terminal Bench",
-    "SWE-Bench verified",
-)
 # The efforts strong enough to stand for a model when no lane's effort has a
 # figure, strongest first. A subset of EFFORTS on purpose: a low-effort figure
 # would understate the model.
@@ -66,10 +61,10 @@ LANE_EFFORT_ORDER = tuple(reversed(EFFORTS))
 # at. `ultra` is generated disabled and no source scores it, so it never stands
 # for the model even when a lane carries it.
 EFFORT_PREFERENCE = tuple(e for e in LANE_EFFORT_ORDER if e != "ultra")
-# The key a figure gets when the source stated no effort. It is a key like any
-# other, so the figure is never dropped for being unlabelled - and it matches
-# no lane, so it is never attributed for being unlabelled either.
-UNKNOWN_EFFORT = "unknown"
+# The key a figure gets when the source stated no effort: `lane_evidence`'s,
+# so the figure is never dropped for being unlabelled and never attributed for
+# it either.
+UNKNOWN_EFFORT = lane_evidence.UNKNOWN_EFFORT
 AA_SOURCE = "aa"
 # The AA columns are whichever component benchmarks the accepted rows carry, in
 # the order the rows first name them; the composite Intelligence Index is never
@@ -77,6 +72,7 @@ AA_SOURCE = "aa"
 # beside them and is never ranked: it is the index's figure for the variant.
 AA_COST_COLUMN = "Cost/task (USD)"
 AA_NO_ROWS = "no rows from effort.py aa given (--effort-rows)"
+EPOCH_NO_ROWS = "no Epoch CSV read"
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
 BOARDS_PATH = os.path.join(ASSETS_DIR, "boards.json")
 SOURCES_PATH = os.path.join(ASSETS_DIR, "sources.json")
@@ -95,20 +91,6 @@ class BenchError(Exception):
 
 def utc_today():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
-def split_model_version(model_version):
-    text = (model_version or "").strip()
-    if not text:
-        return "", "unknown"
-    if "_" not in text:
-        return text, "unknown"
-    slug, effort = text.rsplit("_", 1)
-    if not slug:
-        return text, "unknown"
-    if not effort:
-        return slug, "unknown"
-    return slug, effort
 
 
 def catalog_models(lanes):
@@ -134,13 +116,6 @@ def lane_effort_of(rec):
         if effort in efforts:
             return effort
     return efforts[0]
-
-
-def model_matches_slug(catalog_model, slug):
-    if slug == catalog_model:
-        return True
-    base, _suffix_effort = strip_effort_suffix(catalog_model)
-    return bool(base) and slug == base
 
 
 def as_number(value):
@@ -208,76 +183,21 @@ def md_table(headers, rows):
     return "\n".join(lines)
 
 
-def read_text_file(path):
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        return f.read()
-
-
-def fetch_bytes(url, headers=None, timeout=60):
-    req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
-
-
-def load_epoch_csv_text(text):
-    if text.startswith("\ufeff"):
-        text = text[1:]
-    lines = text.splitlines()
-    first = lines[0].strip() if lines else ""
-    if first != EXPECTED_HEADER:
-        raise BenchError("Epoch CSV missing expected header")
-    reader = csv.DictReader(io.StringIO(text))
-    if reader.fieldnames != EXPECTED_FIELDS:
-        raise BenchError("Epoch CSV missing expected header")
-    rows = []
-    for raw in reader:
-        benchmark = (raw.get("benchmark") or "").strip()
-        if benchmark not in EPOCH_BENCHMARKS:
-            continue
-        performance = as_number(raw.get("performance"))
-        if performance is None:
-            continue
-        model_version = (raw.get("model_version") or "").strip()
-        slug, effort = split_model_version(model_version)
-        rows.append(
-            {
-                "benchmark": benchmark,
-                "performance": performance,
-                "model_version": model_version,
-                "slug": slug,
-                "effort": effort,
-                "source": (raw.get("source") or "").strip(),
-                "model": (raw.get("model") or "").strip(),
-                "date": (raw.get("date") or "").strip(),
-                "benchmark_release_date": (raw.get("benchmark_release_date") or "").strip(),
-            }
-        )
-    return rows
-
-
-def load_epoch(epoch_csv):
+def read_snapshot(effort_rows, epoch_csv, fetch):
+    """The Benchmark snapshot a bench CLI reads. Artificial Analysis comes only
+    from the named accepted-rows files (decision H.5). Epoch comes from
+    `epoch_csv`, else, when `fetch`, from the web through the snapshot's
+    24-hour cache, and else not at all (decision H.4). A named file that
+    cannot be read raises BenchError; a fetch that fails is the Epoch
+    Origin's `failure`, and the report says it (decision H.3)."""
     if epoch_csv:
-        path = os.path.abspath(os.path.expanduser(epoch_csv))
-        try:
-            text = read_text_file(path)
-        except OSError as e:
-            raise BenchError(f"cannot read Epoch CSV: {e}") from e
-        return load_epoch_csv_text(text)
-    try:
-        raw = fetch_bytes(EPOCH_URL)
-        text = raw.decode("utf-8-sig")
-    except Exception as e:
-        raise BenchError(f"cannot read Epoch CSV: {e}") from e
-    return load_epoch_csv_text(text)
-
-
-def match_epoch_rows(epoch_rows, models):
-    matched = defaultdict(list)
-    for row in epoch_rows:
-        for model in models:
-            if model_matches_slug(model, row["slug"]):
-                matched[(model, row["benchmark"])].append(row)
-    return matched
+        epoch = bench_snapshot.local(os.path.abspath(os.path.expanduser(epoch_csv)))
+    else:
+        epoch = bench_snapshot.web() if fetch else None
+    snap = bench_snapshot.snapshot(effort_rows or (), epoch=epoch)
+    if snap.errors:
+        raise BenchError("; ".join(snap.errors))
+    return snap
 
 
 def choose_effort(available, lane_efforts):
@@ -305,62 +225,43 @@ def effort_cell_key(effort):
     return str(effort) if effort else UNKNOWN_EFFORT
 
 
-def collect_epoch_cells(rows):
-    """Every effort measured for one model on one benchmark, keyed by effort.
+def _epoch_figure(rows):
+    """One figure from Epoch rows of one model, benchmark and effort: the best
+    score, with `duplicates` naming the disagreement when they differ."""
+    best = max(rows, key=lambda r: r["performance"])
+    scores = {r["performance"] for r in rows}
+    dup_pairs = None
+    if len(scores) > 1:
+        dup_pairs = []
+        seen = set()
+        for cand in sorted(rows, key=lambda r: (-r["performance"], r["source"])):
+            key = (cand["performance"], cand["source"])
+            if key in seen:
+                continue
+            seen.add(key)
+            dup_pairs.append(key)
+    return {"performance": best["performance"], "source": best["source"], "duplicates": dup_pairs}
+
+
+def collect_epoch_cells(records):
+    """Every effort measured for one model on one benchmark, keyed by effort,
+    from the evidence records of its Epoch rows.
 
     Two rows at the same effort are one figure, with `duplicates` naming the
     disagreement. Two rows at different efforts are two figures: a lane may
     claim only the figure measured at its own effort, so collapsing them here
     is what attributed one model's whole sweep to every one of its lanes
-    (ticket 17).
+    (ticket 17). Each figure names the Lanes that claim it, as the evidence
+    attributed them (`LaneEvidence.records`).
     """
     by_effort = defaultdict(list)
-    for row in rows:
-        by_effort[effort_cell_key(row["effort"])].append(row)
+    for rec in records:
+        by_effort[rec["effort"]].append(rec)
     cell = {}
     for effort, group in by_effort.items():
-        best = max(group, key=lambda r: r["performance"])
-        scores = {c["performance"] for c in group}
-        dup_pairs = None
-        if len(scores) > 1:
-            dup_pairs = []
-            seen = set()
-            for cand in sorted(group, key=lambda r: (-r["performance"], r["source"])):
-                key = (cand["performance"], cand["source"])
-                if key in seen:
-                    continue
-                seen.add(key)
-                dup_pairs.append(key)
-        cell[effort] = {
-            "performance": best["performance"],
-            "source": best["source"],
-            "duplicates": dup_pairs,
-        }
+        cell[effort] = dict(_epoch_figure([rec["row"] for rec in group]),
+                            lanes=sorted({name for rec in group for name in rec["lanes"]}))
     return cell
-
-
-def effort_attributes(measured_effort, lane_effort):
-    """Whether a figure measured at `measured_effort` is this lane's figure.
-
-    The whole of the attribution rule, in one place: equality, and `unknown`
-    matching nothing, because a source that did not state an effort has not
-    said which lane it measured. The report, the wizard and the page all read
-    it from here, so the page can never disagree with the decision the wizard
-    offers (the reason `carry.dominating_row` is shared rather than copied).
-    """
-    if not lane_effort:
-        return False
-    return effort_cell_key(measured_effort) == str(lane_effort)
-
-
-def lane_figure(cell, lane_effort):
-    """The one figure in a cell a lane may claim, or None."""
-    for effort, figure in (cell or {}).items():
-        if effort_attributes(effort, lane_effort):
-            out = dict(figure)
-            out["effort"] = effort
-            return out
-    return None
 
 
 def model_figure(cell, lane_efforts):
@@ -417,7 +318,9 @@ def sort_report_rows(items):
     return sorted(items, key=key)
 
 
-def build_epoch_section(models, matched):
+def build_epoch_section(models, records):
+    """The model-level Epoch view: `records` holds each catalog model's
+    evidence records, its Model's rows at any effort."""
     scores_by_bench = {b: {} for b in EPOCH_BENCHMARKS}
     cells_by_model = {}
     figures_by_model = {}
@@ -425,7 +328,8 @@ def build_epoch_section(models, matched):
         lane_efforts = rec["efforts"]
         cells = {}
         for bench in EPOCH_BENCHMARKS:
-            cell = collect_epoch_cells(matched.get((model, bench), []))
+            cell = collect_epoch_cells([r for r in records.get(model) or ()
+                                        if r["row"].get("benchmark") == bench])
             if cell:
                 cells[bench] = cell
         cells_by_model[model] = cells
@@ -453,66 +357,31 @@ def build_epoch_section(models, matched):
     return sort_report_rows(items)
 
 
-def load_effort_rows(paths):
-    """Every row from one accepted-rows file or several, in order."""
-    rows = []
-    for path in paths or ():
-        full = os.path.abspath(os.path.expanduser(path))
-        try:
-            doc = json.loads(read_text_file(full))
-        except OSError as e:
-            raise BenchError(f"cannot read effort rows: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BenchError(f"effort rows {path}: invalid JSON: {e}") from e
-        if not isinstance(doc, list):
-            raise BenchError(f"effort rows {path}: expected a JSON list")
-        rows.extend(doc)
-    return rows
+def aa_component(row):
+    """Whether an accepted row is an Artificial Analysis component figure:
+    its source, a benchmark, a number, and never the composite index."""
+    return (isinstance(row, dict) and row.get("source") == AA_SOURCE and not row.get("composite")
+            and isinstance(row.get("benchmark"), str) and bool(row["benchmark"].strip())
+            and as_number(row.get("score")) is not None)
 
 
-def aa_component_rows(effort_rows, lanes_doc):
-    """The Artificial Analysis component rows that name a lane model.
-
-    Rows of other sources, the composite index, and rows naming nobody's
-    model are left out; a row's model is resolved by the catalog, with its
-    effort, so an agy family member is found by the effort it carries.
-    """
-    out = []
-    for row in effort_rows or []:
-        if not isinstance(row, dict) or row.get("source") != AA_SOURCE or row.get("composite"):
-            continue
-        benchmark = row.get("benchmark")
-        score = as_number(row.get("score"))
-        if not isinstance(benchmark, str) or not benchmark.strip() or score is None:
-            continue
-        effort = row.get("effort")
-        # every harness that runs the model gets the row (any-harness ticket 31)
-        for model in published_names.resolve_published_models(row.get("model"), lanes_doc,
-                                                               effort=effort):
-            out.append({
-                "model": model,
-                "effort": effort_cell_key(effort),
-                "benchmark": benchmark,
-                "score": score,
-                "cost_usd": as_number(row.get("cost_usd")),
-            })
-    return out
-
-
-def aa_measurements(component_rows):
+def aa_measurements(records):
     """({model: {effort: {benchmark: score}}}, {(model, effort): cost per task},
-    [benchmark, in the order the rows first name them]). The first row for one
-    model, effort and benchmark is the figure; effort.py has already de-duplicated."""
+    {(model, effort): the Lanes that claim those figures}). `records` holds
+    each catalog model's evidence records of AA component rows. The first row
+    for one model, effort and benchmark is the figure; effort.py has already
+    de-duplicated."""
     scores = defaultdict(lambda: defaultdict(dict))
-    costs = {}
-    benchmarks = []
-    for row in component_rows:
-        scores[row["model"]][row["effort"]].setdefault(row["benchmark"], row["score"])
-        if row["cost_usd"] is not None:
-            costs.setdefault((row["model"], row["effort"]), row["cost_usd"])
-        if row["benchmark"] not in benchmarks:
-            benchmarks.append(row["benchmark"])
-    return scores, costs, benchmarks
+    costs, lanes = {}, defaultdict(set)
+    for model, recs in records.items():
+        for rec in recs:
+            row, effort = rec["row"], rec["effort"]
+            scores[model][effort].setdefault(row["benchmark"], as_number(row["score"]))
+            cost = as_number(row.get("cost_usd"))
+            if cost is not None:
+                costs.setdefault((model, effort), cost)
+            lanes[(model, effort)].update(rec["lanes"])
+    return scores, costs, lanes
 
 
 def aa_model_effort(measured, lane_efforts):
@@ -528,9 +397,10 @@ def aa_model_effort(measured, lane_efforts):
     return None
 
 
-def build_aa_models(models, scores, costs, benchmarks):
-    """{model: {cols, effort, cost_usd, mean, mean_s} or None}: one figure per
-    model per column, all measured at one effort, ranked model against model."""
+def build_aa_models(models, scores, costs, benchmarks, lanes):
+    """{model: {cols, effort, cost_usd, mean, mean_s, lanes} or None}: one
+    figure per model per column, all measured at one effort, ranked model
+    against model, naming the Lanes that claim the figures."""
     chosen = {}
     for model, rec in models.items():
         effort = aa_model_effort(scores.get(model) or {}, rec["efforts"])
@@ -554,15 +424,16 @@ def build_aa_models(models, scores, costs, benchmarks):
             "cost_usd": costs.get((model, effort)),
             "mean": mean,
             "mean_s": mean_s,
+            "lanes": sorted(lanes.get((model, effort)) or ()),
         }
     return out
 
 
-def build_notes(models, epoch_items, aa_models, aa_skipped):
+def build_notes(models, epoch_items, aa_models, aa_skipped, epoch_skipped=None):
     notes = []
     epoch_by_model = {item["model"]: item for item in epoch_items}
     for model in models:
-        if epoch_by_model[model]["gap"]:
+        if epoch_skipped is None and epoch_by_model[model]["gap"]:
             notes.append(f"{model} absent from Epoch AI")
         if aa_skipped is None and aa_models.get(model) is None:
             notes.append(f"{model} absent from Artificial Analysis")
@@ -608,8 +479,45 @@ def build_notes(models, epoch_items, aa_models, aa_skipped):
     return notes
 
 
-def aa_source_line(effort_rows):
-    """Where the AA rows came from: the page URLs and the dates observed."""
+def origin_phrase(origin):
+    """Where one source's rows came from, from its Origin in the Benchmark
+    snapshot: "fetched <date of the fetch>" (UTC) or "read from <file>"; None
+    for a source with no Origin or no rows. Rows kept because no fresh ones
+    could be had say why."""
+    if origin is None or origin.how == "none":
+        return None
+    if origin.how in ("fetched", "cache"):
+        stamp = time.time() - (origin.age or 0.0)
+        phrase = f"fetched {datetime.fromtimestamp(stamp, timezone.utc).strftime('%Y-%m-%d')}"
+        if origin.failure:
+            phrase += f" (a newer fetch failed: {origin.failure})"
+        return phrase
+    if origin.how == "file":
+        return f"read from {origin.path}"
+    # "rows": the named --effort-rows, when the source's adapter gave none
+    return "read from --effort-rows" + (f" ({origin.failure})" if origin.failure else "")
+
+
+def skipped_line(name, skipped, origin=None):
+    """A skipped source's line: why it has no rows, the failed fetch or the
+    unreadable file when its Origin says so."""
+    why = origin.failure if origin is not None and origin.how == "none" and origin.failure else skipped
+    return f"{name}: skipped ({why})"
+
+
+def epoch_source_line(skipped, origin=None):
+    """Epoch's line: where its rows came from, or why it was skipped."""
+    if skipped is not None:
+        return skipped_line("Epoch AI", skipped, origin)
+    phrase = origin_phrase(origin)
+    return f"Source: Epoch AI, Benchmarking Hub, {EPOCH_URL}, CC-BY 4.0" + (f", {phrase}" if phrase else "")
+
+
+def aa_source_line(effort_rows, origin=None, skipped=None):
+    """Artificial Analysis's line: the page URLs, the dates observed and, when
+    it has an Origin, where its rows came from; or why it was skipped."""
+    if skipped is not None:
+        return skipped_line("Artificial Analysis", skipped, origin)
     urls, dates = [], []
     for row in effort_rows or []:
         if isinstance(row, dict) and row.get("source") == AA_SOURCE:
@@ -619,34 +527,34 @@ def aa_source_line(effort_rows):
                 dates.append(row["observed"])
     where = ", ".join(urls) if urls else "https://artificialanalysis.ai"
     when = f", observed {', '.join(sorted(dates))}" if dates else ""
-    return f"Source: Artificial Analysis, {where}, per-effort rows accepted by effort.py aa{when}"
+    phrase = origin_phrase(origin)
+    return (f"Source: Artificial Analysis, {where}, per-effort rows accepted by effort.py aa{when}"
+            + (f", {phrase}" if phrase else ""))
 
 
-def render_report(
-    date,
-    epoch_table,
-    aa_table,
-    aa_skipped,
-    notes,
-    aa_source=None,
-):
+def render_report(date, epoch_table, aa_table, notes, epoch_source, aa_source):
+    """The Markdown report. `epoch_source` and `aa_source` are each source's
+    line; a source whose table is None was skipped, and its line stands in
+    its section."""
     lines = [
         f"# Lane benchmark ranking {date}",
         "",
         "This report is evidence for the human's tier edits and is read by no script.",
         "",
-        f"Source: Epoch AI, Benchmarking Hub, {EPOCH_URL}, CC-BY 4.0, fetched {date}",
+        epoch_source,
+        aa_source,
+        "",
+        "## Epoch AI",
+        "",
+        epoch_table if epoch_table is not None else epoch_source,
+        "",
+        "## Artificial Analysis",
+        "",
+        aa_table if aa_table is not None else aa_source,
+        "",
+        "## Gaps and notes",
+        "",
     ]
-    if aa_skipped is None:
-        lines.append(aa_source or aa_source_line(None))
-    else:
-        lines.append(f"Artificial Analysis: skipped ({aa_skipped})")
-    lines.extend(["", "## Epoch AI", "", epoch_table, "", "## Artificial Analysis", ""])
-    if aa_skipped is None:
-        lines.append(aa_table)
-    else:
-        lines.append(f"Artificial Analysis: skipped ({aa_skipped})")
-    lines.extend(["", "## Gaps and notes", ""])
     if notes:
         for note in notes:
             lines.append(f"- {note}")
@@ -656,8 +564,7 @@ def render_report(
     return "\n".join(lines)
 
 
-def build_lane_section(lanes_doc, collected_models, aa_skipped, aa_scores=None, aa_costs=None,
-                       aa_benchmarks=()):
+def build_lane_section(lanes_doc, epoch, accepted, aa_skipped, aa_benchmarks=()):
     """One record per catalog lane, holding only the figures measured at that
     lane's own effort, and the AA columns some lane has a figure for.
 
@@ -666,31 +573,29 @@ def build_lane_section(lanes_doc, collected_models, aa_skipped, aa_scores=None, 
     mean rank and its `n=` count that lane's own figures, so it is a mean of
     measurements that could have happened together. A lane whose model was
     never measured at its effort has an empty record, which is the honest
-    answer and not the same as a model nobody measured. Artificial Analysis
-    measures most models at every effort (ticket 19), so its figures are
-    attributed per lane by the same rule, `effort_attributes`.
+    answer and not the same as a model nobody measured. Its figures are its
+    Lane evidence (`LaneEvidence.lane_rows`) on the Epoch rows and on the
+    accepted rows, the one attribution rule every reader shares.
     """
-    aa_scores = aa_scores or {}
-    aa_costs = aa_costs or {}
     lanes = {}
     for lane_name, lane in (lanes_doc.get("lanes") or {}).items():
         model = lane.get("model")
         effort = lane.get("effort")
-        rec = collected_models.get(model)
+        own = epoch.lane_rows(lane_name)
         cells = {}
+        for bench in EPOCH_BENCHMARKS:
+            rows = [r for r in own if r.get("benchmark") == bench]
+            if rows:
+                cells[bench] = dict(_epoch_figure(rows), effort=effort_cell_key(effort))
         aa = None
-        if rec:
-            epoch_cells = (rec.get("epoch") or {}).get("cells") or {}
-            for bench in EPOCH_BENCHMARKS:
-                figure = lane_figure(epoch_cells.get(bench), effort)
-                if figure:
-                    cells[bench] = figure
-        if aa_skipped is None:
-            for measured, cols in (aa_scores.get(model) or {}).items():
-                if cols and effort_attributes(measured, effort):
-                    aa = {"cols": dict(cols), "effort": effort,
-                          "cost_usd": aa_costs.get((model, measured))}
-                    break
+        rows = [r for r in accepted.lane_rows(lane_name) if aa_component(r)]
+        if aa_skipped is None and rows:
+            cols = {}
+            for row in rows:
+                cols.setdefault(row["benchmark"], as_number(row["score"]))
+            cost = next((as_number(r.get("cost_usd")) for r in rows
+                         if as_number(r.get("cost_usd")) is not None), None)
+            aa = {"cols": cols, "effort": effort, "cost_usd": cost}
         lanes[lane_name] = {"model": model, "effort": effort, "cells": cells, "aa": aa}
 
     # ranks compare lane against lane, each at its own effort, so a rank is
@@ -756,7 +661,7 @@ def group_lanes(names, lanes_doc):
     lanes = (lanes_doc or {}).get("lanes") or {}
     groups = {}
     for name in names:
-        groups.setdefault(carry.model_of(lanes.get(name)), []).append(name)
+        groups.setdefault(lane_evidence.model_identity(lanes.get(name)), []).append(name)
     out = []
     for members in groups.values():
         out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
@@ -771,8 +676,8 @@ def bench_order_key(bench, name, lanes_doc=None):
     mean = rec.get("mean") if rec else None
     if mean is None and rec:
         lanes = (lanes_doc or {}).get("lanes") or {}
-        group = carry.model_of(lanes.get(name))
-        has_epoch = any(carry.model_of(lane) == group
+        group = lane_evidence.model_identity(lanes.get(name))
+        has_epoch = any(lane_evidence.model_identity(lane) == group
                         and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
                         for other, lane in lanes.items())
         if not has_epoch:
@@ -852,66 +757,94 @@ def unmatched_message(unmatched, width=79):
     return head + ", ".join(shown) + (f" +{more} more" if more else "")
 
 
-def collect(lanes_doc, epoch_csv=None, effort_rows=None):
-    """Collect benchmark data for the report and interactive consumers.
+def collect(lanes_doc, epoch_rows=None, effort_rows=None):
+    """Collect benchmark data for the report and interactive consumers. Takes
+    rows and acquires nothing: where they came from is the Benchmark
+    snapshot's (bench_snapshot.py).
 
-    `effort_rows` are accepted rows from effort.py, any mix of sources; only
-    the `aa` rows are read here. Without any, Artificial Analysis is skipped
-    with a reason, the way a missing source always was.
+    `epoch_rows` are the snapshot's Epoch rows; with None, Epoch has no
+    figures and is reported skipped, and every Artificial Analysis column
+    stays. `effort_rows` are accepted rows from effort.py, any mix of sources;
+    only the `aa` rows are read here. Without any, Artificial Analysis is
+    skipped with a reason, the way a missing source always was.
+
+    One `LaneEvidence` for the Epoch rows and one for the accepted rows decide
+    which rows are whose. A catalog model's view reads every record of its
+    Model (its `model_key`), context at any effort; a Lane's reads its
+    `lane_rows`; and each model figure names the Lanes that claim it.
     """
     models = catalog_models(lanes_doc["lanes"])
-    epoch_rows = load_epoch(epoch_csv)
-    matched = match_epoch_rows(epoch_rows, models)
-    epoch_items = build_epoch_section(models, matched)
+    epoch = lane_evidence.LaneEvidence(lanes_doc, epoch_rows)
+    epoch_skipped = EPOCH_NO_ROWS if epoch_rows is None else None
+    accepted = lane_evidence.LaneEvidence(lanes_doc, effort_rows)
+    keys = {model: epoch.identify(model)["model_key"] for model in models}
+
+    def of_model(records):
+        return {model: [r for r in records if key is not None and r["model_key"] == key]
+                for model, key in keys.items()}
+
+    epoch_items = build_epoch_section(models, of_model(epoch.records()))
 
     given = any(isinstance(r, dict) and r.get("source") == AA_SOURCE for r in (effort_rows or []))
     aa_skipped = None if given else AA_NO_ROWS
-    aa_scores, aa_costs, aa_benchmarks = aa_measurements(aa_component_rows(effort_rows, lanes_doc))
-    aa_models = (build_aa_models(models, aa_scores, aa_costs, aa_benchmarks)
+    components = [rec for rec in accepted.records() if aa_component(rec["row"])]
+    # the columns, in the order the rows that name a catalog model first name them
+    aa_benchmarks = []
+    for rec in components:
+        if (rec["model_key"] is not None and rec["model_key"] in keys.values()
+                and rec["row"]["benchmark"] not in aa_benchmarks):
+            aa_benchmarks.append(rec["row"]["benchmark"])
+    aa_scores, aa_costs, aa_lanes = aa_measurements(of_model(components))
+    aa_models = (build_aa_models(models, aa_scores, aa_costs, aa_benchmarks, aa_lanes)
                  if aa_skipped is None else {model: None for model in models})
 
-    notes = build_notes(models, epoch_items, aa_models, aa_skipped)
+    notes = build_notes(models, epoch_items, aa_models, aa_skipped, epoch_skipped)
     epoch_by_model = {item["model"]: item for item in epoch_items}
     collected_models = {}
     for model, rec in models.items():
-        epoch = epoch_by_model[model]
+        epoch_item = epoch_by_model[model]
         collected_models[model] = {
             "lanes": sorted(rec["lanes"]),
-            "lane_effort": epoch["lane_effort"],
+            "lane_effort": epoch_item["lane_effort"],
             "lane_efforts": list(rec["efforts"]),
             "epoch": {
-                "cells": epoch["cells"],
-                "mean": epoch["mean"],
-                "mean_s": epoch["mean_s"],
+                "cells": epoch_item["cells"],
+                "mean": epoch_item["mean"],
+                "mean_s": epoch_item["mean_s"],
             },
             # cols, the effort they were all measured at, cost per task at that
-            # effort, and the model-against-model mean rank; None when AA
-            # measured the model at no effort that can stand for it
+            # effort, the model-against-model mean rank and the Lanes that
+            # claim them; None when AA measured the model at no effort that can
+            # stand for it
             "aa": aa_models.get(model),
         }
-    lanes, aa_columns = build_lane_section(
-        lanes_doc, collected_models, aa_skipped, aa_scores, aa_costs, aa_benchmarks)
+    lanes, aa_columns = build_lane_section(lanes_doc, epoch, accepted, aa_skipped, aa_benchmarks)
     return {
         "models": collected_models,
         "lanes": lanes,
         "epoch_benchmarks": list(EPOCH_BENCHMARKS),
         "aa_columns": aa_columns,
         "aa_skipped": aa_skipped,
+        "epoch_skipped": epoch_skipped,
         "notes": notes,
     }
 
 
-def format_collection(data, effort_rows=None, date=None):
-    """Markdown report from a collect() result. Shared by the CLI and plain setup."""
-    epoch_table = epoch_table_from_collection(data)
-    aa_table = None if data["aa_skipped"] is not None else aa_table_from_collection(data)
+def format_collection(data, snapshot=None, date=None):
+    """Markdown report from a collect() result and the Benchmark snapshot its
+    rows came from: each source's line says where from its `Origin`. Shared
+    by the CLI and plain setup."""
+    origins = snapshot.origins if snapshot is not None else {}
+    epoch_skipped = data.get("epoch_skipped")
+    aa_skipped = data["aa_skipped"]
     return render_report(
         date or utc_today(),
-        epoch_table,
-        aa_table,
-        data["aa_skipped"],
+        None if epoch_skipped is not None else epoch_table_from_collection(data),
+        None if aa_skipped is not None else aa_table_from_collection(data),
         data["notes"],
-        aa_source=aa_source_line(effort_rows),
+        epoch_source_line(epoch_skipped, origins.get(bench_snapshot.EPOCH)),
+        aa_source_line(snapshot.effort_rows if snapshot is not None else None,
+                       origins.get(bench_snapshot.AA), aa_skipped),
     )
 
 
@@ -1084,153 +1017,25 @@ def cost_basis(source, benchmark=None, sources=None, boards=None):
     return "cost as published; not comparable across sources"
 
 
-def _canonical_model(published, models):
-    """The one lane model a row is drawn and grouped under when several
-    harnesses run the model it names: the model whose slug the name matches
-    whole (`claude-opus-5-5`, one model at every effort) before a member that
-    carries the effort in its slug (`claude-opus-5-5-high` on agy)."""
-    key = published_names.normalize_name(published)
-    whole = [m for m in models if published_names.normalize_name(m) == key]
-    return (whole or list(models))[0]
+# The fields a display record takes from `LaneEvidence.records`: which Model
+# the row names and which Lanes claim it, decided once, there.
+EVIDENCE_FIELDS = ("published", "key", "effort", "model_key", "lane_model", "identity",
+                   "identity_reason", "candidates", "lane_models", "model_lanes", "lanes",
+                   "attributed")
 
 
-def identity_of(published, lanes_doc, effort=None):
-    """Lane model a printed name denotes, or an unresolved reason.
-
-    Uses the catalog mapping and never guesses. Conflicting family members and
-    a name nobody runs stay unresolved, with the candidates that collided.
-
-    A model two harnesses run resolves on each (`resolve_published_models`):
-    `lane_models` names every one, so every harness's lanes get the row, and
-    `lane_model` is the one the row is grouped under (`_canonical_model`).
-    Resolving against the catalog as one pool gave a row only to the agy
-    member at its effort, so Claude Code's Opus lanes had no rows at all.
-    """
-    resolved = published_names.resolve_published_models(published, lanes_doc, effort=effort)
-    if resolved:
-        return {
-            "lane_model": _canonical_model(published, resolved),
-            "lane_models": list(resolved),
-            "identity": "resolved",
-            "identity_reason": None,
-            "candidates": list(resolved),
-        }
-    key = published_names.normalize_name(published)
-    if not key:
-        return {
-            "lane_model": None,
-            "identity": "unresolved",
-            "identity_reason": "empty published name",
-            "candidates": [],
-        }
-    candidates = set()
-    for lane in (lanes_doc.get("lanes") or {}).values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if not isinstance(model, str) or not model.strip():
-            continue
-        normalized = published_names.normalize_name(model)
-        base, _suffix = published_names.strip_effort_suffix(normalized)
-        if key in (normalized, base):
-            candidates.add(model)
-    ordered = sorted(candidates)
-    if not ordered:
-        return {
-            "lane_model": None,
-            "identity": "unresolved",
-            "identity_reason": "no catalog model",
-            "candidates": [],
-        }
-    if effort:
-        reason = "conflicting identity: effort does not select one family member"
-    else:
-        reason = "conflicting identity: family members without an effort"
-    return {
-        "lane_model": None,
-        "identity": "unresolved",
-        "identity_reason": reason,
-        "candidates": ordered,
-    }
+def _evidence_fields(rec):
+    return {field: rec[field] for field in EVIDENCE_FIELDS}
 
 
-def inspect_targets(query, lanes_doc):
-    """Catalog models the query names, and the identity of the query itself."""
-    query = (query or "").strip()
-    ident = identity_of(query, lanes_doc)
-    models = []
-    for lane in (lanes_doc.get("lanes") or {}).values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if isinstance(model, str) and model.strip() and model not in models:
-            models.append(model)
-    if query in models:
-        return [query], ident
-    qn = published_names.normalize_name(query)
-    family = []
-    for model in models:
-        normalized = published_names.normalize_name(model)
-        base, _suffix = published_names.strip_effort_suffix(normalized)
-        if qn and qn in (normalized, base):
-            family.append(model)
-    if family:
-        return family, ident
-    if ident["lane_model"]:
-        return _ident_models(ident), ident
-    if ident["candidates"]:
-        return list(ident["candidates"]), ident
-    return [], ident
-
-
-def _ident_models(ident):
-    """Every lane model a resolved identity names, the grouping one first."""
-    if not ident.get("lane_model"):
-        return []
-    models = [ident["lane_model"]]
-    return models + [m for m in ident.get("lane_models") or () if m not in models]
-
-
-def _lanes_at(lanes_doc, models, effort):
-    """The lane names running any of `models` (one slug, or several) at `effort`."""
-    if isinstance(models, str):
-        models = [models]
-    names = []
-    for name, lane in (lanes_doc.get("lanes") or {}).items():
-        if not isinstance(lane, dict):
-            continue
-        if lane.get("model") in models and effort_attributes(effort, lane.get("effort")):
-            names.append(name)
-    return sorted(names)
-
-
-def _attributed(ident, effort, lanes_doc):
-    if ident.get("identity") != "resolved" or not ident.get("lane_model"):
-        return False
-    if not effort or effort_cell_key(effort) == UNKNOWN_EFFORT:
-        return False
-    return bool(_lanes_at(lanes_doc, _ident_models(ident), effort))
-
-
-def _record_from_effort_row(row, lanes_doc, sources=None, boards=None):
-    published = row.get("model")
-    effort = row.get("effort")
-    ident = identity_of(published, lanes_doc, effort=effort)
+def _record_from_effort_row(rec, sources=None, boards=None):
+    row = rec["row"]
     source = row.get("source") or "?"
     benchmark = row.get("benchmark") or "?"
-    measured = effort_cell_key(effort)
-    return {
+    return dict({
         "source": source,
         "benchmark": benchmark,
         "version": board_version(benchmark),
-        "published": published,
-        "effort": measured,
-        "lane_model": ident["lane_model"],
-        "identity": ident["identity"],
-        "identity_reason": ident["identity_reason"],
-        "candidates": list(ident["candidates"]),
-        "lane_models": _ident_models(ident),
-        "lanes": _lanes_at(lanes_doc, _ident_models(ident), measured),
         "score": as_number(row.get("score")),
         "score_unit": row.get("score_unit"),
         "cost_usd": as_number(row.get("cost_usd")),
@@ -1241,57 +1046,21 @@ def _record_from_effort_row(row, lanes_doc, sources=None, boards=None):
         "uncertain": bool(row.get("uncertain")),
         "composite": bool(row.get("composite")),
         "reasons": list(row.get("reasons") or []),
-        "attributed": _attributed(ident, measured, lanes_doc),
         "direction": board_direction(source, benchmark, boards=boards),
         "methodology_fetched": (board_about(source, benchmark, boards=boards) or {}).get("fetched"),
         "absent": False,
         "row": row,
-    }
+    }, **_evidence_fields(rec))
 
 
-def _record_from_epoch_row(row, lanes_doc, sources=None, boards=None):
-    published = row.get("model") or row.get("slug")
-    effort = row.get("effort")
-    slug = row.get("slug") or ""
-    ident = identity_of(published, lanes_doc, effort=effort)
-    if ident["identity"] != "resolved":
-        matched = None
-        slug_candidates = []
-        for lane in (lanes_doc.get("lanes") or {}).values():
-            model = (lane or {}).get("model")
-            if model and model_matches_slug(model, slug) and model not in slug_candidates:
-                slug_candidates.append(model)
-        if len(slug_candidates) == 1:
-            matched = slug_candidates[0]
-        elif len(slug_candidates) > 1:
-            ident = {
-                "lane_model": None,
-                "identity": "unresolved",
-                "identity_reason": "conflicting identity",
-                "candidates": sorted(slug_candidates),
-            }
-        if matched is not None:
-            ident = {
-                "lane_model": matched,
-                "identity": "resolved",
-                "identity_reason": None,
-                "candidates": [matched],
-            }
+def _record_from_epoch_row(rec, boards=None):
+    row = rec["row"]
     source = EPOCH_SOURCE
     benchmark = row.get("benchmark") or "?"
-    measured = effort_cell_key(effort)
-    return {
+    return dict({
         "source": source,
         "benchmark": benchmark,
         "version": board_version(benchmark, extra=row.get("benchmark_release_date")),
-        "published": published,
-        "effort": measured,
-        "lane_model": ident["lane_model"],
-        "identity": ident["identity"],
-        "identity_reason": ident["identity_reason"],
-        "candidates": list(ident["candidates"]),
-        "lane_models": _ident_models(ident),
-        "lanes": _lanes_at(lanes_doc, _ident_models(ident), measured),
         "score": as_number(row.get("performance")),
         "score_unit": None,
         "cost_usd": None,
@@ -1302,13 +1071,12 @@ def _record_from_epoch_row(row, lanes_doc, sources=None, boards=None):
         "uncertain": False,
         "composite": False,
         "reasons": [],
-        "attributed": _attributed(ident, measured, lanes_doc),
         "direction": board_direction(source, benchmark, boards=boards),
         "methodology_fetched": (board_about(source, benchmark, boards=boards) or {}).get("fetched"),
         "absent": False,
         "row": row,
-        "slug": slug,
-    }
+        "slug": row.get("slug") or "",
+    }, **_evidence_fields(rec))
 
 
 def _assign_standing(records):
@@ -1363,53 +1131,29 @@ def _assign_standing(records):
             }
 
 
-def evidence_records(effort_rows, lanes_doc):
-    """One evidence record per accepted mixed-source row, standing assigned."""
+def evidence_records(evidence):
+    """One display record per accepted row of `evidence` (a `LaneEvidence`
+    over accepted rows of any source), standing assigned. Which Model each
+    row names and which Lanes claim it are the evidence's records."""
     sources = load_sources()
     boards = load_boards()
-    records = []
-    for row in effort_rows or []:
-        if not isinstance(row, dict):
-            continue
-        records.append(_record_from_effort_row(row, lanes_doc, sources=sources, boards=boards))
+    records = [_record_from_effort_row(rec, sources=sources, boards=boards)
+               for rec in evidence.records()]
     _assign_standing(records)
     return records
 
 
-def epoch_records(epoch_csv, lanes_doc):
-    """Epoch CSV rows as evidence records. Requires a local path; never fetches."""
-    if not epoch_csv:
-        return []
-    sources = load_sources()
+def epoch_records(evidence):
+    """The Epoch rows of `evidence` (a `LaneEvidence` over Epoch rows) as
+    display records, standing assigned. Reads no file and never fetches."""
     boards = load_boards()
-    records = [
-        _record_from_epoch_row(row, lanes_doc, sources=sources, boards=boards)
-        for row in load_epoch(epoch_csv)
-    ]
+    records = [_record_from_epoch_row(rec, boards=boards) for rec in evidence.records()]
     _assign_standing(records)
     return records
 
 
 def _public_record(rec):
     return {k: v for k, v in rec.items() if k != "row"}
-
-
-def _record_matches_query(rec, query, targets):
-    if set(rec.get("lane_models") or ()).intersection(targets):
-        return True
-    if set(rec.get("candidates") or ()).intersection(targets):
-        return True
-    qn = published_names.normalize_name(query)
-    if qn and published_names.normalize_name(rec.get("published")) == qn:
-        return True
-    slug = rec.get("slug")
-    if slug:
-        for model in targets or ():
-            if model_matches_slug(model, slug):
-                return True
-        if query and model_matches_slug(query, slug):
-            return True
-    return False
 
 
 def _absent_for_family(all_recs, family_recs, targets):
@@ -1449,33 +1193,42 @@ def _absent_for_family(all_recs, family_recs, targets):
     return absent
 
 
-def inspect_model(query, lanes_doc, effort_rows=None, epoch_csv=None):
-    """Read-only all-board inspection. Never fetches; never writes policy."""
-    effort_recs = evidence_records(effort_rows, lanes_doc) if effort_rows is not None else []
-    epoch_recs = epoch_records(epoch_csv, lanes_doc) if epoch_csv else []
+def inspect_model(query, lanes_doc, effort_rows=None, epoch_rows=None):
+    """Read-only all-board inspection of the rows it is given (the accepted
+    rows and the Epoch rows of a Benchmark snapshot). It acquires nothing, so
+    it never fetches; it never writes policy.
+
+    The query names a Model the way a row's printed name does
+    (`LaneEvidence.identify`), so a member slug, the Model's own name and a
+    published name all show the whole Model: every row of it, at any effort,
+    and each of its Lanes with its `lane_rows`. A query that names no Model
+    shows the rows printing that name.
+    """
+    accepted = lane_evidence.LaneEvidence(lanes_doc, effort_rows)
+    epoch = lane_evidence.LaneEvidence(lanes_doc, epoch_rows)
     # standing stays per source; combining lists would mix Epoch with accepted
     # rows of the same printed board name, so they stay separate snapshots
-    all_recs = effort_recs + epoch_recs
-    targets, query_identity = inspect_targets(query, lanes_doc)
-    family_recs = [r for r in all_recs if _record_matches_query(r, query, targets)]
+    all_recs = evidence_records(accepted) + epoch_records(epoch)
+    query = (query or "").strip()
+    query_identity = accepted.identify(query)
+    model_key = query_identity["model_key"]
+    if model_key is not None:
+        family_recs = [r for r in all_recs if r["model_key"] == model_key]
+    else:
+        family_recs = [r for r in all_recs if query_identity["key"] and r["key"] == query_identity["key"]]
+    targets = query_identity["lane_models"]
     lane_view = []
     for name, lane in (lanes_doc.get("lanes") or {}).items():
         if not isinstance(lane, dict) or lane.get("model") not in targets:
             continue
-        lane_effort = lane.get("effort")
-        attributed = [
-            _public_record(r) for r in family_recs
-            if r.get("attributed")
-            and lane.get("model") in (r.get("lane_models") or ())
-            and effort_attributes(r.get("effort"), lane_effort)
-        ]
+        own = {id(row) for row in accepted.lane_rows(name) + epoch.lane_rows(name)}
         lane_view.append({
             "lane": name,
             "model": lane.get("model"),
-            "effort": lane_effort,
+            "effort": lane.get("effort"),
             "tier": lane.get("tier"),
             "enabled": lane.get("enabled", True),
-            "records": attributed,
+            "records": [_public_record(r) for r in all_recs if id(r["row"]) in own],
         })
     return {
         "query": query,
@@ -1490,9 +1243,11 @@ def inspect_model(query, lanes_doc, effort_rows=None, epoch_csv=None):
         "absent": _absent_for_family(all_recs, family_recs, targets),
         "references": load_reference_notes(),
         "fetched": False,
+        # whether accepted rows and an Epoch CSV were read; the keys are the
+        # JSON's, and inspection reads only named files
         "inputs": {
             "effort_rows": effort_rows is not None,
-            "epoch_csv": bool(epoch_csv),
+            "epoch_csv": epoch_rows is not None,
         },
     }
 
@@ -1635,15 +1390,16 @@ def format_inspection(doc):
 
 
 def run_model(args):
-    """Inspect one model. Stdout only; does not write the catalog or fetch."""
+    """Inspect one model. Stdout only; does not write the catalog or fetch:
+    it reads the named files only, and never the cache (decision H.4)."""
     config_dir = os.path.expanduser(args.config_dir or catalog.CONFIG_DIR)
     cat = catalog.load_catalog(config_dir=config_dir)
-    effort_rows = load_effort_rows(args.effort_rows) if args.effort_rows else None
+    snap = read_snapshot(args.effort_rows, args.epoch_csv, fetch=False)
     doc = inspect_model(
         args.model,
         {"lanes": cat["lanes"]},
-        effort_rows=effort_rows,
-        epoch_csv=args.epoch_csv,
+        effort_rows=snap.effort_rows,
+        epoch_rows=snap.epoch_rows,
     )
     if args.json:
         print(json.dumps(doc, indent=2, ensure_ascii=False))
@@ -1659,13 +1415,9 @@ def run(args):
     date = args.date or utc_today()
 
     cat = catalog.load_catalog(config_dir=config_dir)
-    effort_rows = load_effort_rows(args.effort_rows)
-    data = collect(
-        {"lanes": cat["lanes"]},
-        epoch_csv=args.epoch_csv,
-        effort_rows=effort_rows,
-    )
-    text = format_collection(data, effort_rows=effort_rows, date=date)
+    snap = read_snapshot(args.effort_rows, args.epoch_csv, fetch=True)
+    data = collect({"lanes": cat["lanes"]}, epoch_rows=snap.epoch_rows, effort_rows=snap.effort_rows)
+    text = format_collection(data, snap, date)
 
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(os.path.abspath(out_dir), f"{date}.md")
@@ -1710,7 +1462,8 @@ def main(argv=None):
     parser.add_argument("--config-dir", default=None, help="directory holding lanes.json")
     parser.add_argument("--out-dir", default=None, help="directory for <date>.md")
     parser.add_argument("--date", default=None, help="report date YYYY-MM-DD (UTC today)")
-    parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV; skip the fetch")
+    parser.add_argument("--epoch-csv", default=None,
+                        help="local Epoch CSV; else Epoch is fetched through the 24-hour cache")
     parser.add_argument("--effort-rows", action="append", default=[],
                         help="rows effort.py accepted (the aa rows are read); repeat for several files")
     args = parser.parse_args(argv)

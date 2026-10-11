@@ -85,7 +85,7 @@ read), `read`, `hold`, `release`, `cache_path`, `Snapshot`, `Readout` and `main`
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`,
   `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`): load,
   validate and project the effective catalog, and nothing else (ticket 26). It imports no other
-  delegate script but `harnesses` and `published_names`, so `rank` can import it with no cycle.
+  delegate script but `harnesses` and `lane_evidence`, so `rank` can import it with no cycle.
   `write_json` carries the link rule for every catalog document, `catalog fmt` included: a link to
   an existing file is written through and stays, and a dangling link or a loop is refused
   (`link_target`; deepening decision D.1).
@@ -142,9 +142,20 @@ read), `read`, `hold`, `release`, `cache_path`, `Snapshot`, `Readout` and `main`
 - `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
   edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
   `scripts/tier_lines.py`: the parser and summary line for bulk Tier lines; the Draft applies them.
-- `scripts/published_names.py`: the mapping from a benchmark source's printed model name to a
-  lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the
-  member of an agy slug family); `bench.py`, `tier_proposal.py` and the setup pre-screen read it.
+- `scripts/lane_evidence.py`: which benchmark rows belong to which
+  Lane. `LaneEvidence(lanes_doc, rows)` attributes every row once, by the Model its printed name
+  names (the lane field `published_as` names the Model, so it reaches every Harness that runs it)
+  and the effort it states; a row's printed names are its `model`, then its `slug` (an Epoch
+  row). `lane_rows`, `model_rows`, `available`, `unmatched`, `records` (one per row: its identity,
+  `model_key`, the Model's display name `lane_model`, `model_lanes` and exactly the `lanes` whose
+  `lane_rows` hold it) and `identify(name)` are lookups. The carry pre-screen, the Tier proposal,
+  the wizard, the report, model inspection and the benchmark page read one. `model_identity(lane)`
+  is the key "one Model" means across Harnesses (kiro's `claude-opus-5.5`, agy's
+  `claude-opus-5-5-high` and Claude Code's `claude-opus-5-5` are one), which the pages group Lanes
+  by. `published_as_conflict(lanes)` is `catalog.validate_lanes`'s check that one published name
+  denotes one Model: one name may sit on the Lanes of one Model on several Harnesses, never on two
+  Models, and no entry may be another Model's name. It is the one place a printed name is
+  normalized for Lane attribution, and it imports only `harnesses`.
 - `catalog.single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
   Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
   neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
@@ -289,17 +300,44 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
   ticket 19): the AA columns are the component benchmarks some lane has a figure for, with cost per
   task beside them and the composite never a column. `collect()` returns two views of the same
-  figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes`
-  (only the figures measured at that lane's own effort, with `mean`/`n` over those).
-  `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the
-  page both read it from there. Display order lives beside `collect` (`group_lanes`,
+  figures, from one `LaneEvidence` for the Epoch rows and one for the accepted rows: `models` (the
+  records of each catalog model's `model_key`, its Model at any effort, for comparing against
+  models nobody runs; each figure names the Lanes that claim it) and `lanes` (each Lane's
+  `lane_rows`, with `mean`/`n` over those). `collect(lanes_doc, epoch_rows=None, effort_rows=None)`
+  takes rows and acquires nothing; with no Epoch rows it keeps every AA column and reports Epoch
+  skipped (`epoch_skipped`). The report reads one Benchmark snapshot (`read_snapshot`): Epoch from
+  `--epoch-csv`, else from the web through the snapshot's 24-hour cache, and AA only from
+  `--effort-rows`. An Epoch that cannot be fetched is skipped with the reason on its line and the
+  report is still written; a named file that cannot be read exits 1 with "bench: <reason>".
+- `scripts/bench_snapshot.py`: the Benchmark snapshot, the one place benchmark rows are acquired.
+  `snapshot(row_files, aa=, epoch=, renew=)` takes one adapter per source: `web()` (the web through
+  the cache), `fixture(dir)` (`aa-accepted.json` and `epoch.csv`) or `local(path)` (one named file).
+  It returns the accepted rows, with the AA adapter's rows in place of the named AA rows, the Epoch
+  rows (each keeping `model` and `slug` for `LaneEvidence`), each source's `Origin` (fetched, cache,
+  file, rows or none, with its age and why it is not fresh), `errors` (one line per named input that
+  could not be read; a bad accepted-rows input refuses every accepted row) and `note`, the start
+  page's rows line. It never raises for a source, and `load_effort_rows` is the one accepted-rows
+  reader. The cache is `~/.cache/delegate/bench/`: `aa/` exactly as `effort.py aa` writes it and
+  `epoch/eci_benchmarks.csv` as served. Each artifact is fresh for 24 hours after its mtime; a fetch
+  writes into a temporary directory beside the source's and moves the artifact in last, only after
+  it parsed (`effort.aa_accept` extracted and checked it, or the CSV's header matched); a failed
+  fetch keeps the newest copy on hand, whatever its age, before the named rows. `renew` (the `r`
+  key) refetches AA only. `fixture` and `local` open no URL and never touch the cache. It imports
+  `effort` and nothing that routes; `effort.fetch_page` is still the one function that opens a URL.
+  Display order lives beside `collect` (`group_lanes`,
   `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
-  `scripts/carry.py` (ticket 27): `families()`, `beats()` and `decisions()`, which returns
+  `scripts/carry.py` (ticket 27): `beats()` and `decisions(lanes_doc, evidence)`, which returns
   structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
-  `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
-  reads accepted rows and optional local Epoch CSV without fetching. `evidence_records()` shares
-  identity, board/version standing, cost basis and uncertainty with HTML. Family evidence stays
-  separate from exact-effort Lane attribution; ambiguous candidates remain visible.
+  `format_collection(data, snapshot, date)` turns a `collect()` result into the Markdown report, and
+  each source's line says where its rows came from by its `Origin`: "fetched <date of the fetch>",
+  "read from <file>" or "skipped (<why>)". `bench.py model MODEL` reads only the named accepted
+  rows and Epoch CSV, never the cache, and never fetches: `inspect_model(query, lanes_doc,
+  effort_rows, epoch_rows)` takes rows and builds its `LaneEvidence`. The query names a Model as a
+  printed name does (`identify`), so a member slug shows the whole Model, and each of its Lanes
+  lists its `lane_rows`. `evidence_records(evidence)` and `epoch_records(evidence)` turn an
+  evidence's `records` into display records with board/version standing, cost basis and
+  uncertainty, shared with HTML. Model evidence at any effort stays separate from exact-effort
+  Lane attribution; a name no Model or two Models answer to stays visible as unresolved.
 - `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY,
   prompt-driven under `--plain` or pipes). Each page makes one decision per line: with the same
   `[x]`/`[ ]` box, the carry page selects a model at an effort and the four tier pages assign a
@@ -342,18 +380,30 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   shows what the launch scrub found — per harness its status, models listed, and the Lanes the
   refresh adds and removes — with the rows note, and `r` runs the scrub again through `setup.scan`,
   `setup.propose_generation` and `setup.collect_bench` (the callback `main` passes as `rescan`,
-  forcing the rows fetch past the 24 h cache), after which `Wizard._load` builds a new Draft and
-  the `--tiers-from` lines are applied again; it is offered on that page only, before any decision,
-  and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
+  renewing the Artificial Analysis rows past the 24 h cache and reading Epoch from it), after
+  which `Wizard._load` builds a new Draft and a new Lane evidence, and the `--tiers-from` lines are
+  applied again; it is offered on that page only, before any decision, and a failure is a message.
+  It writes this machine's catalog, `~/.config/delegate`,
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
-  opens, which reads its attribution and its lane order (`bench.lane_order`, `group_lanes`) from
-  `bench.py` and its domination rule (`carry.decisions`, `carry.dominating_row`) from `carry.py`
-  rather than deciding any of them again. HTML
-  carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline
-  JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with
-  its own filters and the frontier of what is shown, and only lays out what Python decided. Each
+  opens, which reads its lane order (`bench.lane_order`, `group_lanes`) from `bench.py`, its
+  records (`bench.evidence_records`, read once per render and drawn by the plots, the boards and
+  the rows tables) and each point's Lanes from one `LaneEvidence`, and the wizard's own verdicts
+  (`carry.decisions` on that evidence, asked once per render, never caught) rather than deciding
+  any of them again. Its rows table also lists the Benchmark snapshot's Epoch rows (`write` and
+  `render` take `epoch_rows`), as `bench.epoch_records` over their own `LaneEvidence`, in the same
+  columns; no plot, board or verdict reads them. Points group by the Model's display name, so an
+  agy Model's efforts are one sweep; the scores table names the Lanes `collect` says claim each
+  figure. Each Lane on a point carries its own verdict, a point is struck only when
+  every Lane on it is proposed off, and "beaten by" comes only from an off verdict on the board's
+  own source; two off Lanes on one point that lose to different efforts each get their own
+  arithmetic in the finding and their own competitor in the rows table. A point no Lane runs takes
+  its colour from the evidence's `model_lanes`, the Lanes on the Harnesses that run its effort.
+  HTML carries kind/source/competitor; reason prose is display-only. It embeds its
+  plot data as inline JSON; `assets/bench_page.js`, inlined beside it, draws one
+  score-against-cost plot per panel with its own filters and the frontier of what is shown, and
+  only lays out what Python decided. Each
   board shows what it measures, quoted from its source's methodology page with the URL beside it
   (`assets/boards.json`; a board with no entry says so and is never described from memory); an open
   table under the plots compares every board, and every evidence table sits collapsed below that.
@@ -408,13 +458,17 @@ review order; nothing is written before the confirm page's `y`. Switching the be
 `routing.json` edit.
 
 At start the wizard refreshes itself, so one command is one command (ticket 33).
-`setup.refresh_effort_rows` fetches the Artificial Analysis rows in process through
-`effort.run_aa` into `~/.cache/delegate/bench/aa/`, reuses a fetch under 24 hours
-old, and on a failure keeps the repo's rows with the reason in the line it returns;
-the fetched file replaces the AA file in the `--effort-rows` list, Terminal-Bench
-stays on the repo's rows, and `--fixture-dir` reads `aa-accepted.json` beside the
-harness fixtures instead, so a test touches no network and no cache. The fetch runs
-in a thread beside the harness probes. `discover.refresh_catalog` then proposes the
+`setup.scan` reads one Benchmark snapshot (`setup.read_benchmarks`) on a thread beside the harness
+probes and returns `(discovered, discovery_data, snapshot)`; launch, the `r` rescan, the plain
+report (`show_bench`), `collect_bench` and `propose_generation` read it. A live run reads both
+sources through the cache (`web()`); `--fixture-dir` reads `aa-accepted.json` and `epoch.csv`
+beside the harness fixtures; `--no-discover` reads only named files; `--epoch-csv` names Epoch's
+file, else Epoch comes from where AA does. The fetched AA rows replace only the named AA rows, so
+Terminal-Bench stays on the repo's rows. `r` renews AA and reads Epoch from the cache launch
+wrote, and a renew that fails keeps the rows launch read. The start page's rows line is the
+snapshot's `note`: both sources on one line, where each came from, then why either is not
+fresh; its `errors` join the TUI's first message, and `--plain` prints them.
+`discover.refresh_catalog` then proposes the
 current generation in memory and `setup_tui.refresh_lines` states it on the start
 page, one line per model. The save's Catalog commit gives every native lane in the
 catalog its agent file, for every profile that declares native Lanes, in the profile's
@@ -435,7 +489,8 @@ because a predecessor switched off at an effort judged that model, not this one
 (ticket 35, changing ticket 33). `o` writes the page again before opening it, from the
 Draft's `documents()["lanes"]` — the document the session started from, with the carry
 and Tier decisions made so far — so a lane carried on the carry page reaches the page
-(`Wizard.rewrite_bench_page`). The page's catalog key is its lane names, which no
+(`Wizard.rewrite_bench_page`), with the snapshot's Epoch rows, the rescan's after `r`.
+The page's catalog key is its lane names, which no
 screen changes, so tiers already drawn in the browser survive the rewrite.
 Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
 It starts from the catalog as read and proposes no generation (deepening D.6): it has
@@ -487,14 +542,18 @@ started in, at its starting place; Tier 1 requires Carry to switch off.
 - The carry page's domination rule is `carry.dominating_effort`: another effort of the same model,
   for no more money (`carry.beats`, which the Tier proposal's cost frontier also uses), beats the
   lane on more than half of the benchmarks one source scored both on.
-  Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is
-  a family key, not the model string (ticket 30): `carry.families(lanes_doc)` keys every
-  harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed,
-  because agy names each effort as its own model. The harness decides, never the spelling. That
-  family rule has one implementation, the adapter's `family` (`harnesses/agy.py`, reached through
-  `harnesses.family`, and per Lane through `carry.model_of`, which also groups the pages' rows),
-  which the agy adapter's `group` also groups its model listing with. `dominating_effort`,
-  `dominating_row` and `first_domination` take the map; without one every model is its own family.
+  Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model"
+  is the Lane's Model on its own Harness, at an effort that Harness runs:
+  `carry.decisions(lanes_doc, evidence)` compares a Lane's own rows (`LaneEvidence.lane_rows`)
+  with the rest of `LaneEvidence.model_rows`, which holds only efforts the Harness offers
+  (`offers_effort`), so Claude Code's Opus at xhigh switches off no agy Opus Lane and an effort
+  the grok CLI cannot run switches off no grok Lane. Its no-rows check reads `lane_rows`, and it
+  compares no efforts to attribute a row itself. The harness decides what one Model is, never the
+  spelling (ticket 30): agy names each effort as its own slug, and the adapter's `family`
+  (`harnesses/agy.py`, reached through `harnesses.family`) is the one implementation, which
+  `lane_evidence.model_identity` names a Model with (and `bench.group_lanes`, `bench_order_key`
+  and `bench_page._lane_list` group the pages' Lanes by), and the agy adapter's `group` groups its
+  model listing with.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
   `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
@@ -507,9 +566,10 @@ started in, at its starting place; Tier 1 requires Carry to switch off.
   otherwise auto-reject the approval an MCP tool call raises.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out
   of the relay's final message.
-- `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in
-  for the relays (its brief directive also crashes it with `crash=`, or replays a staged run
-  directory with `replay=`). Each script first moves to a fresh temporary directory with no Git
+- `tests/`: one test file per script, stdlib only, no network (`make test` points every proxy
+  variable at a closed local port, so a test that reaches the web fails); `tests/fake-ads/relay.mjs`
+  stands in for the relays (its brief directive also crashes it with `crash=`, or replays a staged
+  run directory with `replay=`). Each script first moves to a fresh temporary directory with no Git
   root above it, so the invoking checkout's own `.delegate/routing.json` never reaches a test.
 - `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate
   rank|run|dispatch|status|log|runs|cost|catalog|setup`). A user's harness constraint is `--harness

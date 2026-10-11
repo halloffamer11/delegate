@@ -265,7 +265,7 @@
 
   // `ordered` regrouped by model: each group sits where its first lane sat,
   // and lists its efforts from most to least. The same rule as
-  // setup_tui.group_lanes, applied here to an order only the page knows.
+  // bench.group_lanes, applied here to an order only the page knows.
   function groupLanes(ordered) {
     const groups = new Map();
     for (const lane of ordered) {
@@ -289,7 +289,7 @@
   // One line per decided lane, `<lane> <1-4|off>`: the placed lanes in the
   // review page's order, then the off lanes, which the review page does not
   // list, in benchmark order grouped by model. A lane not placed is not written.
-  // setup_tui.parse_tier_lines reads exactly this.
+  // tier_lines.parse_tier_lines reads exactly this.
   function tierLinesText(lanes, tiers) {
     const placed = lanes.filter((l) => TIERS.includes(tiers[l.name]));
     const off = lanes.filter((l) => tiers[l.name] === OFF).sort((a, b) => a.rank - b.rank);
@@ -313,7 +313,7 @@
   }
 
   // At least the score for no more money, and strictly better in one of the
-  // two: the pre-screen's comparison (setup_tui._beats), here across models.
+  // two: the pre-screen's comparison (carry.beats), here across models.
   function beats(o, q) {
     return o.score >= q.score && o.cost <= q.cost && (o.score > q.score || o.cost < q.cost);
   }
@@ -627,8 +627,11 @@
     } else {
       lines.push(["not in your catalog", "quiet"]);
     }
-    if (p.off) lines.push([`pre-screen proposes off: ${p.off}`, "off"]);
-    else if (p.beatenBy) lines.push([`${p.beatenBy} beats it on most of this source`, "quiet"]);
+    // each Lane's own verdict: a point two harnesses share can keep one Lane
+    // and propose the other off (bench_page._annotate)
+    for (const lane of p.lanes) {
+      if (lane.off) lines.push([`pre-screen proposes ${lane.name} off: ${lane.off}`, "off"]);
+    }
     if (p.weak) lines.push([`weak provenance: ${p.provenance}`, "flag"]);
     if (p.published && p.published !== p.name) lines.push([`published as ${p.published}`, "quiet"]);
     return lines;
@@ -906,7 +909,10 @@
         const lane = el("td", {}, null, tr);
         if (p.lanes.length) {
           el("span", { class: "mono" }, p.lanes.map((l) => l.name).join(", "), lane);
-          if (p.off) el("span", { class: "sub off" }, `proposed off: ${p.off}`, lane);
+          for (const l of p.lanes) {
+            const who = p.lanes.length > 1 ? `${l.name} ` : "";
+            if (l.off) el("span", { class: "sub off" }, `${who}proposed off: ${l.off}`, lane);
+          }
         } else {
           el("span", { class: "quiet" }, p.ours ? "no lane at this effort" : "not in catalog", lane);
         }

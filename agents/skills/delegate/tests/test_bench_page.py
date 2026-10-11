@@ -34,6 +34,7 @@ REAL_LANES = os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
+import bench_snapshot
 import carry
 import bench_page
 import catalog
@@ -41,6 +42,8 @@ import harnesses
 import setup_tui
 import tier_lines  # noqa: E402
 from catalog_draft import CatalogDraft  # noqa: E402
+import lane_evidence  # noqa: E402
+from lane_evidence import LaneEvidence  # noqa: E402
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
 NODE = shutil.which("node")
@@ -54,6 +57,11 @@ def record(name, ok, detail=""):
     else:
         fails += 1
         print(f"FAIL {name}: {detail}")
+
+
+def epoch_rows_of(path):
+    """The Epoch rows of a CSV, read as the Benchmark snapshot reads a named file."""
+    return bench_snapshot.snapshot((), epoch=bench_snapshot.local(path)).epoch_rows
 
 
 def remote_resource(html):
@@ -151,7 +159,7 @@ SWEEP += [
 
 # --- the basics ------------------------------------------------------------------
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
+    collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
     html = bench_page.render(collected, LANES)
     record("page from epoch fixture",
            "claude-fable-5-1" in html and "DeepSWE" in html and "98.0" in html
@@ -176,7 +184,7 @@ except Exception as e:
     record("page with bench=None names missing data", False, repr(e))
 
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
+    collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
     html = bench_page.render(collected, LANES, EFFORT_ROWS)
     record("page with per-effort rows carries every number and its provenance",
            "unlabelled" in html and "SWE Refactor Bench" in html and "uncertain" in html
@@ -190,7 +198,7 @@ except Exception as e:
 try:
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "bench.html")
-        collected = bench.collect(LANES, epoch_csv=FIXTURE)
+        collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
         returned = bench_page.write(path, collected, LANES, EFFORT_ROWS)
         with open(path, encoding="utf-8") as f:
             text = f.read()
@@ -209,7 +217,7 @@ except Exception as e:
     record("light and dark are both defined, and the toggle wins both ways", False, repr(e))
 
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     page = bench_page.render(collected, ASTRA, SWEEP)
 
     def inside_details(index):
@@ -316,7 +324,7 @@ except Exception as e:
 # --- the page is the evidence for the pre-screen, so it has to say the same -----
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
-    proposals = carry.decisions(ASTRA, SWEEP)
+    proposals = carry.decisions(ASTRA, LaneEvidence(ASTRA, SWEEP))
     off = sorted(name for name, decision in proposals.items()
                  if not decision["enabled"] and setup_tui.is_dominated_reason(decision))
     struck = [p for p in board_named(data_of(page), "Terminal-Bench 4.0")["points"] if p["kind"] == "lane_off"]
@@ -371,6 +379,175 @@ try:
            f"points={[(p['effort'], p['kind'], p.get('beatenBy')) for p in points]}")
 except Exception as e:
     record("the page marks a dominated agy effort the way it marks a codex one", False, repr(e))
+
+try:
+    # agy names the effort in the slug, so the page used to draw each effort as
+    # a model of its own, and the finding lost the step it is about
+    board = board_named(bench_page.plot_data(AGY_SWEEP, AGY_LANES), "B")
+    record("an agy Model's efforts are one sweep, so its finding shows the arithmetic",
+           [p["model"] for p in board["points"]] == ["gemini-3.8-flash", "gemini-3.8-flash"]
+           and "high scores 0.1 less than medium and costs $1 more (+100%)" in board["finding"],
+           f"models={[p['model'] for p in board['points']]} finding={board['finding']!r}")
+except Exception as e:
+    record("an agy Model's efforts are one sweep, so its finding shows the arithmetic", False, repr(e))
+
+try:
+    # the plots, the boards and the rows tables draw one annotation of the rows
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
+    real_records, calls = bench.evidence_records, []
+
+    def counted(*args, **kwargs):
+        calls.append(args)
+        return real_records(*args, **kwargs)
+
+    bench.evidence_records = counted
+    try:
+        bench_page.render(collected, ASTRA, SWEEP)
+    finally:
+        bench.evidence_records = real_records
+    record("render reads the evidence records once", len(calls) == 1, f"calls={len(calls)}")
+except Exception as e:
+    record("render reads the evidence records once", False, repr(e))
+
+try:
+    # H3: the Epoch rows are listed in the rows table, and nothing else on the
+    # page takes them. Epoch publishes no cost, so no Epoch row is a point, a
+    # board's step or carry's evidence.
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
+    without = bench_page.render(collected, ASTRA, SWEEP)
+    with_epoch = bench_page.render(collected, ASTRA, SWEEP, epoch_rows=epoch_rows_of(FIXTURE))
+
+    def boards_block(page):
+        return page[page.find("<summary>Each board, model by model"):page.find("<summary>Every row")]
+
+    def verdicts(page):
+        return re.findall(r'<p class="verdict">(.*?)</p>', page, re.S)
+
+    def rows_count(page):
+        return re.search(r'<summary>Every row, with its provenance <span class="count">(\d+) rows', page)
+
+    plotted = json.loads(json.dumps(bench_page.plot_data(SWEEP, ASTRA, bench=collected)))
+    record("the Epoch rows reach the rows table and never the plots, the boards or the verdicts",
+           data_of(with_epoch) == data_of(without) == plotted
+           and boards_block(with_epoch) == boards_block(without) != ""
+           and verdicts(with_epoch) == verdicts(without) != []
+           and int(rows_count(with_epoch).group(1)) == len(SWEEP) + 25
+           and int(rows_count(without).group(1)) == len(SWEEP),
+           f"rows={rows_count(with_epoch) and rows_count(with_epoch).group(1)} "
+           f"same_data={data_of(with_epoch) == data_of(without)}")
+except Exception as e:
+    record("the Epoch rows reach the rows table and never the plots, the boards or the verdicts",
+           False, repr(e))
+
+# any-harness ticket 31: Claude Code runs Opus at low to xhigh, agy at low to
+# high. A point both harnesses share is one Lane per harness, each with its own
+# verdict, and the page strikes it only when every Lane on it is off.
+OPUS_TWO_HARNESSES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        **{f"opus55-{e}@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": e,
+                                  "tier": 3, "meter": "claude-general"}
+           for e in ("low", "medium", "high", "xhigh")},
+        **{f"opus55-{e}@agy": {"harness": "agy", "model": f"claude-opus-5-5-{e}", "effort": e,
+                               "tier": 3, "meter": "agy-claude-gpt"}
+           for e in ("low", "medium", "high")},
+    },
+}
+OPUS_ROWS = [{"source": "aa", "model": "Claude Opus 5.5", "effort": e, "benchmark": b,
+              "score": s, "cost_usd": c, "uncertain": False}
+             for e, s, c in (("low", 0.40, 1.0), ("medium", 0.60, 0.9),
+                             ("high", 0.70, 2.0), ("xhigh", 0.80, 1.5))
+             for b in ("b1", "b2")]
+
+try:
+    data = bench_page.plot_data(OPUS_ROWS, OPUS_TWO_HARNESSES)
+    shared = {}
+    for name in ("b1", "b2"):
+        board = board_named(data, name)
+        points = {p["effort"]: p for p in board["points"]}
+        high, low = points["high"], points["low"]
+        verdicts = {lane["name"]: lane["off"] for lane in high["lanes"]}
+        shared[name] = (
+            high["kind"] == "lane" and high["off"] is None
+            and verdicts == {"opus55-high@agy": None, "opus55-high@claude": "xhigh wins on aa"}
+            and {lane["name"]: lane["kind"] for lane in high["lanes"]}
+            == {"opus55-high@agy": "not_dominated", "opus55-high@claude": "dominated"}
+            and low["kind"] == "lane_off" and low["beatenBy"] == "medium"
+            and all(lane["off"] == "medium wins on aa" and lane["competitor"] == "medium"
+                    and lane["source"] == "aa" for lane in low["lanes"])
+            and "opus55-high@claude" in board["finding"]
+            and "opus55-high@agy" not in board["finding"],
+            high, low["kind"], low["beatenBy"], board["finding"])
+    page = bench_page.render(None, OPUS_TWO_HARNESSES, OPUS_ROWS)
+    record("one Opus point both harnesses share strikes only the Lane carry proposes off",
+           all(ok for ok, *_ in shared.values())
+           and "opus55-high@agy" not in re.search(r'<p class="verdict">(.*?)</p>', page, re.S).group(1),
+           repr(shared))
+except Exception as e:
+    record("one Opus point both harnesses share strikes only the Lane carry proposes off", False, repr(e))
+
+try:
+    # Decision A.1: each proposed-off Lane is named with its own reason. With
+    # the xhigh rows first, Claude Code's high Lane loses to xhigh, which agy
+    # does not run, and agy's high Lane loses to medium: one point, two
+    # competitors, and neither Lane may be given the other's arithmetic.
+    rows = [{"source": "aa", "model": "Claude Opus 5.5", "effort": e, "benchmark": b,
+             "score": s, "cost_usd": c, "uncertain": False}
+            for e, s, c in (("xhigh", 0.90, 1.5), ("low", 0.40, 0.5),
+                            ("medium", 0.80, 1.0), ("high", 0.70, 2.0))
+            for b in ("b1", "b2")]
+    board = board_named(bench_page.plot_data(rows, OPUS_TWO_HARNESSES), "b1")
+    high = next(p for p in board["points"] if p["effort"] == "high")
+    page = bench_page.render(None, OPUS_TWO_HARNESSES, rows)
+    record("a shared point whose off Lanes lose to different efforts gives each its own arithmetic",
+           high["kind"] == "lane_off"
+           and {lane["name"]: lane["competitor"] for lane in high["lanes"]}
+           == {"opus55-high@agy": "medium", "opus55-high@claude": "xhigh"}
+           and "Proposed off: opus55-high@agy. high scores 0.1 less than medium and costs $1 more"
+           in board["finding"]
+           and "Proposed off: opus55-high@claude. high scores 0.2 less than xhigh and costs $0.5 more"
+           in board["finding"]
+           and "beaten by medium (opus55-high@agy), xhigh (opus55-high@claude)" in page,
+           board["finding"])
+except Exception as e:
+    record("a shared point whose off Lanes lose to different efforts gives each its own arithmetic",
+           False, repr(e))
+
+try:
+    # No Lane runs Opus at max, and agy cannot: the point is Claude Code's
+    # Model context only (the evidence's model_lanes), so it takes Claude
+    # Code's colour and not agy's.
+    rows = OPUS_ROWS + [{"source": "aa", "model": "Claude Opus 5.5", "effort": "max", "benchmark": "b1",
+                         "score": 0.85, "cost_usd": 3.0, "uncertain": False}]
+    board = board_named(bench_page.plot_data(rows, OPUS_TWO_HARNESSES), "b1")
+    top = next(p for p in board["points"] if p["effort"] == "max")
+    record("a point no Lane runs takes the colour of the Harnesses that run its effort",
+           top["kind"] == "own_other" and top["harness"] == ["claude"]
+           and top["meter"] == ["claude-general"],
+           repr({k: top[k] for k in ("kind", "harness", "meter")}))
+except Exception as e:
+    record("a point no Lane runs takes the colour of the Harnesses that run its effort", False, repr(e))
+
+try:
+    # The wizard runs the same pre-screen first, so a failure here is no new
+    # crash path; drawing no verdicts would be a page that disagrees with it.
+    real = carry.decisions
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("pre-screen broke")
+
+    carry.decisions = broken
+    try:
+        bench_page.render(None, OPUS_TWO_HARNESSES, OPUS_ROWS)
+        raised = None
+    except RuntimeError as e:
+        raised = str(e)
+    finally:
+        carry.decisions = real
+    record("a pre-screen failure stops the page instead of drawing no verdicts",
+           raised == "pre-screen broke", repr(raised))
+except Exception as e:
+    record("a pre-screen failure stops the page instead of drawing no verdicts", False, repr(e))
 
 try:
     missing = bench_page.render(None, LANES, None)
@@ -474,7 +651,7 @@ except Exception as e:
 
 # --- the trap: a per-model score is never a lane's score by default --------------
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     # the fixture measures fable at max; the only fable lane runs xhigh
     page = bench_page.render(collected, ASTRA, SWEEP)
     table = page[page.find('<table class="scores">'):page.find("</table>", page.find('<table class="scores">'))]
@@ -503,13 +680,17 @@ except Exception as e:
            False, repr(e))
 
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
-    doctored = copy.deepcopy(collected)
-    # the source stated no effort: `unknown` is the cell's key, not a value
-    cell = doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"]
-    doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"] = {
-        bench.UNKNOWN_EFFORT: dict(cell[next(iter(cell))])}
-    page = bench_page.render(doctored, LANES, None)
+    with tempfile.TemporaryDirectory() as td:
+        # the source stated no effort for sol on DeepSWE: its model_version has
+        # no `_high`, so `unknown` is the cell's key, and collect gives it no Lane
+        with open(FIXTURE, encoding="utf-8") as f:
+            text = f.read()
+        stated = "0.90,DeepSWE,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,"
+        unstated = os.path.join(td, "unstated.csv")
+        with open(unstated, "w", encoding="utf-8") as f:
+            f.write(text.replace(stated, stated.replace("_high", ""), 1))
+        collected = bench.collect(LANES, epoch_rows=epoch_rows_of(unstated))
+    page = bench_page.render(collected, LANES, None)
     table = page[page.find('<table class="scores">'):]
     sol = table[table.find("gpt-5.6-sol"):table.find("</tr>", table.find("gpt-5.6-sol"))]
     record("an unstated effort is attributed to no lane and says so",
@@ -523,20 +704,23 @@ try:
     # the shape after the attribution fix: a cell keyed by measured effort,
     # `unknown` a literal key, several figures on one benchmark, and the AA
     # effort carried through collect()
-    collected = bench.collect(LANES, epoch_csv=FIXTURE)
+    collected = bench.collect(LANES, epoch_rows=epoch_rows_of(FIXTURE))
     future = copy.deepcopy(collected)
     sol = future["models"]["gpt-5.6-sol"]
+    # each figure names the Lanes that claim it, as collect gives them
     sol["epoch"]["cells"]["DeepSWE"] = {
-        "high": {"performance": 0.90, "source": "f", "duplicates": 0},
-        "max": {"performance": 0.95, "source": "f", "duplicates": 0},
-        "unknown": {"performance": 0.47, "source": "f", "duplicates": 0},
+        "high": {"performance": 0.90, "source": "f", "duplicates": 0, "lanes": ["sol-high@codex"]},
+        "max": {"performance": 0.95, "source": "f", "duplicates": 0, "lanes": []},
+        "unknown": {"performance": 0.47, "source": "f", "duplicates": 0, "lanes": []},
     }
-    sol["epoch"]["cells"]["FrontierCode"] = {"xhigh": {"performance": 0.5, "source": "f", "duplicates": 0}}
+    sol["epoch"]["cells"]["FrontierCode"] = {"xhigh": {"performance": 0.5, "source": "f", "duplicates": 0,
+                                                       "lanes": []}}
     future["aa_skipped"] = None
     future["aa_columns"] = ["Coding Index"]
     for model, rec in future["models"].items():
         rec["aa"] = {"cols": {"Coding Index": 50.0}, "mean": None, "mean_s": "", "effort": None}
-    sol["aa"] = {"cols": {"Coding Index": 61.0}, "mean": None, "mean_s": "", "effort": "high"}
+    sol["aa"] = {"cols": {"Coding Index": 61.0}, "mean": None, "mean_s": "", "effort": "high",
+                 "lanes": ["sol-high@codex"]}
     future["lanes"] = {"sol-high@codex": {"cells": {}, "mean": 1.0, "mean_s": "1.0 (n=1)", "n": 1}}
     page = bench_page.render(future, LANES, None)
     table = page[page.find('<table class="scores">'):]
@@ -765,7 +949,7 @@ except Exception as e:
 
 # --- ticket 26: the page is where tiers are drawn ------------------------------------
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_rows=epoch_rows_of(FIXTURE))
     doc = copy.deepcopy(ASTRA)
     doc["lanes"]["astra-ultra@codex"] = dict(doc["lanes"]["astra-max@codex"], effort="ultra", enabled=False)
     page = bench_page.render(collected, doc, SWEEP)
@@ -876,7 +1060,8 @@ try:
             lane["effort"] = effort
             doc["lanes"][f"fable-{effort}@claude"] = lane
         doc["lanes"]["flash-low@agy"] = dict(LANES["lanes"]["flash-high@agy"], model="gemini-3.8-flash-low", effort="low")
-        lanes = [{"name": n, "group": carry.model_of(doc["lanes"][n]), "effort": doc["lanes"][n]["effort"]}
+        lanes = [{"name": n, "group": lane_evidence.model_identity(doc["lanes"][n]),
+                  "effort": doc["lanes"][n]["effort"]}
                  for n in sorted(doc["lanes"])]
         ordered = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy", "flash-low@agy"]
         tiers = {"sol-high@codex": 4, "fable-low@claude": 3, "fable-max@claude": 1, "flash-low@agy": 1}
@@ -1164,7 +1349,7 @@ try:
          "benchmark": "Nobody's board", "score": 9.0, "cost_usd": 1.0,
          "uncertain": False, "observed": "2026-09-11", "provenance": "unlabelled"},
     ]
-    records = bench.evidence_records(rows, LANES)
+    records = bench.evidence_records(LaneEvidence(LANES, rows))
     page = bench_page.render(None, LANES, rows)
     about = bench.board_about("aa", "AutomationBench")
     tb = bench.board_about("tbench", "Terminal-Bench 4.0")
@@ -1529,5 +1714,37 @@ try:
                repr(out["values"]))
 except Exception as e:
     record("36.10 the cheapest label goes above its dot, not over its link", False, repr(e))
+
+# The script names the Python it mirrors in its comments (`carry.beats`), so a
+# reader can check one against the other. A citation that names a module the
+# function does not live in sends that reader to the wrong file.
+try:
+    import ast
+    with open(bench_page.SCRIPT_PATH, encoding="utf-8") as f:
+        script = f.read()
+    comments = re.findall(r"//[^\n]*|/\*.*?\*/", script, re.S)
+    modules = {name[:-3] for name in os.listdir(DELEGATE_DIR) if name.endswith(".py")}
+    cited = sorted({(m.group(1), m.group(2)) for text in comments
+                    for m in re.finditer(r"\b([a-z_][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b", text)
+                    if m.group(1) in modules and m.group(2) != "py"})
+
+    def defined(module):
+        """The names a module defines itself, at its top level: an import is
+        not a definition."""
+        with open(os.path.join(DELEGATE_DIR, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        names = set()
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.Assign):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        return names
+
+    wrong = [f"{module}.{name}" for module, name in cited if name not in defined(module)]
+    record("every Python function bench_page.js cites lives where it says",
+           cited and not wrong, f"cited={cited} wrong={wrong}")
+except Exception as e:
+    record("every Python function bench_page.js cites lives where it says", False, repr(e))
 
 sys.exit(1 if fails else 0)

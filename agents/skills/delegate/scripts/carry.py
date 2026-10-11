@@ -5,21 +5,21 @@ One rule, read by the wizard (`setup_tui`), the benchmark page (`bench_page`)
 and the Tier proposal (`tier_proposal`), so the page never draws a verdict the
 wizard did not reach (ticket 27):
 
-- `families(lanes_doc)`: what "the same model" means, asked of each Lane's
-  harness (`harnesses.family`). agy names each effort as its own slug, so its
-  efforts are one family; every other harness's model is its own.
 - `beats(other, row)`: at least the score for no more money, and strictly
   better in one of the two. An unknown cost never beats and is never beaten.
-- `decisions(lanes_doc, effort_rows)`: one structured decision per Lane,
+- `decisions(lanes_doc, evidence)`: one structured decision per Lane,
   `{lane, enabled, kind, source, competitor}`. The wording is the renderers'
   (`bench.carry_reason`).
+
+Which rows are a Lane's, and which are its Model's on its own Harness, is
+`lane_evidence.LaneEvidence`'s question; the rule here compares efforts only
+inside the rows it is handed.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import harnesses  # noqa: E402
-import published_names  # noqa: E402
 
 KIND_DOMINATED = "dominated"
 KIND_RECORDED = "recorded"
@@ -40,51 +40,6 @@ def decision(lane, enabled, kind, source=None, competitor=None):
     }
 
 
-def model_of(lane):
-    """The family key a Lane's model groups under, asked of its harness: an agy
-    slug family (`gemini-3.8-flash-high`, `-low`) is one model at several
-    efforts; on any other harness the model is its own."""
-    lane = lane or {}
-    return harnesses.family(lane.get("harness"), lane.get("model") or "")[0]
-
-
-def families(lanes_doc):
-    """{lane model: the family key "the same model" means for the carry rule}.
-
-    On most harnesses a model is its own family, so the key is the model string.
-    A harness that carries the effort in the slug (agy) names each effort as its
-    own model (`gemini-3.8-flash-low`, `-medium`, `-high`); there the key is the
-    slug with its trailing effort removed, the adapter's `family`, the same
-    grouping discovery reports the harness's models under (ticket 30 of the
-    redesign). The harness decides, never the spelling, so a slug on another
-    harness that happens to end in an effort word is still one model of its own.
-
-    The key also names the harness. agy runs Opus (`claude-opus-5-5-high`) on
-    its own pool beside Claude Code's (`claude-opus-5-5`), and a lane is off
-    only when another effort its own harness runs beats it: agy offers no
-    xhigh, so Claude Code's Opus at xhigh is no reason to switch agy's Opus
-    off, nor the reverse (any-harness ticket 31).
-    """
-    out = {}
-    for lane in (lanes_doc.get("lanes") or {}).values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if not isinstance(model, str) or not model.strip():
-            continue
-        key = (lane.get("harness"), model_of(lane))
-        if key[1] != model or model not in out:
-            out[model] = key
-    return out
-
-
-def family_of(model, families=None):
-    """The family key a model compares under, or the model itself when the
-    caller passed no map: without one every model is its own family, which is
-    what every harness but agy does anyway."""
-    return (families or {}).get(model, model)
-
-
 def beats(other, row, cost="cost_usd"):
     """At least the score for no more money, and strictly better in one of the
     two. An unknown cost never beats and is never beaten. `cost` names the cost
@@ -95,9 +50,9 @@ def beats(other, row, cost="cost_usd"):
             and (other["score"] > row["score"] or other[cost] < row[cost]))
 
 
-def evidence_unavailable(effort_rows, decided=None):
+def evidence_unavailable(evidence, decided=None):
     """True when there was no per-effort evidence, as distinct from an empty proposal."""
-    if effort_rows is None:
+    if not evidence.available:
         return True
     if not decided:
         return False
@@ -136,8 +91,12 @@ def certain_effort_rows(effort_rows):
     return certain
 
 
-def dominating_effort(model, effort, source, certain, families=None):
-    """The effort of `model` that dominates `effort` inside one source, or None.
+def dominating_effort(own, rivals, source):
+    """The effort that dominates the Lane inside one source, or None.
+
+    `own` is the Lane's own certain rows and `rivals` the certain rows of its
+    Model's other efforts on its own Harness (`LaneEvidence.model_rows` less
+    `lane_rows`), so "the same model" is already settled when they arrive.
 
     Dominated means another effort of the same model beats it on more than half
     of the benchmarks that source scored both on. A source with one benchmark —
@@ -146,18 +105,13 @@ def dominating_effort(model, effort, source, certain, families=None):
     one noisy component in eight is not reason enough to switch a lane off: on
     the live page of 2026-09-11 that reading proposed twelve lanes off, nine of
     them on a single component.
-
-    "The same model" is the family key `families` gives, so an agy slug family
-    compares against itself; without a map every model is its own family.
     """
-    family = family_of(model, families)
     mine, theirs = {}, {}
-    for row in certain:
-        if family_of(row.get("model"), families) != family or row.get("source") != source:
-            continue
-        if row.get("effort") == effort:
+    for row in own:
+        if row.get("source") == source:
             mine.setdefault(row.get("benchmark"), row)
-        else:
+    for row in rivals:
+        if row.get("source") == source:
             theirs.setdefault(row["effort"], {}).setdefault(row.get("benchmark"), row)
     for other_effort, board in theirs.items():
         shared = [benchmark for benchmark in mine if benchmark in board]
@@ -167,58 +121,27 @@ def dominating_effort(model, effort, source, certain, families=None):
     return None
 
 
-def dominating_row(row, certain, families=None):
-    """The dominating effort's point on this row's own board, or None.
-
-    The judgement belongs to the effort over its whole source
-    (`dominating_effort`), so every point of a dominated effort is marked on
-    every board of that source, including a board where it happens to score
-    higher: the lane is off over the source, not over one chart.
-
-    Public because the benchmark page draws this rule: a point it shows hollow
-    has to be a point the pre-screen switched a lane off over, and two
-    implementations of one rule would eventually disagree in front of a human
-    trying to check the wizard's arithmetic. The page passes the same `families`
-    the pre-screen uses, so an agy competitor is found under its own slug.
-    """
-    other = dominating_effort(row.get("model"), row.get("effort"), row.get("source"),
-                              certain, families)
-    if other is None:
-        return None
-    family = family_of(row.get("model"), families)
-    board = (row.get("source"), row.get("benchmark"))
-    return next((r for r in certain
-                 if family_of(r.get("model"), families) == family and r.get("effort") == other
-                 and (r.get("source"), r.get("benchmark")) == board), None)
-
-
-def first_domination(lane, certain, families=None):
+def first_domination(own, rivals):
     """(effort, source) of the first source in which another effort dominates
-    this lane, else None."""
-    family = family_of(lane["model"], families)
+    the Lane whose own rows are `own`, else None."""
     sources = []
-    for row in certain:
-        if (family_of(row.get("model"), families) == family
-                and row.get("effort") == lane["effort"]):
-            if row.get("source") not in sources:
-                sources.append(row.get("source"))
+    for row in own:
+        if row.get("source") not in sources:
+            sources.append(row.get("source"))
     for source in sources:
-        other = dominating_effort(lane["model"], lane["effort"], source, certain, families)
+        other = dominating_effort(own, rivals, source)
         if other is not None:
             return other, source
     return None
 
 
-def decisions(lanes_doc, effort_rows):
+def decisions(lanes_doc, evidence):
     """The carry pre-screen (ticket 15 of the redesign): {lane name: decision}.
 
-    Each decision is `{lane, enabled, kind, source, competitor}`; the wizard,
-    the benchmark page and the report word it themselves (`bench.carry_reason`)
-    and never parse wording back."""
-    rows, _unmatched = published_names.resolve_effort_rows(lanes_doc, effort_rows)
-    certain = certain_effort_rows(rows)
-    fams = families(lanes_doc)
-    supplied = effort_rows is not None
+    `evidence` is the `lane_evidence.LaneEvidence` for this catalog and the
+    accepted rows. Each decision is `{lane, enabled, kind, source,
+    competitor}`; the wizard, the benchmark page and the report word it
+    themselves (`bench.carry_reason`) and never parse wording back."""
     out = {}
     for name, lane in lanes_doc["lanes"].items():
         if lane.get("effort") == "ultra":
@@ -232,19 +155,18 @@ def decisions(lanes_doc, effort_rows):
             enabled = bool(lane["enabled"])
             out[name] = decision(name, enabled, KIND_RECORDED)
             continue
-        found = first_domination(lane, certain, fams)
+        lane_rows = evidence.lane_rows(name)
+        mine = {id(row) for row in lane_rows}
+        certain = certain_effort_rows(evidence.model_rows(name))
+        found = first_domination([row for row in certain if id(row) in mine],
+                                 [row for row in certain if id(row) not in mine])
         if found is not None:
             other, source = found
             out[name] = decision(name, False, KIND_DOMINATED, source=source, competitor=other)
             continue
-        if not supplied:
+        if not evidence.available:
             out[name] = decision(name, True, KIND_UNAVAILABLE)
-        elif not any(
-            not row.get("uncertain")
-            and family_of(row.get("model"), fams) == family_of(lane["model"], fams)
-            and row.get("effort") == lane["effort"]
-            for row in rows
-        ):
+        elif not any(not row.get("uncertain") for row in lane_rows):
             out[name] = decision(name, True, KIND_NO_ROWS)
         else:
             out[name] = decision(name, True, KIND_NOT_DOMINATED)

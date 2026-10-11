@@ -157,7 +157,7 @@ def scan_imports_test(root):
     loads no module of the wizard to do it (deepening D2)."""
     cfg = config_dir(os.path.join(root, "a14"))
     fixtures = newer_fixtures(root)
-    wizard = ("setup", "setup_tui", "bench", "bench_page", "effort")
+    wizard = ("setup", "setup_tui", "bench", "bench_page", "bench_snapshot", "effort")
     code = (
         "import json, sys\n"
         f"sys.path.insert(0, {SCRIPTS!r})\n"

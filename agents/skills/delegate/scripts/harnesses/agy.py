@@ -1,6 +1,5 @@
 """Antigravity: `agy`, Google's CLI. Its effort is part of the model slug."""
 import json
-import published_names
 import re
 
 from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness, iso_time, run_cli
@@ -12,9 +11,9 @@ COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
 SUPERSEDED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
 # `gemini-3.8-flash-high` -> ("gemini-3.8-flash", "high"). Every effort word
-# delegate knows, longest first as `published_names.strip_effort_suffix` reads them, so
-# a `-xhigh` or `-max` slug joins its family instead of standing as a model of
-# its own.
+# delegate knows, longest first, so a `-xhigh` or `-max` slug joins its family
+# instead of standing as a model of its own. `lane_evidence.model_identity`
+# names a Lane's Model through `family`.
 _EFFORT_WORDS = "|".join(EFFORTS_LONGEST_FIRST)
 _SUFFIX = re.compile(rf"^(.+)-({_EFFORT_WORDS})$")
 # `Gemini 3.8 Flash (High)` -> `Gemini 3.8 Flash`
@@ -65,9 +64,9 @@ class Agy(Harness):
         own, with no effort: `(slug, None)`.
 
         One rule in one place. Discovery groups a harness listing with it
-        (`parse_models`) and the carry rule groups a lane's rows with it
-        (`carry.families`), so the wizard can never disagree with the models
-        discovery reported (ticket 30).
+        (`parse_models`) and `lane_evidence` names a Lane's Model with it, so
+        the wizard can never disagree with the models discovery reported
+        (ticket 30).
         """
         text = slug or ""
         found = _SUFFIX.match(text)

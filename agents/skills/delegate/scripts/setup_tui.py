@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Selectable terminal setup UI for delegate catalogs."""
 import copy
-import published_names
 import carry
+import lane_evidence
 import os
 import subprocess
 import textwrap
@@ -341,7 +341,7 @@ class Wizard:
                  lanes_path, routing_path, initial_message="",
                  bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
                  focus=None, refresh=None, rows_note="", rescan=None, tier_lines=None,
-                 clock=None, class_guide=None, queued=(), applied=()):
+                 clock=None, class_guide=None, queued=(), applied=(), epoch_rows=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         # every shipped Class is on the routing page, with the default Range
@@ -369,12 +369,14 @@ class Wizard:
         self.tier = None
         self._result = None
         self._width = 80
-        self._load(lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note)
+        self._load(lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note,
+                   epoch_rows)
         self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
         if self.focus:
             self._enter_focus()
 
-    def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note):
+    def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note,
+              epoch_rows):
         """Start from what one scrub found: the catalog with the current
         generation proposed (a focused screen gets the catalog as read, with
         none proposed), the benchmark data, the harnesses and their
@@ -383,6 +385,8 @@ class Wizard:
         self.lanes_doc = copy.deepcopy(lanes_doc)
         self.bench = bench
         self.effort_rows = effort_rows
+        # the snapshot's Epoch rows, which only the benchmark page lists
+        self.epoch_rows = epoch_rows
         self.discovered = set(discovered)
         self.discovery = discovery
         # what the refresh proposed before the first screen, and where the
@@ -391,8 +395,13 @@ class Wizard:
         self.rows_note = rows_note
         self.cursor = 0
         self.message = ""
-        _rows, self._unmatched = published_names.resolve_effort_rows(self.lanes_doc, effort_rows)
-        self._proposals = carry.decisions(self.lanes_doc, effort_rows)
+        # One evidence per scrub: the carry page, its unmatched line and the
+        # Tier proposal all read it, so none can claim a row another does not.
+        # The draft changes only `enabled`, `tier` and `order` after this, and
+        # the evidence does not read them.
+        self._evidence = lane_evidence.LaneEvidence(self.lanes_doc, effort_rows)
+        self._unmatched = self._evidence.unmatched()
+        self._proposals = carry.decisions(self.lanes_doc, self._evidence)
         self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
         # The full wizard saves the whole catalog as the pages show it, with
         # every carried Lane's place; a focused screen starts from the catalog
@@ -440,7 +449,7 @@ class Wizard:
             found = self._rescan()
             self._load(found["lanes_doc"], found.get("bench"), found.get("discovered") or (),
                        found.get("effort_rows"), found.get("discovery"), found.get("refresh"),
-                       found.get("rows_note") or "")
+                       found.get("rows_note") or "", found.get("epoch_rows"))
             self.scanned = f"at {self._clock()}"
             refresh = self.refresh or {}
             message = (f"Rescanned {self.scanned}: {plural(len(refresh.get('new') or ()), 'new Lane')}, "
@@ -495,7 +504,7 @@ class Wizard:
             return ""
         try:
             bench_page.write(self.bench_page_path, self.bench, self.draft.documents()["lanes"],
-                             self.effort_rows)
+                             self.effort_rows, self.epoch_rows)
         except (OSError, ValueError) as e:
             return f"benchmark page: {e}"
         return ""
@@ -628,7 +637,7 @@ class Wizard:
         """{lane: proposal} for the carried Lanes with a score on the chosen
         benchmark (ticket 17). A proposal is shown, never applied, until `p`."""
         settings = catalog.tier_proposal_settings(self._routing())
-        return tier_proposal.propose(self.lanes_doc, self.effort_rows, settings,
+        return tier_proposal.propose(self.lanes_doc, self._evidence, settings,
                                      names=self._carried())
 
     def take_proposals(self):

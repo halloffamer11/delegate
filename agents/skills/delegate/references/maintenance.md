@@ -6,7 +6,9 @@ the catalog format.
 ## Tests
 
 `make test` in the checkout runs every script's test (stdlib only, no
-network, no harness CLI needed). After touching one script, its own file is
+network, no harness CLI needed). It points every proxy variable at a closed
+local port, so a test that reaches the web fails on every machine; a test
+that needs a local server uses 127.0.0.1 or localhost. After touching one script, its own file is
 enough: `python3 tests/test_<script>.py` from the skill directory.
 
 ## Evals

@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pty
+import shutil
 import struct
 import subprocess
 import sys
@@ -29,9 +30,10 @@ FIXTURES_DISCOVER = os.path.join(FIXTURES, "discover")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
+import bench_snapshot
 import carry
 import catalog
-import published_names
+import lane_evidence
 from catalog_draft import CatalogDraft
 import harnesses
 import tier_lines
@@ -55,8 +57,13 @@ def record(name, ok, detail=""):
         print(f"FAIL {name}: {detail}")
 
 
+def epoch_rows_of(path):
+    """The Epoch rows of a CSV, read as the Benchmark snapshot reads a named file."""
+    return bench_snapshot.snapshot((), epoch=bench_snapshot.local(path)).epoch_rows
+
+
 def data():
-    return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE)
+    return bench.collect(copy.deepcopy(LANES), epoch_rows=epoch_rows_of(FIXTURE))
 
 
 def wizard(bench_data=True, message="", effort_rows=None, lanes=None, discovery=None,
@@ -164,7 +171,7 @@ try:
     collected = data()
     record("collect returns documented keys",
            set(collected) == {"models", "lanes", "epoch_benchmarks", "aa_columns",
-                              "aa_skipped", "notes"}, str(sorted(collected)))
+                              "aa_skipped", "epoch_skipped", "notes"}, str(sorted(collected)))
 except Exception as e:
     record("collect returns documented keys", False, repr(e))
 
@@ -1122,18 +1129,22 @@ try:
         _packet, AA_ROWS = effort.aa_extract(f.read(), observed="2026-09-11")
     doc = astra_lanes()
     lane_models = {lane["model"] for lane in doc["lanes"].values()}
-    resolved = {(r["model"], published_names.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
-    _rows, unmatched = published_names.resolve_effort_rows(doc, AA_ROWS)
+    evidence = lane_evidence.LaneEvidence(doc, AA_ROWS)
+    # each printed name names a Model, and the Model's Lanes run it under every
+    # model string the catalog gives it (agy's `gemini-3.8-flash-high`)
+    named = {(r["model"], tuple(evidence.identify(r["model"])["lane_models"])) for r in AA_ROWS}
+    unmatched = evidence.unmatched()
     w = wizard(lanes=doc, effort_rows=AA_ROWS)
     w.handle("enter")
     w.handle("enter")
     v = w.view()
     off = {row["cells"][1]: why_of(row) for row in v["rows"] if carry_of(row) == "off"}
     record("30 every catalog variant on the AA page resolves; only the strangers go unmatched",
-           {lane for _name, lane in resolved if lane} == lane_models
+           {model for _name, models in named for model in models} == lane_models
            and sorted(unmatched) == ["GPT-5.5", "Grok 4.3"]
+           and sorted(name for name, models in named if not models) == ["GPT-5.5", "Grok 4.3"]
            and "2 benchmarked models have no lane" in v["legend"],
-           f"resolved={sorted(resolved, key=str)} unmatched={unmatched}")
+           f"named={sorted(named, key=str)} unmatched={unmatched}")
     record("30b the AA rows switch off one dominated effort, and the reason names the source",
            off == {"astra-xhigh@codex": "high wins on aa"},
            str(off))
@@ -1154,7 +1165,7 @@ try:
     # rows' evidence for a `published_as` still owed to us.
     ignored = next((line for line in v["legend"]
                     if line.endswith("benchmarked models have no lane")), "")
-    _rows, unmatched = published_names.resolve_effort_rows(w.lanes_doc, w.effort_rows)
+    unmatched = lane_evidence.LaneEvidence(w.lanes_doc, w.effort_rows).unmatched()
     record("28d models that are nobody's lane are counted once, not warned per lane",
            ignored == f"{len(unmatched)} benchmarked models have no lane"
            and len(unmatched) >= 5 and "GLM-5.3" in unmatched
@@ -1681,7 +1692,7 @@ def groups_of(names, doc):
     """The model groups in the order they appear, each with its efforts."""
     out = []
     for name in names:
-        group = carry.model_of(doc["lanes"][name])
+        group = lane_evidence.model_identity(doc["lanes"][name])
         if not out or out[-1][0] != group:
             out.append((group, []))
         out[-1][1].append(doc["lanes"][name]["effort"])
@@ -1705,14 +1716,32 @@ try:
            grouped == ["fable-max@claude", "fable-low@claude", "sol-high@codex", "sol-low@codex",
                        "flash-high@agy", "flash-low@agy"]
            # an agy slug family is one model
-           and carry.model_of(doc["lanes"]["flash-low@agy"]) == carry.model_of(doc["lanes"]["flash-high@agy"])
-           and carry.model_of(doc["lanes"]["sol-low@codex"]) != carry.model_of(doc["lanes"]["luna-low@codex"])
+           and (lane_evidence.model_identity(doc["lanes"]["flash-low@agy"])
+                == lane_evidence.model_identity(doc["lanes"]["flash-high@agy"]))
+           and (lane_evidence.model_identity(doc["lanes"]["sol-low@codex"])
+                != lane_evidence.model_identity(doc["lanes"]["luna-low@codex"]))
            and [setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")]
            == sorted(setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")),
            repr(grouped))
 except Exception as e:
     record("43 group_lanes places a group where its first lane sat and runs its efforts most to least",
            False, repr(e))
+
+
+try:
+    doc = copy.deepcopy(LANES)
+    fable = doc["lanes"]["fable-xhigh@claude"]
+    doc["lanes"]["opus-high@claude"] = dict(fable, model="claude-opus-5-5", effort="high")
+    doc["lanes"]["opus-low@kiro"] = dict(fable, harness="kiro", model="claude-opus-5.5", effort="low")
+    doc["lanes"]["opus-medium@agy"] = dict(doc["lanes"]["flash-high@agy"], model="claude-opus-5-5-medium",
+                                           effort="medium")
+    names = ["opus-high@claude", "sol-high@codex", "opus-low@kiro", "opus-medium@agy"]
+    grouped = setup_tui.group_lanes(names, doc)
+    record("43b kiro's Opus groups with Claude Code's and agy's Opus, as one Model",
+           grouped == ["opus-high@claude", "opus-medium@agy", "opus-low@kiro", "sol-high@codex"],
+           repr(grouped))
+except Exception as e:
+    record("43b kiro's Opus groups with Claude Code's and agy's Opus, as one Model", False, repr(e))
 
 
 try:
@@ -1727,7 +1756,7 @@ try:
     t4_groups = groups_of(t4, doc)
     # sol-high leads the benchmark order and fable's measured lane is fable-max,
     # so the sol group comes first and every group is whole, most effort first
-    sol, flash, fable = (carry.model_of(doc["lanes"][n])
+    sol, flash, fable = (lane_evidence.model_identity(doc["lanes"][n])
                          for n in ("sol-high@codex", "flash-high@agy", "fable-max@claude"))
     record("44 the carry page and the tier pages group by model, efforts most to least",
            carry_rows[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"]
@@ -2376,6 +2405,50 @@ except Exception as e:
 
 
 try:
+    # H1: the rows line is the Benchmark snapshot's, and names both sources on
+    # one line. At 80 columns both stay in sight even when a fetch failed: the
+    # sources come first and the reasons after them.
+    with tempfile.TemporaryDirectory() as td:
+        def seeded(age):
+            cache = os.path.join(td, str(age))
+            os.makedirs(os.path.join(cache, "aa"))
+            os.makedirs(os.path.join(cache, "epoch"))
+            with open(os.path.join(cache, "aa", "accepted.json"), "w", encoding="utf-8") as f:
+                json.dump([{"source": "aa", "model": "Grok 4.6", "benchmark": "b", "score": 1}], f)
+            shutil.copy(FIXTURE, os.path.join(cache, "epoch", "eci_benchmarks.csv"))
+            then = time.time() - age * 3600
+            for name in ("aa/accepted.json", "epoch/eci_benchmarks.csv"):
+                os.utime(os.path.join(cache, name), (then, then))
+            return cache
+
+        def refused(url):
+            raise OSError(f"{url}: cannot fetch: <urlopen error [Errno 111] Connection refused>")
+
+        def start_body(cache, renew=False):
+            source = bench_snapshot.web(cache_dir=cache, get=refused)
+            snap = bench_snapshot.snapshot((), aa=source, epoch=source, renew=renew)
+            w = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, DISCOVERED,
+                       "/tmp/lanes.json", "/tmp/routing.json", "", rows_note=snap.note)
+            return w.view(80)["body"]
+
+        fresh = start_body(seeded(3))
+        stale = start_body(seeded(30))
+        bare = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), None, DISCOVERED,
+                      "/tmp/lanes.json", "/tmp/routing.json", "").view(80)["body"]
+        rows_lines = [line for line in fresh + stale if line.startswith("Benchmark rows:")]
+    record("63e the start page names both benchmark sources on one rows line, at 80 columns",
+           "Benchmark rows: AA fetched 3h ago, Epoch fetched 3h ago" in fresh
+           and any(line.startswith("Benchmark rows: AA fetched 30h ago, "
+                                   "Epoch fetched 30h ago; ") for line in stale)
+           and len(rows_lines) == 2 and all(len(line) < 80 for line in rows_lines)
+           and len(fresh) == len(stale) == len(bare) + 1,
+           repr((fresh, stale)))
+except Exception as e:
+    record("63e the start page names both benchmark sources on one rows line, at 80 columns",
+           False, repr(e))
+
+
+try:
     # Ticket 35: `o` writes the page again from the catalog as the session holds
     # it, so a lane carried on the carry page reaches the page, and the page's
     # catalog key does not move, so tiers drawn in the browser survive.
@@ -2748,7 +2821,7 @@ try:
            "and counts the benchmarked models that are nobody's lane",
            [d["term"] for d in v["defs"]] == ["X wins on S", "not dominated", "no rows"]
            and v["defs"][0] == setup_tui.DOMINATED_DEF and v["defs"][0]["style"] == "why-data"
-           and v["legend"] == [f"{len(published_names.resolve_effort_rows(w.lanes_doc, TBENCH)[1])} "
+           and v["legend"] == [f"{len(lane_evidence.LaneEvidence(w.lanes_doc, TBENCH).unmatched())} "
                                "benchmarked models have no lane"]
            and def_lines[0][1] == [("X wins on S", "why-data")]
            and def_lines[1][1] == [("not dominated", "term")]
@@ -2992,9 +3065,10 @@ try:
     def evidence(wizard):
         """The proposals, their reasons and the unmatched models the wizard's
         catalog and rows give."""
-        decisions = carry.decisions(wizard.lanes_doc, wizard.effort_rows)
+        evidence = lane_evidence.LaneEvidence(wizard.lanes_doc, wizard.effort_rows)
+        decisions = carry.decisions(wizard.lanes_doc, evidence)
         return (decisions, {name: bench.carry_reason(d) for name, d in decisions.items()},
-                published_names.resolve_effort_rows(wizard.lanes_doc, wizard.effort_rows)[1])
+                evidence.unmatched())
 
     w, _r, _p = scanned_wizard(rescan=other_rows)
     w.handle("enter")
@@ -3013,9 +3087,13 @@ except Exception as e:
 
 
 try:
-    # a rebuild that raises is a message, and the wizard is as it was before r
+    # a rebuild that raises is a message, and the wizard is as it was before r.
+    # The Lane evidence gives a Lane with no model no rows and never raises
+    # (deepening A), so the record here is no object at all: the evidence
+    # skips it, and the carry pre-screen's read of it raises midway through
+    # the rebuild, after `_load` has replaced the first attributes.
     def bad_doc():
-        return {"lanes_doc": {"lanes": {"odd@grok": {"harness": "grok"}}}, "discovered": {"grok"},
+        return {"lanes_doc": {"lanes": {"odd@grok": "grok"}}, "discovered": {"grok"},
                 "discovery": None, "refresh": {"new": ["odd@grok"], "removed": []},
                 "rows_note": "Benchmark rows: nowhere", "effort_rows": None, "bench": None,
                 "message": ""}

@@ -17,7 +17,7 @@ One job: load, validate and project the effective catalog. The rest of what
 catalog.py once held lives beside it (ticket 26): the edit engine in
 `catalog_edit`, the Class guide checks in `class_guides`, the `delegate
 catalog` command in `catalog_cli`, bulk Tier lines in `tier_lines` and the
-published-name reconciliation in `published_names`.
+published-name reconciliation in `lane_evidence`.
 """
 import copy
 import errno
@@ -31,7 +31,7 @@ CONFIG_DIR = "~/.config/delegate"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import harnesses  # noqa: E402
-import published_names  # noqa: E402
+import lane_evidence  # noqa: E402
 
 # The starting catalog's routing: the shipped Classes and the Tier proposal
 # rule a catalog falls back to.
@@ -237,21 +237,6 @@ def validate_lanes(doc, source="lanes.json"):
         "price", "tier", "basis"
     )
     price_keys = ("in", "cache_read", "cache_write", "out")
-    claimed = {}
-    # Which lane models a published name could denote on its own, so that a
-    # published_as entry cannot be pointed at somebody else's model.
-    owners = {}
-    for lane in lanes.values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if not isinstance(model, str) or not model.strip():
-            continue
-        normalized = published_names.normalize_name(model)
-        base, _effort = published_names.strip_effort_suffix(normalized)
-        for key in {normalized, base}:
-            owners.setdefault(key, set()).add(model)
-
     for lane_name, lane in lanes.items():
         if not isinstance(lane, dict):
             raise CatalogError(f"{source}: lane '{lane_name}': must be an object")
@@ -369,25 +354,12 @@ def validate_lanes(doc, source="lanes.json"):
                         f"{source}: lane '{lane_name}': published_as entries must be "
                         f"non-empty strings, got {name!r}"
                     )
-                key = published_names.normalize_name(name)
-                foreign = sorted(m for m in owners.get(key, ()) if m != lane["model"])
-                if foreign:
-                    raise CatalogError(
-                        f"{source}: lane '{lane_name}': published_as {name!r} already names "
-                        f"model '{foreign[0]}', which another lane runs; that would read "
-                        f"'{foreign[0]}' rows as '{lane['model']}'. Drop the entry, or put it "
-                        f"on the lane that runs '{foreign[0]}'"
-                    )
-                first = claimed.get(key)
-                if first is not None and first[2] != lane["model"]:
-                    raise CatalogError(
-                        f"{source}: lane '{lane_name}': published_as {name!r} names the same "
-                        f"model as {first[0]!r} on lane '{first[1]}'; one published name "
-                        f"denotes one model, but this would make it both '{first[2]}' and "
-                        f"'{lane['model']}'"
-                    )
-                if first is None:
-                    claimed[key] = (name, lane_name, lane["model"])
+
+    # One published name denotes one Model, on every Harness that runs it.
+    conflict = lane_evidence.published_as_conflict(lanes)
+    if conflict is not None:
+        lane_name, message = conflict
+        raise CatalogError(f"{source}: lane '{lane_name}': {message}")
 
     return doc
 
