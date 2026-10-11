@@ -42,9 +42,11 @@ The catalog is machine-local: each machine keeps its own, never in the repo.
   lanes with an order in its new tier until `project_order` places it.
 
 Both JSON files are strict JSON, validated on read with a message naming the
-field and the rule, formatted on write, and take `note` fields anywhere. The
-starting catalog ships in `assets/samples/`. A project's `.delegate/` never
-goes to the main branch.
+field and the rule, formatted on write, and take `note` fields anywhere. A file
+that is a link to an existing file is written through, and the link stays; a
+dangling link or a link loop is refused on read and on write, so the file it
+names is never created. The starting catalog ships in `assets/samples/`. A
+project's `.delegate/` never goes to the main branch.
 
 ## Class guides
 
@@ -91,11 +93,18 @@ targets, the changed fields, and the picks and tier leaders before and after,
 from cached meters. Apply the same operation with `--apply --expect
 <revision>` from that preview. A request that states the value authorizes
 both; do not ask again. If a source changed since the preview, preview again.
-Apply preserves stow links and writes only the chosen document.
+Apply writes only the chosen document, through a link to an existing file,
+and refuses a dangling link or a loop. A global apply first copies the file it
+replaces to `backups/` beside the catalog (the newest 20 of each are kept), and
+one that writes this machine's `lanes.json` also gives every native lane its
+agent file, saying so on stderr; stdout is only the JSON result. A project
+apply touches no agent file.
 
 `delegate setup --screen carry|tier1|tier2|tier3|tier4|review|routing` opens
-one wizard screen on the current catalog. Its confirm lists only the changes
-made, and a save with none writes nothing. On a focused tier screen,
+one wizard screen on the current catalog, with no generation proposed. Its
+confirm lists only the changes made, its save writes only those, and a save
+with none writes nothing. If the catalog changed while the screen was open,
+the save names the changed file, writes nothing and exits 1. On a focused tier screen,
 unmarking moves a lane down one tier; turn a tier 1 lane off on the carry
 screen. Use the CLI commands above where there is no terminal.
 
@@ -129,9 +138,17 @@ the carry page only with agy's own Opus efforts. A lane on it reads:
 The pages then decide, in order: which lanes to carry, each lane's tier (the
 tier pages show a proposed tier from the benchmark bands in `tier_proposal`;
 `p` takes them), the order inside each tier, and the routing values. Nothing
-is written until the confirm page, and quitting writes nothing. The save also
-writes the agent file of each new native lane where the orchestrator profile
-keeps them, and removes superseded ones.
+is written until the confirm page, and quitting writes nothing. The save writes
+through the catalog as setup read it at start (`scripts/catalog_commit.py`): if
+`lanes.json` or `routing.json` changed since then, by a `catalog set` or by a
+model swap dispatch's scan made, the save names the file, writes nothing and
+exits 1, so start setup again. A file the session left as it was keeps its
+bytes, and each one the save replaces is first copied to
+`~/.config/delegate/backups/` (the newest 20 of each are kept). The save also
+gives every native lane in the catalog its agent file where the orchestrator
+profile keeps them, and removes the files of the lanes it took out. The start
+page names what dispatch noticed and swapped in since the last run, and the
+save forgets exactly those; a model noticed while setup is open stays queued.
 
 `delegate project` opens the dashboard for the current directory's Git
 project.

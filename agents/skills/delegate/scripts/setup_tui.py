@@ -31,8 +31,9 @@ import harnesses as harness_registry  # noqa: E402
 import catalog  # noqa: E402
 import tier_proposal  # noqa: E402
 from catalog import CLASSES, meter_dependency_lines, meters_enabled
+from catalog_draft import CatalogDraft
 from harnesses import NAMES as HARNESSES
-from tier_lines import parse_tier_lines, tier_lines_summary, unnamed_carried
+from tier_lines import parse_tier_lines, tier_lines_summary
 from class_guides import default_class_guide_path as catalog_guide_path
 
 # These render as single lines in an 80-column terminal, where anything past
@@ -54,7 +55,7 @@ ROUTING_FOOTER = "j/k: move  +/-: adjust  space/x: meters  enter: confirm  b: ba
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 DISCOVERY_FOOTER = "any key: continue  b: back  q: quit"
 DISCOVERY_RESCAN_FOOTER = "any key: continue  r: rescan  b: back  q: quit"
-# `r` once a carry or Tier choice exists: a rescan never discards one
+# `r` once a carry, Tier, Order or routing choice exists: a rescan never discards one
 RESCAN_REFUSED = "r: a choice is made and a rescan would lose it; quit and start again to rescan."
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 
@@ -234,18 +235,32 @@ def plural(count, word):
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
-def refresh_lines(refresh, width=80):
-    """What the catalog refresh proposes, one line per model (ticket 33).
+def placement_text(lane):
+    """Where a Lane record as written places it: `tier 2, order 1` for a
+    carried Lane with an Order, `tier 2` for an off Lane or a carried one
+    without an Order. The full confirm page and `--plain`'s confirm listing
+    both print it, from `draft.documents()["lanes"]`, so each says exactly
+    what `y` writes (deepening F.3)."""
+    text = f"tier {lane['tier']}"
+    if lane.get("enabled") is not False and "order" in lane:
+        text += f", order {lane['order']}"
+    return text
+
+
+def refresh_lines(refresh, width=80, queued=(), applied=()):
+    """What the catalog refresh proposes, one line per model (ticket 33), then
+    the Model queue the wizard read with the catalog: `queued` and `applied`,
+    named whether or not the refresh ran, since the save forgets exactly what
+    is named here (deepening D.4).
 
     A model that takes another's place reads
     `gpt-5.6-sol → gpt-6-sol: sol6-*@codex replace sol-*@codex (6 Lanes)`, and
     one that takes nobody's reads `new gemini-3.1-pro: pro31-*@agy (2 Lanes)`.
     A refresh that did not run says so rather than reading as no change.
     """
-    if refresh is None:
-        return []
+    plan = refresh or {}
     lines = []
-    for item in refresh.get("models") or []:
+    for item in plan.get("models") or []:
         family = harness_registry.lane_name(item["stem"], "*", item["harness"])
         count = plural(len(item["new"]), "Lane")
         if item.get("predecessor"):
@@ -259,40 +274,41 @@ def refresh_lines(refresh, width=80):
             lines.append(fit_line(f"new {item['model']}: {family} ({count})", width))
     # a superseded lane with no successor at its effort leaves with no line of
     # its own above, so it is named here
-    covered = {name for item in refresh.get("models") or [] for name in item["replaced"]}
-    orphans = [name for name in refresh.get("removed") or [] if name not in covered]
+    covered = {name for item in plan.get("models") or [] for name in item["replaced"]}
+    orphans = [name for name in plan.get("removed") or [] if name not in covered]
     if orphans:
         lines.append(list_line("Superseded Lanes removed", orphans, width))
     # an effort a harness lists that no Lane may carry yet: named, not proposed
-    for notice in refresh.get("notices") or ():
+    for notice in plan.get("notices") or ():
         lines.append(fit_line(notice, width))
     # models dispatch noticed since the last run (ticket 29); the refresh
     # lines above are the Lanes this run proposes for them
-    queued = [item["model"] for item in refresh.get("queued") or ()]
-    if queued:
-        lines.append(list_line("Dispatch noticed", queued, width))
+    noticed = [item["model"] for item in queued or ()]
+    if noticed:
+        lines.append(list_line("Dispatch noticed", noticed, width))
     # newer versions dispatch's scan already swapped in since the last run
-    swapped = [f"{item['old']} -> {item['new']}" for item in refresh.get("applied") or ()]
+    swapped = [f"{item['old']} -> {item['new']}" for item in applied or ()]
     if swapped:
         lines.append(list_line("Dispatch swapped in", swapped, width))
-    if not lines:
+    if not lines and refresh is not None:
         return [fit_line("Catalog refresh: every model is the current generation", width)]
     return lines
 
 
 def start_facts(lanes_path, routing_path, page_path, discovery, width=80,
-                refresh=None, rows_note=""):
+                refresh=None, rows_note="", queued=(), applied=()):
     """What the start page says, and what `--plain` prints first: the two files
     it will write, the benchmark page, where the benchmark rows came from, what
-    the refresh proposes, and the discovery notices. Facts only — the terms are
-    defined in CONTEXT.md, and the people who run this know them (the user,
-    2026-09-11; tickets 25 and 33)."""
+    the refresh proposes and what dispatch noticed and swapped in, and the
+    discovery notices. Facts only — the terms are defined in CONTEXT.md, and
+    the people who run this know them (the user, 2026-09-11; tickets 25 and
+    33)."""
     return [
         fit_line(f"Will write {lanes_path}", width),
         fit_line(f"Will write {routing_path}", width),
         fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
         *([fit_line(rows_note, width)] if rows_note else []),
-        *refresh_lines(refresh, width),
+        *refresh_lines(refresh, width, queued=queued, applied=applied),
         *discovery_notices(discovery, width),
     ]
 
@@ -315,19 +331,23 @@ STEPS = (
 
 
 class Wizard:
-    """Pure setup state.  Rendering and terminal input live in run_curses."""
+    """Pure setup state.  Rendering and terminal input live in run_curses.
+
+    Every carry, Tier, Order and routing decision the pages make is held by one
+    `CatalogDraft`, `self.draft` (deepening F): each page reads it, each key
+    decides on it, and the confirm page's `y` hands `draft.documents()` on."""
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
                  bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
                  focus=None, refresh=None, rows_note="", rescan=None, tier_lines=None,
-                 clock=None, class_guide=None):
+                 clock=None, class_guide=None, queued=(), applied=()):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         # every shipped Class is on the routing page, with the default Range
-        # when the catalog gives it none, then the Classes it adds (ticket 16)
-        self._original_routing = catalog.with_default_classes(routing_doc)
-        self.routing_doc = catalog.with_default_classes(routing_doc)
+        # when the catalog gives it none, then the Classes it adds (ticket 16).
+        # Each draft starts from it: at launch, and again after a rescan.
+        self._routing_given = catalog.with_default_classes(routing_doc)
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
@@ -338,6 +358,9 @@ class Wizard:
         self.tier_lines = tier_lines
         self._clock = clock or (lambda: time.strftime("%H:%M"))
         self.scanned = "at launch"
+        # the Model queue read with the catalog: a start-page fact that a
+        # rescan leaves as it is, since the save forgets exactly these
+        self.queued, self.applied = tuple(queued), tuple(applied)
         # the routing page's class descriptions, from the Class guide
         self.class_guide = (class_descriptions(extra=[os.path.join(os.path.dirname(routing_path), "classes.md")])
                             if class_guide is None else class_guide)
@@ -353,10 +376,10 @@ class Wizard:
 
     def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note):
         """Start from what one scrub found: the catalog with the current
-        generation proposed, the benchmark data, the harnesses and their
-        models. Every decision the pages after the harnesses page hold is
-        derived here, so a rescan starts them over consistently."""
-        self._original_lanes = copy.deepcopy(lanes_doc)
+        generation proposed (a focused screen gets the catalog as read, with
+        none proposed), the benchmark data, the harnesses and their
+        models. The draft every page after the harnesses page decides on is
+        built here, so a rescan starts them over consistently."""
         self.lanes_doc = copy.deepcopy(lanes_doc)
         self.bench = bench
         self.effort_rows = effort_rows
@@ -368,58 +391,27 @@ class Wizard:
         self.rows_note = rows_note
         self.cursor = 0
         self.message = ""
-        self._review_order = []
-        # The user's order inside each tier, as the review page shows it (ticket 28),
-        # and each lane's place in the last lines applied, which starts it
-        self._tier_order = {tier: [] for tier in range(1, 5)}
-        self._line_order = {}
         _rows, self._unmatched = published_names.resolve_effort_rows(self.lanes_doc, effort_rows)
         self._proposals = carry.decisions(self.lanes_doc, effort_rows)
         self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
-        # A focused screen starts from the catalog as it stands and never
-        # applies carry proposals the operator has not seen.
-        if self.focus:
-            self._enabled = {
-                name: lane.get("enabled", True)
-                for name, lane in self.lanes_doc["lanes"].items()
-            }
-        else:
-            self._enabled = {name: decision["enabled"] for name, decision in self._proposals.items()}
-        # The catalog is the starting state of a rerun. A lane that the carry
-        # page proposes off keeps its tier here, so switching it back on restores
-        # the catalog default instead of making the operator place it from
-        # scratch.
-        self._assigned = {
-            name: lane["tier"] for name, lane in self.lanes_doc["lanes"].items()
-        }
-        self._marks = {
-            tier: {
-                name for name, assigned in self._assigned.items()
-                if assigned == tier and self._enabled[name]
-            }
-            for tier in range(1, 5)
-        }
-        self._settle()
-
-    def _choices(self):
-        """The carry and Tier decisions as a value to compare. An order the
-        review page only arranged is not a decision, so a tier's order counts
-        only where it differs from the order `_start_key` gives it."""
-        moved = {tier: list(order) for tier, order in self._tier_order.items()
-                 if order != sorted(order, key=self._start_key)}
-        return (dict(self._enabled), dict(self._assigned),
-                {tier: set(marks) for tier, marks in self._marks.items()},
-                moved, dict(self._line_order))
-
-    def _settle(self):
-        """Take the decisions as they stand as the ones the last load built:
-        after `_load`, and after the `--tiers-from` lines it applies again."""
-        self._loaded = self._choices()
+        # The full wizard saves the whole catalog as the pages show it, with
+        # every carried Lane's place; a focused screen starts from the catalog
+        # as it stands, never applies carry proposals the operator has not
+        # seen, and saves only the fields its change touched (deepening F.3).
+        # A Lane the carry page proposes off keeps its Tier, so switching it
+        # back on restores its place instead of making the operator place it
+        # from scratch.
+        self.draft = CatalogDraft(self.lanes_doc, self._routing_given, whole=not self.focus)
+        if not self.focus:
+            for name, decision in self._proposals.items():
+                self.draft.carry(name, decision["enabled"])
+        self.draft.settle()
 
     def made_choice(self):
-        """Whether a carry or Tier choice exists: a change against what the
-        last load built. Going back and forth with no change is none."""
-        return self._choices() != self._loaded
+        """Whether a carry, Tier, Order or routing choice exists: the draft is
+        not as it last settled. Going back and forth with no change, or a
+        change undone, is none."""
+        return not self.draft.is_settled()
 
     def rescan_ready(self):
         """Whether `r` is the rescan key here: on the harnesses page, with a
@@ -441,8 +433,8 @@ class Wizard:
             self.message = RESCAN_REFUSED
             return
         # `_load` replaces every attribute it sets and mutates none it finds,
-        # and the lines then change only what `_load` made, so the attributes
-        # as they stand now are the wizard before `r`
+        # the draft included, and the lines then change only the draft `_load`
+        # made, so the attributes as they stand now are the wizard before `r`
         before = dict(self.__dict__)
         try:
             found = self._rescan()
@@ -483,24 +475,16 @@ class Wizard:
         return bench_order_key(self.bench, name, self.lanes_doc)
 
     def _carried(self):
-        return [name for name in self.lanes_doc["lanes"] if self._enabled[name]]
+        return [name for name in self.lanes_doc["lanes"] if self.draft.lane(name).carried]
 
-    def current_lanes(self):
-        """The catalog as this session holds it: the document it started from,
-        with the carry and Tier decisions made so far. Not a save — the confirm
-        screen's `y` is the save."""
-        doc = copy.deepcopy(self._original_lanes)
-        for name, lane in doc["lanes"].items():
-            lane["tier"] = self._final_tier(name)
-            if self._enabled[name]:
-                lane.pop("enabled", None)
-            else:
-                lane["enabled"] = False
-        return doc
+    def _routing(self):
+        """The routing as the draft holds it: what the routing page edits and
+        the confirm page lists."""
+        return self.draft.documents()["routing"]
 
     def rewrite_bench_page(self):
-        """Write the benchmark page again from the catalog as it stands, and
-        return "" or a message saying why it could not be.
+        """Write the benchmark page again from the catalog as the draft holds
+        it, and return "" or a message saying why it could not be.
 
         `o` used to reopen the file written at start, so a lane carried on the
         carry page reached the page only on the next run (ticket 35). The page's
@@ -510,7 +494,7 @@ class Wizard:
         if not self.bench_page_path:
             return ""
         try:
-            bench_page.write(self.bench_page_path, self.bench, self.current_lanes(),
+            bench_page.write(self.bench_page_path, self.bench, self.draft.documents()["lanes"],
                              self.effort_rows)
         except (OSError, ValueError) as e:
             return f"benchmark page: {e}"
@@ -519,59 +503,51 @@ class Wizard:
     def _tier_names(self):
         """The lanes open on this tier page: carried, and not placed higher.
 
-        Current assignments at this tier stay visible and marked. Assignments
-        below it stay visible and unmarked, so a rerun can move a lane up.
-        A lane placed higher is hidden, not dimmed (ticket 25): a grey row that
-        space still toggled was a decision offered twice.
+        Lanes at this tier stay visible and ticked. Lanes below it, and lanes
+        not placed yet, stay visible and unticked, so a rerun can move a lane
+        up. A lane placed higher is hidden, not dimmed (ticket 25): a grey row
+        that space still toggled was a decision offered twice.
         Benchmark order places each model's group; inside it the efforts run
         from most to least (ticket 26)."""
-        active = [
-            name for name in self._carried()
-            if name not in self._assigned or self._assigned[name] <= self.tier
-        ]
+        active = [name for name in self._carried()
+                  if (self.draft.lane(name).tier or 0) <= self.tier]
         active.sort(key=self._bench_order)
         return group_lanes(active, self.lanes_doc)
 
-    def _meter_coverage(self):
-        """The lanes as this session holds them, for the one-Meter warning.
-
-        Carry and Tier come from the wizard, not from the catalog on disk, so
-        the review page warns about the Tiers the user is about to write rather
-        than the ones he started from (ticket 29).
-        """
-        return {
-            name: {
-                "enabled": self._enabled[name],
-                "tier": self._final_tier(name),
-                "meter": lane.get("meter"),
-            }
-            for name, lane in self.lanes_doc["lanes"].items()
-        }
-
-    def _final_tier(self, name):
-        """The tier written for a lane. A lane not carried is never asked about,
-        so it keeps the tier the catalog already has."""
-        if self._enabled[name] and name in self._assigned:
-            return self._assigned[name]
-        return self._original_lanes["lanes"][name]["tier"]
+    def _tick(self, name):
+        """space/x on a tier page: a tick places the Lane at this Tier at once,
+        at its end unless it returns to the Tier it started in (deepening F.6).
+        An untick returns it to its start Tier when that Tier is lower;
+        otherwise the full wizard leaves it unplaced, for a lower page to
+        place, and a focused screen moves it one Tier down, where Tier 1
+        still refuses."""
+        lane = self.draft.lane(name)
+        if lane.tier != self.tier:
+            self.draft.place(name, self.tier)
+        elif self.focus and self.tier == 1:
+            self.message = "Tier 1 is the lowest Tier; use carry to turn a Lane off."
+        elif lane.start_tier < self.tier:
+            self.draft.place(name, lane.start_tier)
+        else:
+            self.draft.place(name, self.tier - 1 if self.focus else None)
 
     def _enter_tier(self, tier):
         self.screen = "tier"
         self.tier = tier
         self.cursor = 0
         self.message = ""
-        active = self._tier_names()
-        if tier == 1:
+        if tier == 1 and not self.focus:
             # Whatever is still open must take tier 1, including a lane removed
-            # from a higher tier during this run.
-            self._marks[1].update(active)
+            # from a higher tier during this run, in lane-name order.
+            for name in sorted(self._carried()):
+                if self.draft.lane(name).tier is None:
+                    self.draft.place(name, 1)
 
     def _enter_review(self):
         self.screen = "review"
         self.tier = None
         self.cursor = 0
         self.message = ""
-        self._arrange_review()
 
     def _go_confirm(self):
         self.screen = "confirm"
@@ -603,103 +579,41 @@ class Wizard:
             self.screen = "routing"
             self.cursor = 0
 
-    def _start_key(self, name):
-        """Where a lane first sits in its tier: the order of the lines applied,
-        then an `order` the catalog already gives it at this tier, then
-        benchmark order. The model grouping of ticket 26 does not apply here:
-        the order is the user's (ticket 28)."""
-        line = self._line_order.get(name)
-        original = self._original_lanes["lanes"][name]
-        kept = original.get("order") if original.get("tier") == self._assigned.get(name) else None
-        moved = self.focus and original["tier"] != self._assigned.get(name)
-        return (bool(moved), line is None, line or 0, kept is None, kept or 0, *self._bench_order(name))
-
-    def _arrange_review(self):
-        """Each tier's order, 4 to 1. A lane already ordered in its tier keeps
-        its place, so back and forth through routing loses no J/K move; a lane
-        new to the tier joins after them at its starting place."""
-        for tier in range(1, 5):
-            members = [name for name in self._carried() if self._assigned.get(name) == tier]
-            kept = [name for name in self._tier_order[tier] if name in members]
-            fresh = sorted((name for name in members if name not in kept), key=self._start_key)
-            self._tier_order[tier] = kept + fresh
-        self._flatten_review()
-
-    def _flatten_review(self):
-        self._review_order = [name for tier in (4, 3, 2, 1) for name in self._tier_order[tier]]
+    def _review_names(self):
+        """The review page's lanes, Tier 4 to 1, each Tier in the draft's
+        order: the Order as read, then lane name; lines and `p` first in
+        their order; a lane that joined the Tier at its end."""
+        return [name for tier in (4, 3, 2, 1) for name in self.draft.tier_lanes(tier)]
 
     def _review_cursor_name(self):
-        names = self._review_order
+        names = self._review_names()
         return names[min(self.cursor, len(names) - 1)] if names else None
 
-    def _move_in_tier(self, step):
-        """J/K: swap the lane under the cursor with its neighbour inside its
-        tier; at the top or bottom of the tier nothing moves. The cursor stays
-        on the lane."""
+    def _review_place(self, tier, at):
+        """J/K and 1-4: the lane under the cursor to place `at` in `tier`,
+        and the cursor goes with it. J/K at the top or bottom of its Tier
+        moves nothing."""
         name = self._review_cursor_name()
-        order = self._tier_order[self._assigned[name]]
-        here = order.index(name)
-        there = here + step
-        if 0 <= there < len(order):
-            order[here], order[there] = order[there], order[here]
-            self._flatten_review()
-            self.cursor = self._review_order.index(name)
-
-    def _move_to_tier(self, tier):
-        """1-4: the lane under the cursor goes to the end of that tier, its own
-        tier included, and the cursor goes with it."""
-        name = self._review_cursor_name()
-        self._tier_order[self._assigned[name]].remove(name)
-        self._assigned[name] = tier
-        for marks in self._marks.values():
-            marks.discard(name)
-        self._marks[tier].add(name)
-        self._tier_order[tier].append(name)
-        self._flatten_review()
-        self.cursor = self._review_order.index(name)
-
-    def _place(self, name):
-        """A carried lane's place inside its tier from 1, or None if unplaced."""
-        order = self._tier_order.get(self._assigned.get(name), [])
-        return order.index(name) + 1 if name in order else None
+        self.draft.place(name, tier, at=at)
+        self.cursor = self._review_names().index(name)
 
     def apply_tier_lines(self, text):
         """Apply `<lane> <1-4|off>` lines and say what they did, on one line.
 
         A tier line carries the lane and gives it that tier; an off line sets it
         not carried; a carried lane with no line goes off (ticket 28). The
-        lines' order inside a tier is the review page's starting order. On the
-        review page the order is taken again, and the cursor stays on the lane
-        it was on when that lane is still listed. Returns the summary line."""
+        lines' order inside a tier is the order the review page shows. On the
+        review page the cursor stays on the lane it was on when that lane is
+        still listed. Returns the summary line."""
         parsed = parse_tier_lines(text, self.lanes_doc)
-        dropped = unnamed_carried(parsed, self._carried())
-        for name in dropped:
-            self._enabled[name] = False
-            self._assigned.pop(name, None)
-        for name, value in parsed["decided"].items():
-            if value == "off":
-                self._enabled[name] = False
-                self._assigned.pop(name, None)
-            else:
-                self._enabled[name] = True
-                self._assigned[name] = value
-        if parsed["decided"]:
-            self._marks = {
-                tier: {
-                    name for name, assigned in self._assigned.items()
-                    if assigned == tier and self._enabled[name]
-                }
-                for tier in range(1, 5)
-            }
-            self._line_order = {name: index for index, name in enumerate(parsed["decided"])}
-            self._tier_order = {tier: [] for tier in range(1, 5)}
+        here = self._review_cursor_name() if self.screen == "review" else None
+        dropped = self.draft.apply(parsed["decided"], "off")
         summary = tier_lines_summary(parsed, dropped)
         if self.screen == "review":
-            order = self._review_order
-            here = order[min(self.cursor, len(order) - 1)] if order else None
             self._enter_review()
-            if here in self._review_order:
-                self.cursor = self._review_order.index(here)
+            names = self._review_names()
+            if here in names:
+                self.cursor = names.index(here)
         self.message = summary
         return summary
 
@@ -707,13 +621,13 @@ class Wizard:
         """The `--tiers-from` lines, at launch and again after a rescan. They
         are where the pages start, not a choice made on one, so `r` stays."""
         summary = self.apply_tier_lines(self.tier_lines)
-        self._settle()
+        self.draft.settle()
         return summary
 
     def tier_proposals(self):
         """{lane: proposal} for the carried Lanes with a score on the chosen
         benchmark (ticket 17). A proposal is shown, never applied, until `p`."""
-        settings = catalog.tier_proposal_settings(self.routing_doc)
+        settings = catalog.tier_proposal_settings(self._routing())
         return tier_proposal.propose(self.lanes_doc, self.effort_rows, settings,
                                      names=self._carried())
 
@@ -725,16 +639,10 @@ class Wizard:
         if not proposals:
             self.message = "p: no carried lane has a score on the chosen benchmark; nothing changed"
             return
-        for name, proposal in proposals.items():
-            self._assigned[name] = proposal["tier"]
-        self._marks = {
-            tier: {name for name, assigned in self._assigned.items()
-                   if assigned == tier and self._enabled[name]}
-            for tier in range(1, 5)
-        }
-        ordered = tier_proposal.ordered(proposals)
-        self._line_order = {name: index for index, name in enumerate(ordered)}
-        self._tier_order = {tier: [] for tier in range(1, 5)}
+        # each Tier starts with its proposed Lanes in the proposal's order;
+        # the rest keep their Tier and follow
+        self.draft.apply([(name, proposals[name]["tier"]) for name in tier_proposal.ordered(proposals)],
+                         "keep")
         unscored = len(self._carried()) - len(proposals)
         self.message = (f"p: took the proposed Tier for {plural(len(proposals), 'lane')}"
                         + (f"; {plural(unscored, 'lane')} with no score kept theirs" if unscored else ""))
@@ -766,17 +674,6 @@ class Wizard:
         """The carry page's lanes: the catalog's order places each model's
         group, and its efforts run from most to least (ticket 26)."""
         return group_lanes(list(self.lanes_doc["lanes"]), self.lanes_doc)
-
-    def _toggle_enabled(self, name):
-        if name:
-            self._enabled[name] = not self._enabled[name]
-            for marks in self._marks.values():
-                marks.discard(name)
-            if self._enabled[name]:
-                tier = self._assigned.setdefault(
-                    name, self._original_lanes["lanes"][name]["tier"]
-                )
-                self._marks[tier].add(name)
 
     def _active_name(self):
         active = self._tier_names()
@@ -816,7 +713,8 @@ class Wizard:
             elif key == "down" and names:
                 self.cursor = (self.cursor + 1) % len(names)
             elif key in ("x", "space") and names:
-                self._toggle_enabled(names[min(self.cursor, len(names) - 1)])
+                name = names[min(self.cursor, len(names) - 1)]
+                self.draft.carry(name, not self.draft.lane(name).carried)
             elif key == "enter":
                 if self.focus:
                     self._go_confirm()
@@ -842,30 +740,14 @@ class Wizard:
                 # and gave the box on this line two meanings.
                 name = self._active_name()
                 if name:
-                    if name in self._marks[self.tier]:
-                        if self.focus and self.tier == 1:
-                            self.message = "Tier 1 is the lowest Tier; use carry to turn a Lane off."
-                            return
-                        self._marks[self.tier].remove(name)
-                    else:
-                        self._marks[self.tier].add(name)
+                    self._tick(name)
             elif key == "enter":
+                # Each tick already placed its Lane, so enter decides nothing;
+                # tier 1 is the last page that can place one.
                 if (self.tier == 1 and not self.focus
-                        and any(name not in self._marks[1] for name in active)):
+                        and any(self.draft.lane(name).tier != 1 for name in active)):
                     self.message = "every lane needs a tier"
                     return
-                # A marked lane takes this tier. An unmarked lane that used to
-                # be here becomes open for the next lower page. Existing lower
-                # assignments remain as that lane's editable default.
-                for name in active:
-                    if self._assigned.get(name) == self.tier:
-                        if self.focus:
-                            self._assigned[name] = max(1, self.tier - 1)
-                        else:
-                            del self._assigned[name]
-                for name in active:
-                    if name in self._marks[self.tier]:
-                        self._assigned[name] = self.tier
                 if self.focus:
                     self._go_confirm()
                 elif self.tier > 1:
@@ -883,15 +765,17 @@ class Wizard:
                 self._enter_prescreen()
             return
         if self.screen == "review":
-            names = self._review_order
+            names = self._review_names()
             if key == "up" and names:
                 self.cursor = (self.cursor - 1) % len(names)
             elif key == "down" and names:
                 self.cursor = (self.cursor + 1) % len(names)
             elif key in ("lane-up", "lane-down") and names:
-                self._move_in_tier(-1 if key == "lane-up" else 1)
+                lane = self.draft.lane(self._review_cursor_name())
+                self._review_place(lane.tier, lane.place + (-1 if key == "lane-up" else 1))
             elif key in ("1", "2", "3", "4") and names:
-                self._move_to_tier(int(key))
+                # to the end of that tier, its own tier included
+                self._review_place(int(key), "end")
             elif key == "v":
                 self._paste_tier_lines()
             elif key == "enter":
@@ -907,30 +791,27 @@ class Wizard:
                 self._enter_tier(1)
             return
         if self.screen == "routing":
-            count = len(self.classes) * 2 + 3
-            meters_idx = len(self.classes) * 2 + 2
+            # the cursor is an index into the settings the page draws
+            # (`_routing_rows`), so the setting under it is read from there
+            settings = self._routing_settings()
             if key == "up":
-                self.cursor = (self.cursor - 1) % count
+                self.cursor = (self.cursor - 1) % len(settings)
             elif key == "down":
-                self.cursor = (self.cursor + 1) % count
+                self.cursor = (self.cursor + 1) % len(settings)
             elif key in ("plus", "minus", "x", "space"):
-                if self.cursor == meters_idx:
-                    self._set_meters(not self._meters_on())
+                cls, kind, value = settings[min(self.cursor, len(settings) - 1)]
+                if kind == "meters":
+                    self.draft.set_routing("meters", not self._meters_on())
                 elif key in ("plus", "minus"):
                     delta = 1 if key == "plus" else -1
-                    if self.cursor < len(self.classes) * 2:
-                        cls_idx = self.cursor // 2
-                        is_ceiling = (self.cursor % 2 == 1)
-                        name = self.classes[cls_idx]
-                        cls_info = self.routing_doc["classes"][name]
-                        if is_ceiling:
-                            cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
-                        else:
-                            cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
+                    if kind == "ceiling":
+                        floor = self._routing()["classes"][cls]["floor"]
+                        self.draft.set_routing("ceiling", min(4, max(floor, value + delta)), cls)
+                    elif kind == "floor":
+                        ceiling = self._routing()["classes"][cls]["ceiling"]
+                        self.draft.set_routing("floor", min(ceiling, max(1, value + delta)), cls)
                     else:
-                        name = "margin" if self.cursor == len(self.classes) * 2 else "gate"
-                        old = self.routing_doc[name]
-                        self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
+                        self.draft.set_routing(kind, round(min(1.0, max(0.0, value + delta * 0.05)), 2))
             elif key == "enter":
                 self.screen = "confirm"
                 self.cursor = 0
@@ -945,9 +826,9 @@ class Wizard:
             # The list of what is about to be written is longer than a short
             # window: at 80x24 eleven of twenty items showed, and the nine out
             # of sight included both file paths and every routing value. A
-            # confirm screen you cannot read to the end is not one.
-            count = (len(self._focus_rows()) if self.focus else
-                     len(self.lanes_doc["lanes"]) + len(self.classes) * 2 + 5)
+            # confirm screen you cannot read to the end is not one. The
+            # cursor runs over the rows the page draws, and no others.
+            count = len(self._confirm_rows())
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -955,26 +836,10 @@ class Wizard:
                 self.cursor = (self.cursor + 1) % count
                 return
             if key == "y":
-                if self.focus:
-                    self._result = (self._focused_lanes(), copy.deepcopy(self.routing_doc))
-                    self.screen = "done"
-                    return
-                result_lanes = copy.deepcopy(self._original_lanes)
-                self._arrange_review()
-                for name, lane in result_lanes["lanes"].items():
-                    lane["tier"] = self._final_tier(name)
-                    # each carried lane's place inside its tier (ticket 28); a
-                    # lane not carried is in no order, so it keeps none
-                    place = self._place(name) if self._enabled[name] else None
-                    if place is None:
-                        lane.pop("order", None)
-                    else:
-                        lane["order"] = place
-                    if not self._enabled[name]:
-                        lane["enabled"] = False
-                    else:
-                        lane.pop("enabled", None)
-                self._result = (result_lanes, copy.deepcopy(self.routing_doc))
+                # what the draft writes: the whole catalog with each carried
+                # lane's place (ticket 28), or on a focused screen only the
+                # fields its change touched
+                self._result = self.draft.documents()
                 self.screen = "done"
             elif key in ("n", "q"):
                 self._result = None
@@ -982,60 +847,64 @@ class Wizard:
             elif key == "b":
                 self._back_from_confirm()
 
-    def _focused_lanes(self):
-        """Preserve untouched records and materialize only changed decisions."""
-        result = copy.deepcopy(self._original_lanes)
-        if self.focus == "routing":
-            return result
-        self._arrange_review()
-        for name, lane in result["lanes"].items():
-            original = self._original_lanes["lanes"][name]
-            lane["tier"] = self._final_tier(name)
-            if self._enabled[name] != original.get("enabled", True):
-                if self._enabled[name]:
-                    lane.pop("enabled", None)
-                else:
-                    lane["enabled"] = False
-                    lane.pop("order", None)
-        for tier in range(1, 5):
-            original_names = [name for name, lane in self._original_lanes["lanes"].items()
-                              if lane["tier"] == tier and lane.get("enabled", True)]
-            original_names.sort(key=lambda name: (
-                self._original_lanes["lanes"][name].get("order") is None,
-                self._original_lanes["lanes"][name].get("order", 0),
-                *self._bench_order(name)))
-            current = self._tier_order[tier]
-            if current != original_names:
-                for order, name in enumerate(current, 1):
-                    result["lanes"][name]["order"] = order
-        return result
+    def _confirm_rows(self):
+        """The confirm page's rows, the one list the page draws and its
+        cursor runs over: on a focused screen `_focus_rows`; in the full
+        wizard each Lane as `y` writes it, from `draft.documents()`, then each
+        Class Range, margin, gate, meters and the two files."""
+        if self.focus:
+            return self._focus_rows()
+        rows = []
+        # `carry` sits between the item and its value so that `value`, the
+        # one column with a path in it, is last: an elastic column pads to
+        # the widest row it holds, and a 40-place path column with `tier 4`
+        # in it opened a river of blanks across every other line.
+        documents = self.draft.documents()
+        routing = documents["routing"]
+        for name, lane in documents["lanes"]["lanes"].items():
+            off = not self.draft.lane(name).carried
+            # the column says `off`; a tag saying it again read `off  off`
+            rows.append({"cells": [name, "off" if off else "", placement_text(lane)],
+                         "marked": False, "dimmed": off, "tag": "",
+                         "harness": lane.get("harness")})
+        for name in self.classes:
+            cls_info = routing["classes"][name]
+            rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
+                         "marked": False, "dimmed": False, "tag": ""})
+            rows.append({"cells": [f"classes.{name}.ceiling", "", str(cls_info["ceiling"])],
+                         "marked": False, "dimmed": False, "tag": ""})
+        for name in ("margin", "gate"):
+            rows.append({"cells": [name, "", str(routing[name])], "marked": False,
+                         "dimmed": False, "tag": ""})
+        rows.append({"cells": ["meters", "", "on" if meters_enabled(routing) else "off"],
+                     "marked": False, "dimmed": False, "tag": ""})
+        for path in (self.lanes_path, self.routing_path):
+            rows.append({"cells": ["file", "", path], "marked": False,
+                         "dimmed": False, "tag": ""})
+        return rows
 
     def _focus_rows(self):
-        """The actual focused edits, including their Order consequences."""
+        """A focused confirm page's rows: each field `draft.changes()` lists,
+        with its Order consequences, then the file of each document a change
+        touches, and its target when the path is a link."""
         rows = []
         def add(name, old, new):
             rows.append({"cells": [name, "", f"{old} → {new}"],
                          "marked": False, "dimmed": False, "tag": ""})
-        result = self._focused_lanes()
-        for name, lane in result["lanes"].items():
-            original = self._original_lanes["lanes"][name]
-            for field in ("tier", "order", "enabled"):
-                if lane.get(field) != original.get(field):
-                    add(f"{name}.{field}", original.get(field, "unset"), lane.get(field, "unset"))
-        for name in self.classes:
-            for field in ("floor", "ceiling"):
-                old = self._original_routing["classes"][name][field]
-                new = self.routing_doc["classes"][name][field]
-                if old != new:
-                    add(f"classes.{name}.{field}", old, new)
-        for field in ("gate", "margin", "meters"):
-            old, new = self._original_routing.get(field), self.routing_doc.get(field)
-            if old != new:
-                add(field, ("on (default)" if old is None else "on" if old else "off")
-                    if field == "meters" else old,
-                    ("on" if new else "off") if field == "meters" else new)
-        for path, changed in ((self.lanes_path, result != self._original_lanes),
-                              (self.routing_path, self.routing_doc != self._original_routing)):
+        changes = self.draft.changes()
+        for path, old, new in changes:
+            if path[0] == "lanes":
+                add(f"{path[1]}.{path[2]}", "unset" if old is None else old, "unset" if new is None else new)
+            elif path[0] == "classes":
+                add(f"classes.{path[1]}.{path[2]}", old, new)
+            elif path == ("meters",):
+                add("meters", *("on (default)" if value is None else "on" if value else "off"
+                                for value in (old, new)))
+            else:
+                add(path[0], old, new)
+        touched = changed_documents(changes)
+        for path, changed in ((self.lanes_path, "lanes" in touched),
+                              (self.routing_path, "routing" in touched)):
             if changed:
                 rows.append({"cells": ["file", "", path], "marked": False,
                              "dimmed": False, "tag": ""})
@@ -1154,9 +1023,9 @@ class Wizard:
         lines = []
         taken = sum(
             1 for name in self._carried()
-            if self._assigned.get(name, 0) > self.tier
+            if (self.draft.lane(name).tier or 0) > self.tier
         )
-        off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
+        off = len(self.lanes_doc["lanes"]) - len(self._carried())
         hidden = hidden_legend(taken, off)
         if hidden:
             lines.append(hidden)
@@ -1167,7 +1036,7 @@ class Wizard:
         return lines
 
     def _lanes_at(self, tier):
-        return sorted(name for name in self._carried() if self._assigned.get(name) == tier)
+        return sorted(self.draft.tier_lanes(tier))
 
     def _tier_map_lines(self):
         # Counts only: a name list cut to the width read as a list that stops
@@ -1185,7 +1054,8 @@ class Wizard:
     def _confirm_defs(self):
         """The confirm page's definitions: each routing term, its value as it
         will be written, and what it means in one line, from CONTEXT.md."""
-        margin, gate = self.routing_doc["margin"], self.routing_doc["gate"]
+        routing = self._routing()
+        margin, gate = routing["margin"], routing["gate"]
         if self._meters_on():
             entries = [
                 definition("margin", "the pace lead a later lane needs to take the job from the pick",
@@ -1205,25 +1075,17 @@ class Wizard:
         return [CLASSES_DEF, *entries, CONFIRM_OFF_DEF]
 
     def _meters_on(self):
-        return meters_enabled(self.routing_doc)
-
-    def _set_meters(self, enabled):
-        if enabled:
-            if "meters" not in self._original_routing:
-                self.routing_doc.pop("meters", None)
-            else:
-                self.routing_doc["meters"] = True
-        else:
-            self.routing_doc["meters"] = False
+        return meters_enabled(self._routing())
 
     def _routing_settings(self):
         values = []
+        routing = self._routing()
         for name in self.classes:
-            cls_info = self.routing_doc["classes"][name]
+            cls_info = routing["classes"][name]
             values.append((name, "floor", cls_info["floor"]))
             values.append((name, "ceiling", cls_info["ceiling"]))
-        values.extend([(None, "margin", self.routing_doc["margin"]),
-                       (None, "gate", self.routing_doc["gate"]),
+        values.extend([(None, "margin", routing["margin"]),
+                       (None, "gate", routing["gate"]),
                        (None, "meters", "on" if self._meters_on() else "off")])
         return values
 
@@ -1231,7 +1093,7 @@ class Wizard:
     def classes(self):
         """The Classes on the routing page: the shipped five, then the
         catalog's own."""
-        return catalog.class_names(self.routing_doc)
+        return catalog.class_names(self._routing())
 
     # The routing page's last group: the three settings that make the pick.
     RANKING_GROUP = ("ranking", "how the pick is made among eligible lanes")
@@ -1276,7 +1138,7 @@ class Wizard:
         settings = self._routing_settings()
         cls, kind, value = settings[min(self.cursor, len(settings) - 1)]
         if cls is not None:
-            info = self.routing_doc["classes"][cls]
+            info = self._routing()["classes"][cls]
             floor, ceiling = info["floor"], info["ceiling"]
             if kind == "floor":
                 paragraphs = [
@@ -1354,7 +1216,8 @@ class Wizard:
             body = [
                 *start_facts(self.lanes_path, self.routing_path, self.bench_page_path,
                              self.discovery, self._width, refresh=self.refresh,
-                             rows_note=self.rows_note),
+                             rows_note=self.rows_note, queued=self.queued,
+                             applied=self.applied),
                 "",
                 "Nothing is written until the confirm screen; q leaves without writing.",
             ]
@@ -1429,7 +1292,7 @@ class Wizard:
             rows = []
             for index, name in enumerate(names):
                 lane = self.lanes_doc["lanes"][name]
-                on = self._enabled[name]
+                on = self.draft.lane(name).carried
                 # One signal for one fact. This screen used to carry three — the
                 # box, a `carry` column reading on/off, and an `off` tag after
                 # the reason — and the three together cost the reason its room:
@@ -1472,7 +1335,7 @@ class Wizard:
             rows = []
             for index, name in enumerate(active):
                 lane = self.lanes_doc["lanes"][name]
-                marked = name in self._marks[self.tier]
+                marked = self.draft.lane(name).tier == self.tier
                 proposed = ([tier_proposal.describe(proposals[name]) if name in proposals else ""]
                             if proposals else [])
                 rows.append({
@@ -1489,7 +1352,7 @@ class Wizard:
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
                 # truncated footer loses the keys.
-                legend=[*(tier_proposal.legend(catalog.tier_proposal_settings(self.routing_doc), proposals)
+                legend=[*(tier_proposal.legend(catalog.tier_proposal_settings(self._routing()), proposals)
                           if proposals else []),
                         *self._tier_legend(), *(
                     ["Unmarking moves a Lane down one Tier; Enter reviews the changes."]
@@ -1507,7 +1370,7 @@ class Wizard:
             # tier box; the number is the place ranking tries it in. An empty
             # tier keeps its section, as the place 1-4 can move a lane to.
             for tier in (4, 3, 2, 1):
-                order = self._tier_order[tier]
+                order = self.draft.tier_lanes(tier)
                 count = f"{len(order)} lane{'s' if len(order) != 1 else ''}" if order else "no lanes"
                 rows.append(section_row(f"Tier {tier} ({count})", len(columns)))
                 for place, name in enumerate(order, 1):
@@ -1519,7 +1382,7 @@ class Wizard:
                         "cursor": name == here, "tag": "",
                         "harness": lane.get("harness"),
                     })
-            off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
+            off = len(self.lanes_doc["lanes"]) - len(self._carried())
             # The keys spelled out, then the rule, then any warning: three
             # things read three ways. The lanes not carried used to be listed
             # by name, which at thirty-seven ran off the line; they are on
@@ -1538,7 +1401,9 @@ class Wizard:
                 # Coverage, not a verdict on the Tier: which lanes a Tier
                 # carries stays the user's decision (ticket 29). A warning, so it
                 # is drawn as one and never sits in the dim legend.
-                warnings=meter_dependency_lines(self._meter_coverage()),
+                # It reads the draft, not the catalog on disk, so it warns
+                # about the Tiers about to be written (ticket 29).
+                warnings=meter_dependency_lines(self.draft.documents()["lanes"]["lanes"]),
             )
         if self.screen == "routing":
             return self._frame(
@@ -1554,34 +1419,7 @@ class Wizard:
                 elastic="value",
             )
         if self.screen == "confirm":
-            rows = []
-            # `carry` sits between the item and its value so that `value`, the
-            # one column with a path in it, is last: an elastic column pads to
-            # the widest row it holds, and a 40-place path column with `tier 4`
-            # in it opened a river of blanks across every other line.
-            for name in self.lanes_doc["lanes"]:
-                off = not self._enabled[name]
-                # the column says `off`; a tag saying it again read `off  off`
-                rows.append({"cells": [name, "off" if off else "",
-                                        f"tier {self._final_tier(name)}"],
-                             "marked": False, "dimmed": off, "tag": "",
-                             "harness": self.lanes_doc["lanes"][name].get("harness")})
-            for name in self.classes:
-                cls_info = self.routing_doc["classes"][name]
-                rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
-                             "marked": False, "dimmed": False, "tag": ""})
-                rows.append({"cells": [f"classes.{name}.ceiling", "", str(cls_info["ceiling"])],
-                             "marked": False, "dimmed": False, "tag": ""})
-            for name in ("margin", "gate"):
-                rows.append({"cells": [name, "", str(self.routing_doc[name])], "marked": False,
-                             "dimmed": False, "tag": ""})
-            rows.append({"cells": ["meters", "", "on" if self._meters_on() else "off"],
-                         "marked": False, "dimmed": False, "tag": ""})
-            for path in (self.lanes_path, self.routing_path):
-                rows.append({"cells": ["file", "", path], "marked": False,
-                             "dimmed": False, "tag": ""})
-            if self.focus:
-                rows = self._focus_rows()
+            rows = self._confirm_rows()
             for index, row in enumerate(rows):
                 row["cursor"] = index == self.cursor
             return self._frame(
@@ -1598,6 +1436,14 @@ class Wizard:
 
 
 MIN_ELASTIC = 12
+
+
+def changed_documents(changes):
+    """The catalog documents a list of `catalog_draft.Change` touches, by
+    `catalog_commit.DOCUMENTS` name: "lanes" for a Lane's tier, order or
+    enabled, "routing" for a Class Range, margin, gate or meters. A focused
+    screen lists their files and its save commits them and no others."""
+    return {"lanes" if change.path[0] == "lanes" else "routing" for change in changes}
 
 
 def section_row(text, width):

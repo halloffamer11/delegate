@@ -25,6 +25,7 @@ import catalog
 import published_names
 import class_guides
 import catalog_edit
+import catalog_commit
 import catalog_cli
 import harnesses  # noqa: E402
 import rank
@@ -1586,7 +1587,7 @@ with tempfile.TemporaryDirectory() as td:
         cwd=repo,
         config_dir=cfg,
         apply=True,
-        expect=catalog_edit.catalog_revision(cwd=repo, config_dir=cfg),
+        expect=catalog_commit.read(cfg, project_dir=repo).revision,
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
@@ -1772,7 +1773,7 @@ with tempfile.TemporaryDirectory() as td:
         and project_doc["note"] == "other tiers stay",
     )
 
-    rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    rev = catalog_commit.read(cfg, project_dir=repo).revision
     preview_p = catalog_edit.edit_catalog(
         "order",
         lane="terra-high@codex",
@@ -1939,10 +1940,10 @@ with tempfile.TemporaryDirectory() as td:
         res_bad.stderr,
     )
 
-    absent_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    absent_rev = catalog_commit.read(cfg, project_dir=repo).revision
     os.makedirs(os.path.join(repo, ".delegate"), exist_ok=True)
     catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), {"gate": 0.2})
-    present_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    present_rev = catalog_commit.read(cfg, project_dir=repo).revision
     record(
         "10.9 absent project file is part of the revision",
         absent_rev != present_rev,
@@ -2009,7 +2010,7 @@ with tempfile.TemporaryDirectory() as td:
         apply=True, expect=preview["revision"])
     after = catalog.load_json(path)["lanes"]
     record("10.11 Tier move follows unordered destination Lanes",
-          catalog_edit._carried_in_tier(after, dest)[-1] == moving, preview)
+          catalog.carried_in_tier(after, dest)[-1] == moving, preview)
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _ = make_edit_fixture(td)
@@ -2044,6 +2045,141 @@ with tempfile.TemporaryDirectory() as td:
         config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
     record("10.13 Present null project is invalid, not an absent overlay",
         msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
+
+# A dangling link at the project's routing.json names a file outside the
+# repository. The set refuses it, at the preview, and never creates that file
+# (deepening D, bug 5).
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    outside = os.path.join(td, "outside", "routing.json")
+    link = os.path.join(repo, ".delegate", "routing.json")
+    os.makedirs(os.path.dirname(link))
+    os.symlink(outside, link)
+    def set_gate():
+        preview = catalog_edit.edit_catalog("set", scope="project", cwd=repo, config_dir=cfg,
+            field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+        catalog_edit.edit_catalog("set", scope="project", cwd=repo, config_dir=cfg,
+            field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES,
+            apply=True, expect=preview["revision"])
+    msg = check_catalog_error(set_gate)
+    record("10.14 a project set refuses a dangling link and creates nothing outside the project",
+        msg is not None and link in msg and outside in msg
+        and not os.path.lexists(outside) and not os.path.isdir(os.path.dirname(outside))
+        and os.path.islink(link), msg)
+
+# An apply writes through the Catalog commit (deepening D4), so a global set
+# copies the lanes.json it replaces to <config dir>/backups first.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    lanes_path = os.path.join(cfg, "lanes.json")
+    replaced = file_bytes(lanes_path)
+    kwargs = dict(scope="global", cwd=repo, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                  value=3, meters={}, present=ALL_HARNESSES)
+    preview = catalog_edit.edit_catalog("set", **kwargs)
+    catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
+    folder = os.path.join(cfg, "backups")
+    found = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    record("10.15 a global set backs up lanes.json beside the catalog",
+        len(found) == 1 and found[0].startswith("lanes-") and found[0].endswith(".json")
+        and file_bytes(os.path.join(folder, found[0])) == replaced
+        and catalog.load_json(lanes_path)["lanes"]["terra-high@codex"]["tier"] == 3, found)
+
+# `catalog set` on a live layout: the catalog in a temp HOME's
+# ~/.config/delegate, with claude Lanes that have no Agent file yet. A global
+# set of lanes.json gives every claude Lane its Agent file and says so on
+# stderr; a project set never touches ~/.claude/agents. Either way stdout is
+# the one JSON result, keys as before.
+RESULT_KEYS = ["op", "scope", "revision", "target", "sources", "values", "changed", "picks",
+               "leaders", "unavailable_harnesses", "missing_observations", "observations",
+               "noop", "written"]
+
+
+def live_layout(td):
+    """(env, config dir, agents dir, repo) for a temp HOME holding the live
+    catalog: the refresh fixture's lanes (sixteen claude Lanes) and the sample
+    routing."""
+    home = os.path.join(td, "home")
+    cfg = os.path.join(home, ".config", "delegate")
+    os.makedirs(cfg)
+    shutil.copy(os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json"), cfg)
+    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), cfg)
+    repo = os.path.join(td, "repo")
+    os.makedirs(repo)
+    open(os.path.join(repo, ".git"), "w").close()
+    env = isolated_cli_env(td)
+    env["HOME"] = home
+    env["DELEGATE_MODEL_QUEUE"] = os.path.join(td, "new-models.json")
+    env.pop("DELEGATE_ORCHESTRATORS_DIR", None)
+    return env, cfg, os.path.join(home, ".claude", "agents"), repo
+
+
+def cli_set(env, repo, *args):
+    """Preview then apply one `catalog set` on the live catalog; returns the apply."""
+    preview = run_catalog_cli(["set", *args, "--cwd", repo], env)
+    revision = json.loads(preview.stdout)["revision"]
+    return run_catalog_cli(["set", *args, "--cwd", repo, "--apply", "--expect", revision], env)
+
+
+def one_json_result(stdout):
+    """Whether stdout is exactly one formatted result, with its keys in order."""
+    try:
+        doc = json.loads(stdout)
+    except ValueError:
+        return False
+    return list(doc) == RESULT_KEYS and stdout == catalog.format_json(doc)
+
+
+with tempfile.TemporaryDirectory() as td:
+    env, cfg, agents, repo = live_layout(td)
+    res = cli_set(env, repo, "routing.gate", "0.2", "--scope", "project")
+    record("10.16 a project set on the live catalog writes no agent file and prints only its JSON",
+        res.returncode == 0 and one_json_result(res.stdout) and res.stderr == ""
+        and json.loads(res.stdout)["written"] is True
+        and catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))["gate"] == 0.2
+        and not os.path.exists(agents) and not os.path.exists(os.path.join(cfg, "backups")),
+        res.stderr + res.stdout[:200])
+
+with tempfile.TemporaryDirectory() as td:
+    env, cfg, agents, repo = live_layout(td)
+    res = cli_set(env, repo, "lanes.opus-high@claude.tier", "2", "--scope", "global")
+    claude = [name for name, lane in catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"].items()
+              if lane["harness"] == "claude"]
+    files = sorted(os.listdir(agents)) if os.path.isdir(agents) else []
+    wanted = sorted(f"lane-{name.split('@')[0]}.md" for name in claude)
+    noted = sorted(line for line in res.stderr.splitlines() if line.startswith("wrote "))
+    record("10.17 a global set on the live catalog gives every claude Lane its agent file, notes on stderr",
+        res.returncode == 0 and one_json_result(res.stdout)
+        and json.loads(res.stdout)["written"] is True
+        and files == wanted and len(claude) == 16
+        and noted == sorted(f"wrote {os.path.join(agents, f)}" for f in wanted)
+        and len(os.listdir(os.path.join(cfg, "backups"))) == 1,
+        f"files={files} stderr={res.stderr[:300]!r}")
+
+# An edit that lands after the apply's revision check, while it ranks, is
+# caught by the commit, and the refusal is the text the dashboard matches.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    path = os.path.join(cfg, "lanes.json")
+    kwargs = dict(scope="global", cwd=repo, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                  value=3, meters={}, present=ALL_HARNESSES)
+    preview = catalog_edit.edit_catalog("set", **kwargs)
+    original_preview = catalog_edit._rank_preview
+    def lands_while_ranking(*args):
+        catalog.write_json(path, dict(catalog.load_json(path), note="a set landed meanwhile"))
+        return original_preview(*args)
+    catalog_edit._rank_preview = lands_while_ranking
+    try:
+        msg = check_catalog_error(catalog_edit.edit_catalog, "set", apply=True,
+                                  expect=preview["revision"], **kwargs)
+    finally:
+        catalog_edit._rank_preview = original_preview
+    theirs = catalog.load_json(path)
+    record("10.18 an edit landing after the revision check is refused with the dashboard's text",
+        msg == "intervening edit: source documents or resolved paths changed; preview again"
+        and theirs.get("note") == "a set landed meanwhile"
+        and theirs["lanes"]["terra-high@codex"]["tier"] != 3
+        and not os.path.exists(os.path.join(cfg, "backups")), msg)
+
 # 11. routing.meters: validators, default on, project override, no-op absence.
 doc_m = copy.deepcopy(routing_sample)
 record("11.1 legacy routing without meters defaults on",
@@ -3091,5 +3227,26 @@ with tempfile.TemporaryDirectory() as td:
     record("21.5 the rank preview picks for every Class the catalog defines",
            list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
            repr(picks))
+
+# 22. Deepening F.1: one tie-break places the carried Lanes of a Tier. Order
+# first, a Lane without one after every Lane with one, ties by lane name.
+try:
+    tie_lanes = {
+        "zed@codex": {"tier": 2},
+        "mid@codex": {"tier": 2, "order": 7},
+        "abe@codex": {"tier": 2},
+        "top@codex": {"tier": 2, "order": 1},
+        "off@codex": {"tier": 2, "order": 2, "enabled": False},
+        "low@codex": {"tier": 1, "order": 1},
+        "two@codex": {"tier": 2, "order": 7, "enabled": True},
+    }
+    record("22.1 carried_in_tier orders by Order, then lane name, and skips off Lanes",
+           catalog.carried_in_tier(tie_lanes, 2)
+           == ["top@codex", "mid@codex", "two@codex", "abe@codex", "zed@codex"]
+           and catalog.carried_in_tier(tie_lanes, 1) == ["low@codex"]
+           and catalog.carried_in_tier(tie_lanes, 3) == [],
+           repr(catalog.carried_in_tier(tie_lanes, 2)))
+except Exception as e:
+    record("22.1 carried_in_tier orders by Order, then lane name, and skips off Lanes", False, repr(e))
 
 sys.exit(1 if fails else 0)

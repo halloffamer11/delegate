@@ -26,3 +26,12 @@ one real dispatch, `python3 scripts/model_queue.py show` lists what the scan fou
 - [x] A model no Lane runs reaches the wizard's start page.
 - [x] The wizard's write empties the queue.
 - [ ] The user sees a queued model on his Mac.
+
+## Queue rule replaced, 2026-10-11
+
+Delegate-deepening ticket 10 (decision D.4) replaced "The wizard's confirm write empties the
+queue", and the code's rule that a run whose refresh did not run keeps the queue. The full
+wizard now reads the queue with the catalog (`catalog_commit.read(queue=True)`) and names it on
+its start page whether or not the refresh ran; its save forgets exactly the entries it named,
+so a model noticed while the wizard is open stays queued. Focused screens, the scan and
+`catalog set` read no queue and forget nothing.

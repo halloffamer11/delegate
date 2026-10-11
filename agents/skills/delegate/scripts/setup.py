@@ -12,15 +12,13 @@ import time
 import bench
 import bench_page
 import catalog
-import catalog_edit
+import catalog_commit
+import catalog_draft
 import tier_lines as tier_line_rules
 import discover
 import effort
-import harnesses
-import model_queue
-import orchestrators
 import setup_tui
-from catalog import CatalogError, load_json, validate_lanes, validate_routing, write_json
+from catalog import CatalogError, load_json
 from harnesses import NAMES as HARNESSES
 
 # The wizard refreshes the Artificial Analysis rows itself, so that one command
@@ -29,14 +27,6 @@ AA_CACHE_DIR = os.path.expanduser("~/.cache/delegate/bench/aa")
 AA_MAX_AGE = 24 * 60 * 60
 # The rows a fixture run reads instead of fetching, beside the harness fixtures.
 AA_FIXTURE = "aa-accepted.json"
-
-# A native Lane runs in-process in its orchestrator, so the Lane is not live
-# until its agent file is (ticket 22). Which orchestrators run Lanes natively,
-# where their agent files live and what they hold is profile data
-# (orchestrators.py); setup writes files only for a profile that declares them.
-# The catalog is machine-local, so its agent files are too: they go straight
-# into the profile's agents directory, and never into the repo (the user,
-# 2026-09-29).
 
 
 class SetupAbort(Exception):
@@ -132,16 +122,18 @@ def read_discovery(args):
     return discovered
 
 
-def load_or_propose(config_dir, discovered):
-    lanes_path = os.path.join(config_dir, "lanes.json")
-    routing_path = os.path.join(config_dir, "routing.json")
-    if os.path.isfile(lanes_path):
-        lanes_doc = load_json(lanes_path)
-        routing_doc = load_json(routing_path)
-        validate_lanes(lanes_doc, lanes_path)
-        validate_routing(routing_doc, routing_path)
+def load_or_propose(snap, discovered):
+    """The catalog the wizard starts from: the documents `snap`, the launch
+    Catalog read, holds, or on a first run the sample proposal for the
+    harnesses discovered. Nothing here reads the catalog's files; every save
+    commits through `snap` (deepening D)."""
+    lanes_path, routing_path = snap.files["lanes"], snap.files["routing"]
+    if snap.lanes is not None:
+        if snap.routing is None:
+            raise CatalogError(f"{routing_path}: file is missing")
+        lanes_doc = copy.deepcopy(snap.lanes)
         # the wizard shows, and writes, every shipped Class (ticket 16)
-        routing_doc = catalog.with_default_classes(routing_doc)
+        routing_doc = catalog.with_default_classes(snap.routing)
     else:
         samples_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "samples"))
         sample_lanes = load_json(os.path.join(samples_dir, "lanes.json"))
@@ -184,9 +176,11 @@ def note_undiscovered_lanes(lanes_doc, discovery_data):
             print(f"{name}: {lane['harness']} discovery error ({err}); the lane stays")
 
 
-def show_bench(args, lanes_doc, routing_doc, rows=None):
-    """`rows` is the `(rows, message)` pair `load_effort_rows` gives, already
-    read from the refreshed list; without one this reads the list on `args`."""
+def show_bench(args, draft, rows=None):
+    """The benchmark report on the Lanes as `draft`, a `CatalogDraft`, holds
+    them. `rows` is the `(rows, message)` pair `load_effort_rows` gives,
+    already read from the refreshed list; without one this reads the list on
+    `args`."""
     if args.no_bench:
         return
     if args.bench_report:
@@ -203,7 +197,7 @@ def show_bench(args, lanes_doc, routing_doc, rows=None):
         return
     try:
         data = bench.collect(
-            lanes_doc,
+            draft.documents()["lanes"],
             epoch_csv=args.epoch_csv,
             effort_rows=effort_rows,
         )
@@ -250,7 +244,11 @@ def ask_fraction(label, current):
         print(rule)
 
 
-def ask_lanes(lanes_doc):
+def ask_lanes(lanes_doc, draft):
+    """One Tier prompt per Lane of `lanes_doc`, the documents `draft` was
+    built from, its default the Tier the draft holds. Each answer places the
+    Lane in the draft: a carried Lane that changes Tier goes to the end of its
+    new one, and an off Lane takes only the Tier (deepening F)."""
     for name, lane in lanes_doc["lanes"].items():
         print(name)
         print(f"  harness: {lane['harness']}")
@@ -258,7 +256,7 @@ def ask_lanes(lanes_doc):
         print(f"  effort: {lane['effort']}")
         print(f"  meter: {lane['meter']}")
         print(f"  basis: {lane['basis']}")
-        lane["tier"] = ask_int("tier", lane["tier"], 1, 4)
+        draft.place(name, ask_int("tier", draft.lane(name).tier, 1, 4))
 
 
 def show_routing(routing_doc):
@@ -270,7 +268,10 @@ def show_routing(routing_doc):
     print(f"meters: {'on' if catalog.meters_enabled(routing_doc) else 'off'}")
 
 
-def ask_routing(routing_doc):
+def ask_routing(draft):
+    """The routing prompts; each answer is set on `draft`, whose rule for
+    meters on (no key where the catalog had none) is the only one."""
+    routing_doc = draft.documents()["routing"]
     show_routing(routing_doc)
     if read_answer("keep routing as shown? [Y/n] ").strip().lower() != "n":
         return
@@ -278,19 +279,16 @@ def ask_routing(routing_doc):
         cls_info = routing_doc["classes"][name]
         f = ask_int(f"{name} floor", cls_info["floor"], 1, 4)
         c = ask_int(f"{name} ceiling", max(f, cls_info["ceiling"]), f, 4)
-        cls_info["floor"] = f
-        cls_info["ceiling"] = c
-    routing_doc["margin"] = ask_fraction("margin", routing_doc["margin"])
-    routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
+        draft.set_routing("floor", f, name)
+        draft.set_routing("ceiling", c, name)
+    draft.set_routing("margin", ask_fraction("margin", routing_doc["margin"]))
+    draft.set_routing("gate", ask_fraction("gate", routing_doc["gate"]))
     current = "on" if catalog.meters_enabled(routing_doc) else "off"
     answer = read_answer(f"meters [{current}]: ").strip().lower()
     if answer in ("off", "false", "n", "no"):
-        routing_doc["meters"] = False
+        draft.set_routing("meters", False)
     elif answer in ("on", "true", "y", "yes"):
-        if "meters" not in routing_doc:
-            pass
-        else:
-            routing_doc["meters"] = True
+        draft.set_routing("meters", True)
 
 
 def aa_rows_path(paths):
@@ -410,9 +408,6 @@ def propose_generation(lanes_doc, discovery_data, rows):
     lanes_doc, refresh = discover.refresh_catalog(
         lanes_doc, discovery_data, published_models=published_model_names(rows[0])
     )
-    # what dispatch noticed since the last run, named on the start page (ticket 29)
-    refresh["queued"] = model_queue.pending()
-    refresh["applied"] = model_queue.applied()
     return lanes_doc, refresh, discover.map_lanes(discovery_data, lanes_doc)
 
 
@@ -438,99 +433,6 @@ def published_model_names(rows):
         if isinstance(row, dict) and row.get("source") == effort.AA_SOURCE
         and isinstance(row.get("model"), str)
     })
-
-
-def native_agent_text(lane_name, lane, profile):
-    """The agent file for one native Lane, from its orchestrator profile's
-    template. A model that takes no effort level carries no `effort` line."""
-    effort = lane["effort"] if discover.model_takes_effort(lane.get("harness"), lane["model"]) else None
-    return orchestrators.agent_text(profile, lane_name, lane["model"], effort)
-
-
-def native_agents_dir(config_dir, profile):
-    """Where a native Lane's agent file goes for this profile, or None.
-
-    The agent files and the catalog have to stay in step, so they are written
-    only when the catalog being written is this machine's live one,
-    `catalog.CONFIG_DIR`. A catalog somewhere else — a test, a throwaway copy —
-    gets none, because the profile's agents directory is not that catalog's.
-    """
-    here = os.path.realpath(os.path.expanduser(config_dir or ""))
-    live = os.path.realpath(os.path.expanduser(catalog.CONFIG_DIR))
-    return os.path.expanduser(profile["native"]["agents_dir"]) if here == live else None
-
-
-def native_targets(config_dir):
-    """[(profile, agents directory or None)] for each profile with native Lanes."""
-    return [(profile, native_agents_dir(config_dir, profile))
-            for profile in orchestrators.native_profiles()]
-
-
-def save_native_agents(refresh, lanes_doc, agents_dir, profile):
-    """Write the agent file of each new Lane on the profile's harness, remove
-    each superseded one, and return the lines to print.
-
-    A native Lane runs in-process, so a new Lane is not live until its file is,
-    and the wizard writes it before it exits (ticket 33). A link left at a
-    Lane's path — the stow link of a lane file the repo used to carry — is
-    removed first, so the write never lands in the repo through it.
-
-    An existing file of a Lane in the catalog that no longer matches the
-    template is rewritten, so a template change (browser ticket 02's `tools`
-    line) reaches the Lanes already placed.
-    """
-    refresh = refresh or {}
-    harness = profile["harness"]
-    lanes = lanes_doc.get("lanes") or {}
-    if agents_dir is None:
-        waiting = [name for name in refresh.get("new") or ()
-                   if (lanes.get(name) or {}).get("harness") == harness]
-        if not waiting:
-            return []
-        return [f"note: {len(waiting)} new {harness} lanes need an agent file; this catalog is "
-                "not the live one, so none was written"]
-    lines = []
-    for name in refresh.get("new") or ():
-        lane = lanes.get(name)
-        if not isinstance(lane, dict) or lane.get("harness") != harness:
-            continue
-        os.makedirs(agents_dir, exist_ok=True)
-        path = orchestrators.agent_path(profile, name, agents_dir)
-        if os.path.islink(path):
-            os.remove(path)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(native_agent_text(name, lane, profile))
-        lines.append(f"wrote {path}")
-    for name in refresh.get("removed") or ():
-        if harnesses.split_lane(name)[1] != harness or name in lanes:
-            continue
-        path = orchestrators.agent_path(profile, name, agents_dir)
-        if os.path.isfile(path) or os.path.islink(path):
-            os.remove(path)
-            lines.append(f"removed {path}")
-    fresh = set(refresh.get("new") or ())
-    for name, lane in lanes.items():
-        if name in fresh or not isinstance(lane, dict) or lane.get("harness") != harness:
-            continue
-        path = orchestrators.agent_path(profile, name, agents_dir)
-        if not os.path.isfile(path) or os.path.islink(path):
-            continue
-        text = native_agent_text(name, lane, profile)
-        with open(path, encoding="utf-8") as f:
-            if f.read() == text:
-                continue
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        lines.append(f"updated {path}")
-    return lines
-
-
-def save_all_native_agents(refresh, lanes_doc, targets):
-    """save_native_agents for every native profile's (profile, directory)."""
-    lines = []
-    for profile, agents_dir in targets or ():
-        lines += save_native_agents(refresh, lanes_doc, agents_dir, profile)
-    return lines
 
 
 def load_effort_rows(paths):
@@ -566,56 +468,33 @@ def read_tier_lines(path):
         raise CatalogError(f"tiers-from: {e}") from e
 
 
-def clear_queue(refresh):
-    """Empty dispatch's model queue once a run that saw it wrote the catalog
-    (ticket 29). A run whose refresh did not run saw no models, so it keeps
-    the queue for the next one."""
-    if refresh is not None and "queued" in refresh:
-        try:
-            model_queue.clear()
-        except OSError as e:
-            print(f"note: could not empty the model queue: {e}")
+def report_commit(done):
+    """What a save wrote, on stdout, and the commit's own lines on stderr: the
+    Agent files it wrote, updated or removed, and its notes."""
+    for path in done.written:
+        print(f"wrote {path}")
+    if not done.written:
+        print("nothing changed; nothing written")
+    for line in done.lines:
+        sys.stderr.write(f"{line}\n")
 
 
-def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=None,
-                      targets=None):
-    print(lanes_path)
-    print(routing_path)
-    for name, lane in lanes_doc["lanes"].items():
-        order = f", order {lane['order']}" if "order" in lane else ""
+def confirm_and_write(draft, read):
+    """The --plain confirm: list each Lane as `draft` writes it, with the
+    TUI confirm page's placement text, then commit the draft's documents
+    through the launch read `read`, which also keeps the Agent files in step
+    and forgets the Model queue entries the start facts named."""
+    documents = draft.documents()
+    print(read.files["lanes"])
+    print(read.files["routing"])
+    for name, lane in documents["lanes"]["lanes"].items():
         off = ", off" if lane.get("enabled") is False else ""
-        print(f"{name}: tier {lane['tier']}{order}{off}")
+        print(f"{name}: {setup_tui.placement_text(lane)}{off}")
     answer = read_answer("write both files? [y/N] ").strip()
     if answer not in ("y", "yes"):
         print("nothing written")
         return
-    validate_lanes(lanes_doc, lanes_path)
-    validate_routing(routing_doc, routing_path)
-    write_json(lanes_path, lanes_doc)
-    write_json(routing_path, routing_doc)
-    print(f"wrote {lanes_path}")
-    print(f"wrote {routing_path}")
-    clear_queue(refresh)
-    for line in save_all_native_agents(refresh, lanes_doc, targets):
-        print(line)
-
-
-def write_focused(config_dir, revision, original_lanes, original_routing,
-                  lanes, routing, lanes_path, routing_path):
-    """Check the sources again and preserve links and unchanged document bytes."""
-    if catalog_edit.catalog_revision(config_dir=config_dir) != revision:
-        raise CatalogError("intervening edit: catalog sources changed; reopen the focused screen")
-    validate_lanes(lanes, lanes_path)
-    validate_routing(routing, routing_path)
-    written = False
-    for path, old, new in ((lanes_path, original_lanes, lanes),
-                           (routing_path, original_routing, routing)):
-        if old != new:
-            catalog_edit._write_preserving_link(path, new)
-            print(f"wrote {path}")
-            written = True
-    if not written:
-        print("nothing changed; nothing written")
+    report_commit(catalog_commit.commit(read, documents))
 
 
 def main(argv=None):
@@ -654,19 +533,22 @@ def main(argv=None):
                 "use delegate catalog set, range, or order for non-interactive edits"
             )
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
-        focused_revision = catalog_edit.catalog_revision(config_dir=config_dir) if args.screen != "start" else None
+        # the one screen a focused run opens, or None for the full wizard
+        focus = None if args.screen == "start" else args.screen
+        # The catalog as read at launch. Every save commits through it, so a
+        # change made while the wizard is open is refused, never overwritten.
+        # The full wizard reads the Model queue with it: the start facts name
+        # that queue, and its commit forgets exactly what they named (D.4).
+        # A focused screen reads no queue, so its save forgets nothing.
+        snap = catalog_commit.read(config_dir, queue=focus is None)
         tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
-        existing = os.path.isfile(os.path.join(config_dir, "lanes.json"))
+        existing = snap.lanes is not None
         # Start from the editable catalog, acquire once, then filter only a
         # first-time proposal. Existing catalog decisions survive probe errors.
-        lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
-            config_dir, set(HARNESSES)
-        )
+        lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(snap, set(HARNESSES))
         discovered, discovery_data, rows, rows_note, effort_row_paths = scan(args, lanes_doc)
         if not existing:
-            lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
-                config_dir, discovered
-            )
+            lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(snap, discovered)
         else:
             note_undiscovered_lanes(lanes_doc, discovery_data)
         # the catalog as read, which a rescan starts from again. On a first
@@ -674,23 +556,35 @@ def main(argv=None):
         # rescan never proposes it again: a harness only the rescan finds gets
         # none of the sample's Lanes, only what the refresh proposes for it.
         base_lanes = copy.deepcopy(lanes_doc)
-        lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data, rows)
+        # A focused screen starts from the catalog as read and proposes no
+        # generation: it has no start page to state a refresh, and its save
+        # writes only the change made on it (deepening D.6).
+        refresh = None
+        if focus is None:
+            lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data, rows)
         # Discovery reports drift at the moment the human is already deciding
         # tiers, and it must never be able to stop them getting there: any
         # failure becomes the reason string the start facts print. Both
         # interfaces print the same facts.
         if plain:
+            # Every prompt decides on one draft of the catalog as read (with
+            # the generation refresh), and the save writes only the fields
+            # those decisions changed (deepening F.3).
+            draft = catalog_draft.CatalogDraft(lanes_doc, routing_doc, whole=False)
             # the prompt-driven interface writes no benchmark page; it prints
             # the report instead, so the page line says (not written)
             for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
                                               width=10_000, refresh=refresh,
-                                              rows_note=rows_note):
+                                              rows_note=rows_note, queued=snap.queued,
+                                              applied=snap.applied):
                 print(line)
             if tier_lines is not None:
                 # the same parser and summary as the review page's `v`; the
-                # tiers become the prompts' defaults, and an off line is written off
+                # tiers become the prompts' defaults, an off line is written
+                # off, and with no review page here the lines' order inside
+                # each tier is the order written (ticket 28)
                 parsed = tier_line_rules.parse_tier_lines(tier_lines, lanes_doc)
-                dropped = tier_line_rules.apply_tier_lines_to_doc(lanes_doc, parsed)
+                dropped = draft.apply(parsed["decided"], "off")
                 print(tier_line_rules.tier_lines_summary(parsed, dropped))
             if effort_row_paths:
                 # The pre-screen is a selectable screen; there is no prompt-driven
@@ -700,15 +594,10 @@ def main(argv=None):
                 print("note: --effort-rows drives the pre-screen, which the prompt-driven "
                       "interface does not have; no lane will be proposed off. Run on a "
                       "terminal without --plain to use it.")
-            show_bench(args, lanes_doc, routing_doc, rows=rows)
-            ask_lanes(lanes_doc)
-            if tier_lines is not None:
-                # no review page here: the lines' order inside each tier is the
-                # order written (ticket 28)
-                tier_line_rules.write_order_from_lines(lanes_doc, parsed)
-            ask_routing(routing_doc)
-            confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path,
-                              refresh=refresh, targets=native_targets(config_dir))
+            show_bench(args, draft, rows=rows)
+            ask_lanes(lanes_doc, draft)
+            ask_routing(draft)
+            confirm_and_write(draft, snap)
         else:
             if args.bench_report:
                 print("note: --bench-report is ignored in TUI mode")
@@ -746,37 +635,41 @@ def main(argv=None):
                 bench_page_path=page_path,
                 effort_rows=effort_rows,
                 discovery=discovery_data,
-                focus=None if args.screen == "start" else args.screen,
+                focus=focus,
                 refresh=refresh,
                 rows_note=rows_note,
-                rescan=rescan if args.screen == "start" else None,
+                rescan=rescan if focus is None else None,
                 tier_lines=tier_lines,
+                queued=snap.queued,
+                applied=snap.applied,
             )
             if tier_lines is not None:
                 summary = wizard.apply_start_lines()
                 wizard.message = f"{initial_message}; {summary}" if initial_message else summary
-            result = setup_tui.run_curses(wizard)
-            if result is None:
+            documents = setup_tui.run_curses(wizard)
+            if documents is None:
                 print("nothing written")
             else:
-                result_lanes, result_routing = result
-                validate_lanes(result_lanes, lanes_path)
-                validate_routing(result_routing, routing_path)
-                if args.screen != "start":
-                    write_focused(config_dir, focused_revision, lanes_doc, routing_doc,
-                                  result_lanes, result_routing, lanes_path, routing_path)
-                else:
-                    write_json(lanes_path, result_lanes)
-                    write_json(routing_path, result_routing)
-                    print(f"wrote {lanes_path}")
-                    print(f"wrote {routing_path}")
-                    clear_queue(wizard.refresh)
-                    # the plan the wizard holds: a rescan replaced launch's
-                    for line in save_all_native_agents(wizard.refresh, result_lanes,
-                                                       native_targets(config_dir)):
-                        print(line)
+                if focus is not None:
+                    # A focused save commits only the documents its draft's
+                    # changes touch, the ones its confirm page listed. The
+                    # routing a screen shows carries every shipped Class, so
+                    # committing it unchanged would write a file the confirm
+                    # page never listed (deepening D3, F). On a first run the
+                    # read found no catalog: a save that writes one document
+                    # writes the other as the screen showed it, so the
+                    # catalog is never left half written.
+                    changed = setup_tui.changed_documents(wizard.draft.changes())
+                    absent = [name for name in documents if getattr(snap, name) is None]
+                    documents = {name: doc for name, doc in documents.items()
+                                 if name in changed or (changed and name in absent)}
+                report_commit(catalog_commit.commit(snap, documents))
     except SetupAbort:
         return 130
+    except catalog_commit.CatalogChanged as e:
+        sys.stderr.write(f"setup: {e}; nothing written. Run setup again to start from the "
+                         "catalog as it is now.\n")
+        return 1
     except CatalogError as e:
         sys.stderr.write(f"setup: {e}\n")
         return 1

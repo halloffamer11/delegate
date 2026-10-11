@@ -87,7 +87,7 @@ delegate-codex-home:
 		echo "NOTE: ~/.codex/auth.json is absent — run 'codex login', then 'make delegate-codex-home' again"; \
 	fi
 
-# Writes this machine's catalog, ~/.config/delegate, and the agent file of each new
+# Writes this machine's catalog, ~/.config/delegate, and the agent file of every
 # native claude lane straight into ~/.claude/agents, so a new lane is live with no
 # second command (ticket 33). Neither is in the repo.
 delegate-wizard:

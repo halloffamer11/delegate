@@ -20,6 +20,7 @@ catalog` command in `catalog_cli`, bulk Tier lines in `tier_lines` and the
 published-name reconciliation in `published_names`.
 """
 import copy
+import errno
 import json
 import os
 import re
@@ -83,10 +84,36 @@ def format_json(doc):
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
+def link_target(path):
+    """Where a catalog document at `path` lives: the file a link there names,
+    or `path` itself when it is no link.
+
+    The link rule (deepening decision D.1): a catalog document is written
+    through a link to an existing file, and the link stays. A dangling link or
+    a loop raises CatalogError naming the link and its target, so a write never
+    creates the file a dangling link names.
+    """
+    full_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.islink(full_path):
+        return full_path
+    if not os.path.exists(full_path):
+        try:
+            os.stat(full_path)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise CatalogError(f"{path}: link loop through {os.readlink(full_path)}")
+        raise CatalogError(
+            f"{path}: dangling link to {os.path.realpath(full_path)}, which does not exist; "
+            "point the link at the file or remove it"
+        )
+    return os.path.realpath(full_path)
+
+
 def write_json(path, doc):
     """Writes format_json(doc) atomically (temp file in the same directory, then os.replace).
-    Creates parent directory if needed."""
-    full_path = os.path.abspath(os.path.expanduser(path))
+    Creates parent directory if needed. A link at `path` is written through and
+    stays; a dangling link or a loop is refused (`link_target`)."""
+    full_path = link_target(path)
     parent_dir = os.path.dirname(full_path)
     os.makedirs(parent_dir, exist_ok=True)
     text = format_json(doc)
@@ -982,6 +1009,19 @@ def effective_routing(cwd=None, config_dir=None, lanes_doc=None, lanes_source=No
     return routing, sources
 
 
+def carried_in_tier(lanes, tier):
+    """The carried Lanes at `tier`, by Order; a Lane without one comes after every
+    Lane with one, and ties go by lane name. This is the order rank tries them in
+    with Meters off. `lanes` is {lane name: record}. The one tie-break: the setup
+    draft, `catalog set` and `catalog order`, and Project order all number a Tier
+    with it (deepening F.1)."""
+    names = [name for name, lane in lanes.items()
+             if lane.get("enabled", True) and lane.get("tier") == tier]
+    names.sort(key=lambda name: (lanes[name].get("order") is None,
+                                 lanes[name].get("order") or 0, name))
+    return names
+
+
 def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
                      project_lanes_source=None):
     """Return lane records with the project Tier and the Project order projection.
@@ -1021,20 +1061,8 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
         named_in_tier = [
             name for name in project_order if effective[name]["tier"] == tier
         ]
-        unnamed = sorted(
-            (
-                (name, lane)
-                for name, lane in effective.items()
-                if lane["tier"] == tier
-                and lane.get("enabled", True)
-                and name not in named
-            ),
-            key=lambda item: (
-                item[1].get("order") is None,
-                item[1].get("order", 0),
-                item[0],
-            ),
-        )
+        unnamed = [(name, effective[name]) for name in carried_in_tier(effective, tier)
+                   if name not in named]
         ordered_names = _place_by_global_order(named_in_tier, unnamed, effective)
         for order, lane_name in enumerate(ordered_names, 1):
             effective[lane_name]["order"] = order

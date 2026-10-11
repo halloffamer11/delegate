@@ -192,12 +192,6 @@ def read_harness(harness, fixture_dir=None, runner=None):
     return raw, None
 
 
-def model_takes_effort(harness, slug):
-    """False for a model its harness runs with no effort level at all."""
-    adapter = harnesses.get(harness)
-    return adapter is None or adapter.model_takes_effort(slug)
-
-
 def model_level(slug, harness):
     """(level, version) for a model slug: the slug with its version taken out,
     and that version as a tuple of whole numbers.

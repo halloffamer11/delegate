@@ -157,8 +157,9 @@ def test_order_is_a_list():
                "/tmp/lanes.json", "/tmp/routing.json", effort_rows=AA_ROWS, class_guide={})
     walk_to_tier_four(w)
     w.handle("p")
-    record("taking the proposals keeps that order",
-           sorted(w._line_order, key=w._line_order.get) == names, repr(w._line_order))
+    # each Tier's proposed Lanes come first in it, in the proposal's order
+    taken = [name for tier in (4, 3, 2, 1) for name in w.draft.tier_lanes(tier) if name in proposals]
+    record("taking the proposals keeps that order", taken == names, repr(taken))
 
 
 def test_wizard_confirm_and_quit():
@@ -181,7 +182,7 @@ def test_wizard_confirm_and_quit():
     w.handle("y")
     result = w.result()
     expected = {name: p["tier"] for name, p in tier_proposal.propose(LANES, AA_ROWS, SETTINGS).items()}
-    written = result and {name: lane["tier"] for name, lane in result[0]["lanes"].items()}
+    written = result and {name: lane["tier"] for name, lane in result["lanes"]["lanes"].items()}
     record("confirming writes the proposed Tiers; a Lane with no score keeps its own",
            written is not None
            and all(written[name] == tier for name, tier in expected.items())

@@ -49,20 +49,62 @@ replaces partial use of invalid documents.
   `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`): load,
   validate and project the effective catalog, and nothing else (ticket 26). It imports no other
   delegate script but `harnesses` and `published_names`, so `rank` can import it with no cycle.
+  `write_json` carries the link rule for every catalog document, `catalog fmt` included: a link to
+  an existing file is written through and stays, and a dangling link or a loop is refused
+  (`link_target`; deepening decision D.1).
   The efforts a harness offers are its adapter's `efforts`, with the command or page that proved
   each list; `check` and `delegate.py --effort` refuse anything outside them (ticket 19).
+- `scripts/catalog_commit.py`: the write path for catalog documents (deepening D). `read()` is the
+  Catalog read: the global pair, and the project pair when given a directory under a Git root, each
+  file's bytes, link and resolved path, and one revision over them all; it parses strict JSON,
+  validates, and refuses a dangling link or a loop. `commit(read, documents)` validates with the
+  same validators, refuses an Intervening edit (`CatalogChanged`, naming each changed document),
+  skips a document equal to its read, copies each global document it replaces to
+  `<config dir>/backups/<name>-<UTC stamp>.json` (the newest 20 per document kept; project
+  documents are not backed up), writes through links, and puts back what it already wrote when a
+  later write fails. A commit whose documents include the live catalog's global lanes (the config
+  dir resolves to `catalog.CONFIG_DIR`) then gives every native Lane its Agent file and removes the
+  file of each native Lane it took out; another catalog, or project documents alone, write none.
+  Last it forgets the Model queue entries its read returned (`read(queue=True)`). A failure in
+  either step is a line in `Committed.lines`, which callers print to stderr. The wizard's saves
+  commit through the read taken at launch, and dispatch's scan and `edit_catalog`'s apply commit
+  through theirs. No other script writes a catalog document, except `catalog fmt`, which formats
+  one named file through `catalog.write_json`.
 - `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
-  previews cached Picks and resolved source paths, validates complete proposals, preserves stow
-  symlinks, and rechecks source revisions before writing one document. `plan_edits()` is the one
-  planning path (ticket 14). It takes the source documents already in hand and a list of the same
+  previews cached Picks and resolved source paths from `catalog_commit.read()` and validates
+  complete proposals. An apply checks `--expect` against that read's revision, then commits its one
+  document with `catalog_commit.commit(read, {dest: doc})`; a `CatalogChanged` there is the same
+  "intervening edit" refusal, and `Committed.lines` go to stderr, so `catalog set`'s JSON stdout is
+  only the result. A global apply backs up the document it replaces, and one that writes the live
+  catalog's `lanes.json` keeps the Agent files in step; a project apply, the dashboard's only
+  write, does neither. An empty customization over an absent file is a noop and commits nothing.
+  `plan_edits()` is the one planning path (ticket 14). It takes the source documents already in hand and a list of the same
   `set`/`range`/`order` operations, plans each one onto the documents the one before it produced,
   and returns named fields: the four planned documents, the effective `catalog` they produce, and
   one `steps` entry per operation with its `dest` and `values`. It reads no Meter and writes
   nothing. `edit_catalog()` plans its one edit through it, and so does the dashboard's staged view,
   so there is no second planner to drift.
+- `scripts/catalog_draft.py`: the Draft (deepening F). `CatalogDraft(lanes_doc, routing_doc,
+  whole=)` holds the catalog setup started from and every decision made since: verbs `carry`,
+  `place` (with `at` a place, clamped, or `"end"`), `apply` (tier lines with `unnamed="off"`, the
+  tier proposal with `"keep"`), `set_routing` and `settle`; answers `is_settled`, `lane`,
+  `tier_lanes`, `documents()` and `changes()`. `documents()` is `{"lanes", "routing"}`, keyed by
+  `catalog_commit.DOCUMENTS` names, so `catalog_commit.commit(read, draft.documents())` takes it
+  whole; `changes()` is its field diff against the documents as given. It owns the rules for placing
+  a Lane in its Tier: a Tier as given is numbered by `catalog.carried_in_tier` (Order, a Lane
+  without one after every Lane with one, then lane name, the one tie-break that `catalog set`,
+  `catalog order` and Project order also use); a Lane joining another Tier goes to its end; a Lane
+  returning to its start Tier takes back its starting place, so undo is exact. It owns both save
+  scopes: `whole=True` numbers every carried Lane 1 to n and writes `enabled: false` only on off
+  Lanes; `whole=False` writes only changed fields and numbers a Tier only when its sequence changed
+  or lines or a proposal set it. It owns the meters-on rule too (no key where the catalog had none).
+  It never mutates what it is given and validates nothing; the commit does. A draft compares by
+  value and is never hashed. `setup.py --plain` decides on one with `whole=False`, and
+  `setup_tui.Wizard` keeps one as `self.draft`: `whole=True` in the full wizard, `whole=False` on a
+  focused screen.
 - `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
   edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
-  `scripts/tier_lines.py`: bulk Tier lines for the wizard.
+  `scripts/tier_lines.py`: the parser and summary line for bulk Tier lines; the Draft applies them.
 - `scripts/published_names.py`: the mapping from a benchmark source's printed model name to a
   lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the
   member of an agy slug family); `bench.py`, `tier_proposal.py` and the setup pre-screen read it.
@@ -182,12 +224,19 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.
   `dispatch --model` naming such a model queues it too. The queue is `new-models.json` beside the
-  meter cache. The wizard's start facts name it ("Dispatch noticed") and its write empties it.
+  meter cache. The full wizard reads it with the catalog (`catalog_commit.read(queue=True)`) and
+  its start facts name it ("Dispatch noticed") whether or not the refresh ran; its save forgets
+  exactly the entries those facts named and keeps any noted since (deepening D.4, which replaces
+  any-harness ticket 29's "the wizard's confirm write empties the queue" and the rule that a run
+  whose refresh did not run keeps it). Focused screens read no queue and forget nothing.
   `$DELEGATE_MODEL_SCAN=off` stops the scan. A newer version of a model the catalog already runs
   is not queued but applied (ticket 44 of the redesign): the scan swaps each Lane the refresh
-  replaces with its successor into lanes.json, keeping Tier, Order and an off Lane off, after
-  copying lanes.json to `lanes-backups/` beside the queue. The wizard names the swaps ("Dispatch
-  swapped in"). `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
+  replaces with its successor into lanes.json, keeping Tier, Order and an off Lane off, through a
+  Catalog commit, so the old lanes.json is backed up to `<config dir>/backups` and the Agent files
+  follow. A catalog that changed while the scan listed models (`CatalogChanged`) is left to that
+  writer, and the newer version is queued instead. The scan imports `catalog_commit`, never
+  `setup` or `catalog_edit`. The wizard names the swaps ("Dispatch swapped in").
+  `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `log --run` and `cost` price a Run
   from `dispatch.json`'s `tokens` and the Lane's price record (`compute_cost(tokens, lane, catalog)`,
   delegate-deepening 08); null tokens, or a Run directory from before them, are unmeasured, never
@@ -214,12 +263,20 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   them in sections tier 4 to 1, each numbered in its current order; j/k moves the cursor, J/K or
   shift-up/down moves the lane inside its tier, 1-4 moves it to the end of that tier, and the
   confirm write gives each carried lane `order`, its place from 1 (`catalog.py check` takes `order`
-  as a whole number from 1). The starting order is the applied lines' order, then an `order` the
-  catalog already has at that tier, then benchmark order. Tier pages restore the current catalog as
-  their editable defaults: lanes at the current tier are marked, lanes at a lower tier are visible
-  and unmarked, and lanes taken by a higher tier or not carried are hidden. Enter without edits
-  preserves the current tiers and order; a lane not carried keeps its catalog tier. Lines applied by
-  `v` or `--tiers-from` become the same editable defaults. The routing page explains the setting
+  as a whole number from 1). The confirm page lists each lane as `y` writes it, from the Draft's
+  `documents()`: `tier N, order M`, or `tier N` for a lane off (`setup_tui.placement_text`, which
+  `--plain`'s confirm listing prints too); its cursor runs over the rows the page draws, as the
+  routing page's runs over its settings. The starting order is the Draft's: the Order as read, then lane name;
+  lines and `p` put the lanes they name first in their tier, in their order; a lane that joins a
+  tier, by a tick or by 1-4, joins it at its end; and undo restores the starting place, so a lane
+  ticked back, or switched off and on, returns to its place. Tier pages restore the current catalog
+  as their editable defaults: lanes at the current tier are marked, lanes at a lower tier are
+  visible and unmarked, and lanes taken by a higher tier or not carried are hidden. A tick places
+  the lane at once; an untick returns it to its start tier when that tier is lower, and otherwise
+  leaves it for a lower page (on a focused screen, one tier down); entering tier 1 places every lane
+  still unplaced, in lane-name order. Enter decides nothing: without edits it keeps the current
+  tiers and order, and a lane not carried keeps the tier it started with. Lines applied by `v` or
+  `--tiers-from` become the same editable defaults. The routing page explains the setting
   under the cursor in a panel beside the table. The start page, and `--plain` from the same
   `setup_tui.start_facts`, states only facts: the two files, the benchmark page, the discovery
   notices. Setup discovery is one `discover.discover` result; `--no-discover` skips every probe;
@@ -241,9 +298,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   shows what the launch scrub found — per harness its status, models listed, and the Lanes the
   refresh adds and removes — with the rows note, and `r` runs the scrub again through `setup.scan`,
   `setup.propose_generation` and `setup.collect_bench` (the callback `main` passes as `rescan`,
-  forcing the rows fetch past the 24 h cache), after which `Wizard._load` derives every later page
-  again and the `--tiers-from` lines are applied again; it is offered on that page only, before any
-  decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
+  forcing the rows fetch past the 24 h cache), after which `Wizard._load` builds a new Draft and
+  the `--tiers-from` lines are applied again; it is offered on that page only, before any decision,
+  and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
@@ -286,14 +343,15 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `tier_lines.parse_tier_lines` and one summary line
   (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it
   (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines'
-  order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives
-  each meter its harness colour, and a second meter on one harness (`claude-fable`) a shade of it
-  (`--h-<harness>-1`); the panel counts per meter. Under the plots a sensitivity table gives, per
-  placed lane, the tier each board alone would give it at the page's tier proportions, with the
-  composite shown and never counted; a lane another carried lane beats on score for no more cost on
-  a board shown says "beaten by" in its tooltip and panel line. Both are display aids computed in
-  the script (`sensitivity`, `beatenByLane`); the carry rule is unchanged. `--effort-rows` may be
-  repeated to put several sources on one page.
+  order inside a tier is the `order` written, and a prompt that moves a carried lane to another tier
+  puts it at that tier's end and numbers the tiers it left and joined (the Draft). Colour is the
+  meter: `bench_page.meter_shades` gives each meter its harness colour, and a second meter on one
+  harness (`claude-fable`) a shade of it (`--h-<harness>-1`); the panel counts per meter. Under the
+  plots a sensitivity table gives, per placed lane, the tier each board alone would give it at the
+  page's tier proportions, with the composite shown and never counted; a lane another carried lane
+  beats on score for no more cost on a board shown says "beaten by" in its tooltip and panel line.
+  Both are display aids computed in the script (`sensitivity`, `beatenByLane`); the carry rule is
+  unchanged. `--effort-rows` may be repeated to put several sources on one page.
 The tier pages propose a Tier for each carried Lane with a score (ticket 17,
 `scripts/tier_proposal.py`): the rule is `routing.json`'s `tier_proposal` (source, benchmark,
 thresholds for Tiers 2-4, diversity; the sample catalog's when a catalog has none,
@@ -314,15 +372,14 @@ stays on the repo's rows, and `--fixture-dir` reads `aa-accepted.json` beside th
 harness fixtures instead, so a test touches no network and no cache. The fetch runs
 in a thread beside the harness probes. `discover.refresh_catalog` then proposes the
 current generation in memory and `setup_tui.refresh_lines` states it on the start
-page, one line per model. The save writes the agent file of each new native lane, for every profile
-that
-declares native Lanes, and removes each superseded one (`setup.save_native_agents`,
-`setup.native_agent_text`, from the profile's template); `setup.native_agents_dir` returns the
-profile's agents directory only
-when the catalog being written is the live `~/.config/delegate`, so a catalog in a
-temp directory gets a note instead of a file. The agent files are machine-local like
-the catalog, and a stow link left at a lane's path is removed before the write, so the
-write never lands in the repo. Prices are never proposed.
+page, one line per model. The save's Catalog commit gives every native lane in the
+catalog its agent file, for every profile that declares native Lanes, in the profile's
+template, and removes the file of each lane it took out (`catalog_commit`, deepening
+D.7). It does so only when the catalog being written is the live `~/.config/delegate`,
+so a catalog in a temp directory gets a note instead of a file. The agent files are
+machine-local like the catalog, and a stow link left at a lane's path is replaced by a
+plain file, never written through, so the write never lands in the repo. Prices are
+never proposed.
 A project file that names a lane the refresh removed warns on stderr and is ignored
 (`catalog.warn_stale_lane`); the next project save drops it. A lane the wizard turned
 off is the same case (`catalog.warn_off_lane`, ticket 36): on the read it warns and
@@ -331,19 +388,29 @@ takes no place in its Tier, and only a save refuses it —
 A new lane starts carried, `ultra` apart, so every effort of every current model
 reaches the screening page; `enabled` is the one field a successor does not inherit,
 because a predecessor switched off at an effort judged that model, not this one
-(ticket 35, changing ticket 33). `o` writes the page again before opening it, from
-`Wizard.current_lanes()` — the document the session started from, with the carry and
-Tier decisions made so far — so a lane carried on the carry page reaches the page
+(ticket 35, changing ticket 33). `o` writes the page again before opening it, from the
+Draft's `documents()["lanes"]` — the document the session started from, with the carry
+and Tier decisions made so far — so a lane carried on the carry page reaches the page
 (`Wizard.rewrite_bench_page`). The page's catalog key is its lane names, which no
 screen changes, so tiers already drawn in the browser survive the rewrite.
 Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
-It restores current choices and shows only changed fields before confirmation.
-Untouched records and documents retain their bytes; changed sources use a revision
-check and symlink-preserving writes. The full `start` wizard keeps its bulk save
-behavior. Catalog owns the bulk tier-line parser/application/order helpers;
-`setup_tui` keeps aliases. The routing screen exposes metering with `[x]`/`[ ]`,
-space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark moves
-down one Tier; Tier 1 requires Carry to switch off.
+It starts from the catalog as read and proposes no generation (deepening D.6): it has
+no start page to state a refresh. It restores current choices and shows only changed
+fields before confirmation: `draft.changes()`. Its save commits only the documents
+those changes touch (`setup_tui.changed_documents`) through the Catalog read taken at
+launch, which holds no Model queue: untouched
+records and documents keep their bytes, a shipped Class the routing lacks is shown
+but never written unless a routing field changed, and a save with no change writes
+nothing. On a first run, with no catalog yet, a focused save that writes one document
+writes the other as the screen showed it, so the catalog is never half written. The
+full `start` wizard and `--plain` commit both documents through the Catalog read taken
+at launch (`catalog_commit`). On every screen a document changed since launch, by
+`catalog set` or by the scan's Model swap, stops the save, which names it, writes
+nothing and exits 1. `tier_lines` owns the bulk tier-line parser and summary, and
+the Draft applies the lines; `setup_tui` keeps aliases. The routing screen exposes
+metering with `[x]`/`[ ]`, space/x or +/-. Legacy absence stays absent on a no-op.
+Focused Tier unmark moves down one Tier, or back to the lower Tier a Lane ticked there
+started in, at its starting place; Tier 1 requires Carry to switch off.
 
 - `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their
   efforts, each from the adapter's `models()`. Efforts come from

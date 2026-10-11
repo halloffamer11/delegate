@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """tier_lines.py — bulk Tier lines: the benchmark page's decisions, pasted into
-the wizard (ticket 27 of the redesign). The wizard (`setup_tui`) is the one
-caller. Split out of catalog.py (ticket 26).
+the wizard (ticket 27 of the redesign). The parser and the summary line, for
+the wizard (`setup_tui`) and `setup.py --plain --tiers-from`; applying the
+lines, and switching off the carried lanes they do not name, is the Draft's
+(`catalog_draft.CatalogDraft.apply`, deepening F). Split out of catalog.py
+(ticket 26).
 """
 
 TIER_LINE_VALUES = {"1": 1, "2": 2, "3": 3, "4": 4, "off": "off"}
@@ -43,17 +46,6 @@ def parse_tier_lines(text, lanes_doc):
     return out
 
 
-def unnamed_carried(parsed, carried):
-    """The carried lanes a set of lines does not name. They go off: "if it's not
-    in the tier list, it's not used" (the user, 2026-09-12; ticket 28).
-
-    Lines that name no lane in the catalog decide nothing, so they switch nothing
-    off: a clipboard holding the wrong text must not empty the catalog."""
-    if not parsed["decided"]:
-        return []
-    return [name for name in carried if name not in parsed["decided"]]
-
-
 def tier_lines_summary(parsed, dropped=()):
     """The one line that says what a set of tier lines did: how many lanes took
     a tier, how many went off by a line, how many carried lanes went off because
@@ -75,40 +67,3 @@ def tier_lines_summary(parsed, dropped=()):
     if parsed["bad"]:
         parts.append("not <lane> <1-4|off>, ignored: line " + ", ".join(str(n) for n in parsed["bad"]))
     return "Lines: " + "; ".join(parts) + "."
-
-
-def apply_tier_lines_to_doc(lanes_doc, parsed):
-    """The prompt-driven interface's form of the same lines: a tier line sets
-    the lane's tier and carries it, an off line records it off, and a carried
-    lane no line names is recorded off (ticket 28). Returns those lanes."""
-    carried = [name for name, lane in lanes_doc["lanes"].items() if lane.get("enabled", True)]
-    dropped = unnamed_carried(parsed, carried)
-    for name in dropped:
-        lanes_doc["lanes"][name]["enabled"] = False
-    for name, value in parsed["decided"].items():
-        lane = lanes_doc["lanes"][name]
-        if value == "off":
-            lane["enabled"] = False
-        else:
-            lane["tier"] = value
-            lane.pop("enabled", None)
-    return dropped
-
-
-def write_order_from_lines(lanes_doc, parsed):
-    """`--plain` has no review page, so the lines' order inside each tier is the
-    order written: each carried lane a line named gets `order`, its place in its
-    tier from 1, counted on the tier it holds after the prompts. A lane not
-    carried loses any `order` it had. Lines that name no lane change nothing."""
-    if not parsed["decided"]:
-        return
-    placed = {}
-    for name in parsed["decided"]:
-        lane = lanes_doc["lanes"][name]
-        if not lane.get("enabled", True):
-            continue
-        placed[lane["tier"]] = placed.get(lane["tier"], 0) + 1
-        lane["order"] = placed[lane["tier"]]
-    for lane in lanes_doc["lanes"].values():
-        if not lane.get("enabled", True):
-            lane.pop("order", None)
