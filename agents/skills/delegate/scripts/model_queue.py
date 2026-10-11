@@ -196,14 +196,13 @@ def _write_applied(base, lanes_path, raw, doc, swaps):
     it (a wizard run in between wins), and the native agents that follow it.
     Returns True when it wrote."""
     import catalog
-    import catalog_edit
     import setup
     catalog.validate_lanes(doc, source=lanes_path)
     with open(lanes_path, "rb") as f:
         if f.read() != raw:
             return False
     _backup(lanes_path, raw)
-    catalog_edit._write_preserving_link(lanes_path, doc)
+    catalog.write_json(lanes_path, doc)
     change = {"new": [new for _old, new in swaps], "removed": [old for old, _new in swaps]}
     setup.save_all_native_agents(change, doc, setup.native_targets(base))
     return True

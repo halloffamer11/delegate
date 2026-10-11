@@ -49,11 +49,25 @@ replaces partial use of invalid documents.
   `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`): load,
   validate and project the effective catalog, and nothing else (ticket 26). It imports no other
   delegate script but `harnesses` and `published_names`, so `rank` can import it with no cycle.
+  `write_json` carries the link rule for every catalog document, `catalog fmt` included: a link to
+  an existing file is written through and stays, and a dangling link or a loop is refused
+  (`link_target`; deepening decision D.1).
   The efforts a harness offers are its adapter's `efforts`, with the command or page that proved
   each list; `check` and `delegate.py --effort` refuse anything outside them (ticket 19).
+- `scripts/catalog_commit.py`: the write path for catalog documents (deepening D). `read()` is the
+  Catalog read: the global pair, and the project pair when given a directory under a Git root, each
+  file's bytes, link and resolved path, and one revision over them all; it parses strict JSON,
+  validates, and refuses a dangling link or a loop. `commit(read, documents)` validates with the
+  same validators, refuses an Intervening edit (`CatalogChanged`, naming each changed document),
+  skips a document equal to its read, copies each global document it replaces to
+  `<config dir>/backups/<name>-<UTC stamp>.json` (the newest 20 per document kept; project
+  documents are not backed up), writes through links, and puts back what it already wrote when a
+  later write fails. The wizard's full save and `--plain` save commit through the read taken at
+  launch.
 - `scripts/catalog_edit.py`: revision-checked `set`/`range`/`order`. `edit_catalog()`
-  previews cached Picks and resolved source paths, validates complete proposals, preserves stow
-  symlinks, and rechecks source revisions before writing one document. `plan_edits()` is the one
+  previews cached Picks and resolved source paths from `catalog_commit.read()`, validates complete
+  proposals, and rechecks the revision before writing one document through `catalog.write_json`,
+  which writes through links. `plan_edits()` is the one
   planning path (ticket 14). It takes the source documents already in hand and a list of the same
   `set`/`range`/`order` operations, plans each one onto the documents the one before it produced,
   and returns named fields: the four planned documents, the effective `catalog` they produce, and
@@ -295,8 +309,10 @@ screen changes, so tiers already drawn in the browser survive the rewrite.
 Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
 It restores current choices and shows only changed fields before confirmation.
 Untouched records and documents retain their bytes; changed sources use a revision
-check and symlink-preserving writes. The full `start` wizard keeps its bulk save
-behavior. Catalog owns the bulk tier-line parser/application/order helpers;
+check and writes through links. The full `start` wizard and `--plain` commit both
+documents through the Catalog read taken at launch (`catalog_commit`): a document
+changed since launch, by `catalog set` or by the scan's Model swap, stops the save,
+which names it, writes nothing and exits 1. Catalog owns the bulk tier-line parser/application/order helpers;
 `setup_tui` keeps aliases. The routing screen exposes metering with `[x]`/`[ ]`,
 space/x or +/-. Legacy absence stays absent on a no-op. Focused Tier unmark moves
 down one Tier; Tier 1 requires Carry to switch off.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Black-box tests for setup.py. Run: python3 tests/test_setup.py"""
 import copy
+import io
 import json
 import os
 import shutil
@@ -27,6 +28,7 @@ sys.path.insert(0, DELEGATE_DIR)
 import catalog
 import harnesses
 import catalog_edit
+import catalog_commit
 import orchestrators  # noqa: E402
 # The shipped Claude Code profile: the one that runs claude Lanes in-process.
 CLAUDE_PROFILE = orchestrators.load([orchestrators.SHIPPED_DIR])["claude"]
@@ -980,7 +982,9 @@ def case_the_refreshed_rows_reach_the_new_lanes():
     import bench
     _frozen, refreshed, _plan = refresh_fixture()
     rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
-    data = bench.collect(refreshed, effort_rows=rows)
+    # the Epoch fixture, so the case reaches no URL
+    data = bench.collect(refreshed, epoch_csv=os.path.join(HERE, "fixture", "bench-epoch.csv"),
+                         effort_rows=rows)
     lanes = data["lanes"]
 
     def columns(name):
@@ -1049,6 +1053,165 @@ def case_plain_prints_the_refresh_change_lines():
                     f"expected={expected} stdout={result.stdout[:600]!r}")
 
 
+# --- deepening D1: a wizard save commits through the catalog it read ---------
+
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def confirm_every_page(wizard):
+    """The full wizard from its start page to the confirm, every page taken
+    as it opens, then `y`."""
+    wizard.handle("enter")
+    for _ in range(40):
+        if wizard.screen in ("done", "quit"):
+            break
+        wizard.handle("y" if wizard.screen == "confirm" else "enter")
+    return wizard.result()
+
+
+def wizard_in_process(home, argv, during=None, stdin=None):
+    """setup.main in this process under the temp HOME `home`, with its own
+    model queue: on a terminal whose TUI runs `during()` while the wizard is
+    open and then confirms every page, or, with `stdin`, on that input.
+    Returns (exit code, stdout, stderr)."""
+    import setup
+    import setup_tui
+    real_run = setup_tui.run_curses
+    real_streams = sys.stdin, sys.stdout, sys.stderr
+    real_env = {key: os.environ.get(key) for key in ("HOME", "DELEGATE_MODEL_QUEUE")}
+
+    def run_curses(wizard):
+        if during is not None:
+            during()
+        return confirm_every_page(wizard)
+
+    out, err = Terminal(), io.StringIO()
+    setup_tui.run_curses = run_curses
+    sys.stdin, sys.stdout, sys.stderr = stdin or Terminal(), out, err
+    os.environ["HOME"] = home
+    os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(home, "new-models.json")
+    try:
+        code = setup.main(argv)
+    finally:
+        setup_tui.run_curses = real_run
+        sys.stdin, sys.stdout, sys.stderr = real_streams
+        for key, value in real_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    return code, out.getvalue(), err.getvalue()
+
+
+def sample_catalog(root):
+    cfg = os.path.join(root, "cfg")
+    os.makedirs(cfg)
+    for name in ("lanes.json", "routing.json"):
+        shutil.copy(os.path.join(SAMPLES_DIR, name), cfg)
+    return cfg
+
+
+def case_a_catalog_set_made_while_the_wizard_is_open_survives_its_save():
+    """`delegate catalog set` lands while the wizard is open; the wizard's
+    save then refuses, names lanes.json, writes nothing and exits 1, so the
+    set's Tier stays (deepening D, bug 1)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+
+        def catalog_set():
+            kwargs = dict(scope="global", cwd=td, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                          value=1, meters={}, present=set(harnesses.NAMES))
+            preview = catalog_edit.edit_catalog("set", **kwargs)
+            catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
+
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench"], during=catalog_set)
+        tier = catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"]["terra-high@codex"]["tier"]
+        ok = (code == 1 and "lanes.json" in err and "nothing written" in err and tier == 1
+              and not os.path.isdir(os.path.join(cfg, "backups")))
+        return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
+
+
+def case_a_model_swap_made_while_the_wizard_is_open_survives_its_save():
+    """Dispatch's scan swaps a newer codex model into lanes.json while the
+    wizard is open; the wizard's save refuses rather than put the old Lane
+    back (deepening D, bug 1)."""
+    import model_queue
+    sys.path.insert(0, HERE)
+    from test_model_queue import newer_fixtures
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        fixtures = newer_fixtures(td)
+
+        def scan():
+            model_queue.scan(config_dir=cfg, fixture_dir=fixtures, present={"codex", "agy", "grok"})
+
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench"], during=scan)
+        lanes = catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"]
+        successor = [name for name, lane in lanes.items() if lane["model"] == "gpt-6.1-sol"]
+        ok = (code == 1 and "lanes.json" in err and len(successor) == 1
+              and "sol-high@codex" not in lanes)
+        return ok, f"code={code} successor={successor} err={err!r}"
+
+
+def case_the_full_save_writes_through_a_linked_catalog():
+    """A config dir whose documents are links to files elsewhere keeps its
+    links: the full save writes the changed lanes.json through its link and
+    leaves the unchanged routing.json alone (deepening D, bug 3)."""
+    with tempfile.TemporaryDirectory() as td:
+        real = sample_catalog(os.path.join(td, "real"))
+        cfg = os.path.join(td, "linked")
+        os.makedirs(cfg)
+        for name in ("lanes.json", "routing.json"):
+            os.symlink(os.path.join(real, name), os.path.join(cfg, name))
+        routing_before = open(os.path.join(real, "routing.json"), "rb").read()
+        code, out, err = wizard_in_process(td, ["--config-dir", cfg, "--no-discover", "--no-bench"])
+        saved = catalog.load_json(os.path.join(real, "lanes.json"))["lanes"]
+        ok = (code == 0
+              and all(os.path.islink(os.path.join(cfg, name)) for name in ("lanes.json", "routing.json"))
+              and all("order" in lane for lane in saved.values())
+              and open(os.path.join(real, "routing.json"), "rb").read() == routing_before)
+        return ok, f"code={code} links={[os.path.islink(os.path.join(cfg, n)) for n in os.listdir(cfg)]} err={err!r}"
+
+
+class EditingInput(io.StringIO):
+    """The prompts' answers, from a reader that changes the catalog the first
+    time it is read: a write that lands while --plain asks."""
+
+    def __init__(self, answers, edit):
+        super().__init__(answers)
+        self._edit = edit
+
+    def readline(self, *args):
+        if self._edit is not None:
+            edit, self._edit = self._edit, None
+            edit()
+        return super().readline(*args)
+
+
+def case_the_plain_save_refuses_a_catalog_changed_while_it_asked():
+    """--plain reads the catalog at launch and commits through that read: a
+    lanes.json changed while it asked is refused, and the change stays."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        lanes_path = os.path.join(cfg, "lanes.json")
+
+        def edit():
+            doc = catalog.load_json(lanes_path)
+            doc["lanes"]["sol-high@codex"]["tier"] = 4
+            catalog.write_json(lanes_path, doc)
+
+        answers = EditingInput(default_answers(len(lanes_sample["lanes"])), edit)
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench", "--plain"], stdin=answers)
+        tier = catalog.load_json(lanes_path)["lanes"]["sol-high@codex"]["tier"]
+        ok = code == 1 and "lanes.json" in err and "nothing written" in err and tier == 4
+        return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
+
+
 for name, case in (
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
@@ -1089,6 +1252,13 @@ for name, case in (
     ("plain collects bench in process", case_plain_collects_bench_in_process),
     ("focused screen on a pipe names the surgical CLI", case_focused_screen_rejects_plain),
     ("full start on a pipe still runs the wizard", case_start_screen_keeps_plain_wizard),
+    ("a catalog set made while the wizard is open survives its save",
+     case_a_catalog_set_made_while_the_wizard_is_open_survives_its_save),
+    ("a model swap made while the wizard is open survives its save",
+     case_a_model_swap_made_while_the_wizard_is_open_survives_its_save),
+    ("the full save writes through a linked catalog", case_the_full_save_writes_through_a_linked_catalog),
+    ("the plain save refuses a catalog changed while it asked",
+     case_the_plain_save_refuses_a_catalog_changed_while_it_asked),
 ):
     try:
         ok, detail = case()
@@ -1107,7 +1277,7 @@ try:
             os.symlink(os.path.join(real, name), os.path.join(cfg, name))
         lp, rp = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
         before = {p: open(p, "rb").read() for p in (lp, rp)}
-        rev = catalog_edit.catalog_revision(config_dir=cfg)
+        rev = catalog_commit.read(cfg).revision
         setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
         record("focused no-op preserves bytes and stow links",
                all(os.path.islink(p) and open(p, "rb").read() == before[p] for p in (lp, rp)))

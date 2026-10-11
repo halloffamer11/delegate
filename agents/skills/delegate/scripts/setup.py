@@ -12,7 +12,7 @@ import time
 import bench
 import bench_page
 import catalog
-import catalog_edit
+import catalog_commit
 import tier_lines as tier_line_rules
 import discover
 import effort
@@ -20,7 +20,7 @@ import harnesses
 import model_queue
 import orchestrators
 import setup_tui
-from catalog import CatalogError, load_json, validate_lanes, validate_routing, write_json
+from catalog import CatalogError, load_json, validate_lanes, validate_routing
 from harnesses import NAMES as HARNESSES
 
 # The wizard refreshes the Artificial Analysis rows itself, so that one command
@@ -132,16 +132,18 @@ def read_discovery(args):
     return discovered
 
 
-def load_or_propose(config_dir, discovered):
-    lanes_path = os.path.join(config_dir, "lanes.json")
-    routing_path = os.path.join(config_dir, "routing.json")
-    if os.path.isfile(lanes_path):
-        lanes_doc = load_json(lanes_path)
-        routing_doc = load_json(routing_path)
-        validate_lanes(lanes_doc, lanes_path)
-        validate_routing(routing_doc, routing_path)
+def load_or_propose(snap, discovered):
+    """The catalog the wizard starts from: the documents `snap`, the launch
+    Catalog read, holds, or on a first run the sample proposal for the
+    harnesses discovered. Nothing here reads the catalog's files; every save
+    commits through `snap` (deepening D)."""
+    lanes_path, routing_path = snap.files["lanes"], snap.files["routing"]
+    if snap.lanes is not None:
+        if snap.routing is None:
+            raise CatalogError(f"{routing_path}: file is missing")
+        lanes_doc = copy.deepcopy(snap.lanes)
         # the wizard shows, and writes, every shipped Class (ticket 16)
-        routing_doc = catalog.with_default_classes(routing_doc)
+        routing_doc = catalog.with_default_classes(snap.routing)
     else:
         samples_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "samples"))
         sample_lanes = load_json(os.path.join(samples_dir, "lanes.json"))
@@ -577,10 +579,21 @@ def clear_queue(refresh):
             print(f"note: could not empty the model queue: {e}")
 
 
-def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=None,
-                      targets=None):
-    print(lanes_path)
-    print(routing_path)
+def report_commit(done):
+    """What a save wrote, on stdout, and the commit's own lines on stderr."""
+    for path in done.written:
+        print(f"wrote {path}")
+    if not done.written:
+        print("nothing changed; nothing written")
+    for line in done.lines:
+        sys.stderr.write(f"{line}\n")
+
+
+def confirm_and_write(snap, lanes_doc, routing_doc, refresh=None, targets=None):
+    """The --plain confirm: list what the save writes, then commit both
+    documents through the launch read `snap`."""
+    print(snap.files["lanes"])
+    print(snap.files["routing"])
     for name, lane in lanes_doc["lanes"].items():
         order = f", order {lane['order']}" if "order" in lane else ""
         off = ", off" if lane.get("enabled") is False else ""
@@ -589,12 +602,7 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=
     if answer not in ("y", "yes"):
         print("nothing written")
         return
-    validate_lanes(lanes_doc, lanes_path)
-    validate_routing(routing_doc, routing_path)
-    write_json(lanes_path, lanes_doc)
-    write_json(routing_path, routing_doc)
-    print(f"wrote {lanes_path}")
-    print(f"wrote {routing_path}")
+    report_commit(catalog_commit.commit(snap, {"lanes": lanes_doc, "routing": routing_doc}))
     clear_queue(refresh)
     for line in save_all_native_agents(refresh, lanes_doc, targets):
         print(line)
@@ -603,7 +611,7 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=
 def write_focused(config_dir, revision, original_lanes, original_routing,
                   lanes, routing, lanes_path, routing_path):
     """Check the sources again and preserve links and unchanged document bytes."""
-    if catalog_edit.catalog_revision(config_dir=config_dir) != revision:
+    if catalog_commit.read(config_dir).revision != revision:
         raise CatalogError("intervening edit: catalog sources changed; reopen the focused screen")
     validate_lanes(lanes, lanes_path)
     validate_routing(routing, routing_path)
@@ -611,7 +619,7 @@ def write_focused(config_dir, revision, original_lanes, original_routing,
     for path, old, new in ((lanes_path, original_lanes, lanes),
                            (routing_path, original_routing, routing)):
         if old != new:
-            catalog_edit._write_preserving_link(path, new)
+            catalog.write_json(path, new)
             print(f"wrote {path}")
             written = True
     if not written:
@@ -654,19 +662,18 @@ def main(argv=None):
                 "use delegate catalog set, range, or order for non-interactive edits"
             )
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
-        focused_revision = catalog_edit.catalog_revision(config_dir=config_dir) if args.screen != "start" else None
+        # The catalog as read at launch. Every save commits through it, so a
+        # change made while the wizard is open is refused, never overwritten.
+        snap = catalog_commit.read(config_dir)
+        focused_revision = snap.revision if args.screen != "start" else None
         tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
-        existing = os.path.isfile(os.path.join(config_dir, "lanes.json"))
+        existing = snap.lanes is not None
         # Start from the editable catalog, acquire once, then filter only a
         # first-time proposal. Existing catalog decisions survive probe errors.
-        lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
-            config_dir, set(HARNESSES)
-        )
+        lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(snap, set(HARNESSES))
         discovered, discovery_data, rows, rows_note, effort_row_paths = scan(args, lanes_doc)
         if not existing:
-            lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
-                config_dir, discovered
-            )
+            lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(snap, discovered)
         else:
             note_undiscovered_lanes(lanes_doc, discovery_data)
         # the catalog as read, which a rescan starts from again. On a first
@@ -707,7 +714,7 @@ def main(argv=None):
                 # order written (ticket 28)
                 tier_line_rules.write_order_from_lines(lanes_doc, parsed)
             ask_routing(routing_doc)
-            confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path,
+            confirm_and_write(snap, lanes_doc, routing_doc,
                               refresh=refresh, targets=native_targets(config_dir))
         else:
             if args.bench_report:
@@ -760,16 +767,12 @@ def main(argv=None):
                 print("nothing written")
             else:
                 result_lanes, result_routing = result
-                validate_lanes(result_lanes, lanes_path)
-                validate_routing(result_routing, routing_path)
                 if args.screen != "start":
                     write_focused(config_dir, focused_revision, lanes_doc, routing_doc,
                                   result_lanes, result_routing, lanes_path, routing_path)
                 else:
-                    write_json(lanes_path, result_lanes)
-                    write_json(routing_path, result_routing)
-                    print(f"wrote {lanes_path}")
-                    print(f"wrote {routing_path}")
+                    report_commit(catalog_commit.commit(
+                        snap, {"lanes": result_lanes, "routing": result_routing}))
                     clear_queue(wizard.refresh)
                     # the plan the wizard holds: a rescan replaced launch's
                     for line in save_all_native_agents(wizard.refresh, result_lanes,
@@ -777,6 +780,10 @@ def main(argv=None):
                         print(line)
     except SetupAbort:
         return 130
+    except catalog_commit.CatalogChanged as e:
+        sys.stderr.write(f"setup: {e}; nothing written. Run setup again to start from the "
+                         "catalog as it is now.\n")
+        return 1
     except CatalogError as e:
         sys.stderr.write(f"setup: {e}\n")
         return 1

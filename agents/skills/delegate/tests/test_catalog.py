@@ -25,6 +25,7 @@ import catalog
 import published_names
 import class_guides
 import catalog_edit
+import catalog_commit
 import catalog_cli
 import harnesses  # noqa: E402
 import rank
@@ -1586,7 +1587,7 @@ with tempfile.TemporaryDirectory() as td:
         cwd=repo,
         config_dir=cfg,
         apply=True,
-        expect=catalog_edit.catalog_revision(cwd=repo, config_dir=cfg),
+        expect=catalog_commit.read(cfg, project_dir=repo).revision,
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
@@ -1772,7 +1773,7 @@ with tempfile.TemporaryDirectory() as td:
         and project_doc["note"] == "other tiers stay",
     )
 
-    rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    rev = catalog_commit.read(cfg, project_dir=repo).revision
     preview_p = catalog_edit.edit_catalog(
         "order",
         lane="terra-high@codex",
@@ -1939,10 +1940,10 @@ with tempfile.TemporaryDirectory() as td:
         res_bad.stderr,
     )
 
-    absent_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    absent_rev = catalog_commit.read(cfg, project_dir=repo).revision
     os.makedirs(os.path.join(repo, ".delegate"), exist_ok=True)
     catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), {"gate": 0.2})
-    present_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    present_rev = catalog_commit.read(cfg, project_dir=repo).revision
     record(
         "10.9 absent project file is part of the revision",
         absent_rev != present_rev,
@@ -2044,6 +2045,27 @@ with tempfile.TemporaryDirectory() as td:
         config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
     record("10.13 Present null project is invalid, not an absent overlay",
         msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
+
+# A dangling link at the project's routing.json names a file outside the
+# repository. The set refuses it, at the preview, and never creates that file
+# (deepening D, bug 5).
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    outside = os.path.join(td, "outside", "routing.json")
+    link = os.path.join(repo, ".delegate", "routing.json")
+    os.makedirs(os.path.dirname(link))
+    os.symlink(outside, link)
+    def set_gate():
+        preview = catalog_edit.edit_catalog("set", scope="project", cwd=repo, config_dir=cfg,
+            field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+        catalog_edit.edit_catalog("set", scope="project", cwd=repo, config_dir=cfg,
+            field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES,
+            apply=True, expect=preview["revision"])
+    msg = check_catalog_error(set_gate)
+    record("10.14 a project set refuses a dangling link and creates nothing outside the project",
+        msg is not None and link in msg and outside in msg
+        and not os.path.lexists(outside) and not os.path.isdir(os.path.dirname(outside))
+        and os.path.islink(link), msg)
 # 11. routing.meters: validators, default on, project override, no-op absence.
 doc_m = copy.deepcopy(routing_sample)
 record("11.1 legacy routing without meters defaults on",

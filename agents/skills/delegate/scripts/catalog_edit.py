@@ -6,20 +6,23 @@ under the cached meters, and the catalog revision), and writes only with
 `--apply --expect REVISION`, refusing when another edit landed between. The
 wizard, the dashboard and `delegate catalog set|range|order` all edit through
 `edit_catalog`. Split out of catalog.py (ticket 26), which keeps loading and
-validating; this module imports `rank` at load, and `catalog` never does.
+validating; this module imports `rank` at load, and `catalog` never does. The
+sources and their revision come from `catalog_commit.read()`.
 """
 import copy
-import hashlib
-import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import catalog  # noqa: E402
+import catalog_commit  # noqa: E402
 import harnesses  # noqa: E402
 import rank  # noqa: E402
 
 
+# The refusal when a source changed between the preview and the apply; the
+# dashboard matches this exact text.
+INTERVENING_EDIT = "intervening edit: source documents or resolved paths changed; preview again"
 _SET_LANE_PREFIX = "lanes."
 _SET_LANE_TIER_SUFFIX = ".tier"
 _SET_ROUTING_FIELDS = {
@@ -44,149 +47,6 @@ def _cached_meters(meters=None):
     if meters is not None:
         return meters
     return rank.load_cached_usage()
-
-
-def _loads_strict(content, path):
-    """Parse snapshot bytes with the same strict JSON rules as load_json."""
-    if content is None:
-        if os.path.basename(path) == "lanes.json":
-            raise catalog.CatalogError(
-                f"{path}: file is missing; copy samples/lanes.json there or run /delegate setup"
-            )
-        raise catalog.CatalogError(f"{path}: file is missing")
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise catalog.CatalogError(f"{path}: file: cannot read: {e}")
-
-    def _reject_constant(c):
-        raise ValueError(f"{c} is not allowed in strict JSON")
-
-    try:
-        return json.loads(text, parse_constant=_reject_constant)
-    except json.JSONDecodeError as e:
-        raise catalog.CatalogError(
-            f"{path}: line {e.lineno}, column {e.colno}: JSON syntax error: {e.msg}"
-        )
-    except ValueError as e:
-        raise catalog.CatalogError(f"{path}: number: NaN is not allowed in strict JSON ({e})")
-
-
-def _describe_source(path):
-    abs_path = os.path.abspath(os.path.expanduser(path))
-    is_link = os.path.islink(abs_path)
-    is_file = os.path.isfile(abs_path)
-    resolved = os.path.realpath(abs_path) if (is_link or is_file or os.path.lexists(abs_path)) else None
-    content = None
-    if is_file:
-        try:
-            with open(abs_path, "rb") as f:
-                content = f.read()
-        except OSError as e:
-            raise catalog.CatalogError(f"{path}: file: cannot read: {e}")
-    return {
-        "file": abs_path,
-        "resolved": resolved,
-        "symlink": is_link,
-        "exists": is_file,
-        "content": content,
-    }
-
-
-def _source_public(desc):
-    if desc is None:
-        return None
-    return {
-        "file": desc["file"],
-        "resolved": desc["resolved"],
-        "symlink": desc["symlink"],
-        "exists": desc["exists"],
-    }
-
-
-def _hash_source(hasher, key, desc):
-    hasher.update(key.encode("utf-8"))
-    hasher.update(b"\0")
-    if desc is None:
-        hasher.update(b"ABSENT\0")
-        return
-    hasher.update(desc["file"].encode("utf-8"))
-    hasher.update(b"\0")
-    hasher.update((desc["resolved"] or "").encode("utf-8"))
-    hasher.update(b"\0")
-    hasher.update(b"1" if desc["symlink"] else b"0")
-    hasher.update(b"\0")
-    hasher.update(b"1" if desc["exists"] else b"0")
-    hasher.update(b"\0")
-    hasher.update(desc["content"] or b"")
-    hasher.update(b"\0")
-
-
-def _source_snapshot(cwd=None, config_dir=None):
-    base_dir = os.path.abspath(os.path.expanduser(
-        config_dir if config_dir is not None else catalog.CONFIG_DIR
-    ))
-    lanes_path = os.path.join(base_dir, "lanes.json")
-    routing_path = os.path.join(base_dir, "routing.json")
-    git_root = catalog.find_git_root(cwd)
-    project_path = (
-        os.path.join(git_root, ".delegate", "routing.json") if git_root else None
-    )
-    project_lanes_file = (
-        os.path.join(git_root, ".delegate", "lanes.json") if git_root else None
-    )
-    lanes = _describe_source(lanes_path)
-    routing = _describe_source(routing_path)
-    if project_path is None:
-        project = None
-    else:
-        project = _describe_source(project_path)
-    if project_lanes_file is None:
-        project_lanes = None
-    else:
-        project_lanes = _describe_source(project_lanes_file)
-    hasher = hashlib.sha256()
-    _hash_source(hasher, "lanes", lanes)
-    _hash_source(hasher, "routing", routing)
-    _hash_source(hasher, "project", project)
-    _hash_source(hasher, "project_lanes", project_lanes)
-    return {
-        "lanes": lanes,
-        "routing": routing,
-        "project": project,
-        "project_lanes": project_lanes,
-        "git_root": git_root,
-        "revision": hasher.hexdigest(),
-        "files": {
-            "lanes": lanes["file"],
-            "routing": routing["file"],
-            "project": project["file"] if project is not None else None,
-            "project_lanes": (
-                project_lanes["file"] if project_lanes is not None else None
-            ),
-        },
-    }
-
-
-def catalog_revision(cwd=None, config_dir=None):
-    """Hash global sources, project presence/content, and resolved paths."""
-    return _source_snapshot(cwd=cwd, config_dir=config_dir)["revision"]
-
-
-def _write_preserving_link(path, doc):
-    """Write through a symlink chain so the catalog link itself is not replaced."""
-    full_path = os.path.abspath(os.path.expanduser(path))
-    dest = full_path
-    seen = set()
-    while os.path.islink(dest):
-        if dest in seen:
-            raise catalog.CatalogError(f"{path}: symlink loop")
-        seen.add(dest)
-        link = os.readlink(dest)
-        dest = link if os.path.isabs(link) else os.path.abspath(
-            os.path.join(os.path.dirname(dest), link)
-        )
-    catalog.write_json(dest, doc)
 
 
 def _catalog_from_docs(lanes_doc, routing_doc, project_doc, files, project_lanes_doc=None):
@@ -346,69 +206,41 @@ def _append_order_in_tier(lanes, lane_name, new_tier):
 
 
 
-def _load_docs_from_snapshot(snap):
-    lanes_doc = _loads_strict(snap["lanes"]["content"], snap["files"]["lanes"])
-    routing_doc = _loads_strict(snap["routing"]["content"], snap["files"]["routing"])
-    project_desc = snap["project"]
-    if project_desc is None:
-        project_doc = None
-    elif not project_desc["exists"]:
-        project_doc = None
-    else:
-        project_doc = _loads_strict(project_desc["content"], project_desc["file"])
-        catalog.validate_routing(project_doc, source=project_desc["file"], partial=True)
-    project_lanes_desc = snap["project_lanes"]
-    if project_lanes_desc is None or not project_lanes_desc["exists"]:
-        project_lanes_doc = None
-    else:
-        project_lanes_doc = _loads_strict(
-            project_lanes_desc["content"], project_lanes_desc["file"]
+def _target(snap, dest):
+    """The source an edit writes, as the read described it; dest is 'lanes',
+    'routing', 'project' or 'project_lanes'. A project document is unread only
+    when no Git root was found."""
+    source = snap.sources[dest]
+    if source is None:
+        raise catalog.CatalogError(
+            "scope 'project' needs a git root so the .delegate files can be written"
         )
-    catalog.validate_lanes(lanes_doc, source=snap["files"]["lanes"])
-    catalog.validate_routing(routing_doc, source=snap["files"]["routing"], partial=False)
-    if project_lanes_doc is not None:
-        catalog.validate_project_lanes(
-            project_lanes_doc,
-            lanes_doc,
-            source=snap["files"]["project_lanes"],
-            lanes_source=snap["files"]["lanes"],
+    return dict(source)
+
+
+def _require_globals(snap):
+    """The global pair the edit engine needs; an absent one is named."""
+    if snap.lanes is None:
+        raise catalog.CatalogError(
+            f"{snap.files['lanes']}: file is missing; copy samples/lanes.json there or run /delegate setup"
         )
-    if project_doc is not None:
-        catalog.validate_project_routing(
-            project_doc,
-            lanes_doc,
-            routing_doc,
-            source=snap["files"]["project"],
-            lanes_source=snap["files"]["lanes"],
-            global_source=snap["files"]["routing"],
-        )
-    return lanes_doc, routing_doc, project_doc, project_lanes_doc
+    if snap.routing is None:
+        raise catalog.CatalogError(f"{snap.files['routing']}: file is missing")
 
 
-# Which file each edit destination writes, and how the project pair is named.
-_PROJECT_DESTS = {"project": "routing.json", "project_lanes": "lanes.json"}
+def _read(cwd, config_dir):
+    """The catalog read an edit works from: the global pair, and the project
+    pair of the Git root above `cwd` (default: the current directory)."""
+    return catalog_commit.read(config_dir, project_dir=cwd if cwd is not None else os.getcwd())
 
 
-def _target_from_scope(snap, scope, dest):
-    """dest is 'lanes', 'routing', 'project', or 'project_lanes'."""
-    if dest in _PROJECT_DESTS:
-        desc = snap[dest]
-        if desc is None:
-            git_root = snap["git_root"]
-            if git_root is None:
-                raise catalog.CatalogError(
-                    f"scope 'project' needs a git root so .delegate/{_PROJECT_DESTS[dest]} "
-                    "can be written"
-                )
-            path = os.path.join(git_root, ".delegate", _PROJECT_DESTS[dest])
-            return {
-                "file": path,
-                "resolved": path,
-                "symlink": False,
-                "exists": False,
-            }
-        return _source_public(desc)
-    return _source_public(snap[dest])
+def _unchanged_since(snap, cwd, config_dir):
+    """Whether the sources still read as `snap` read them. A source that no
+    longer reads (now invalid, or now a dangling link) has changed too."""
+    try:
+        return _read(cwd, config_dir).revision == snap.revision
+    except catalog.CatalogError:
+        return False
 
 
 def _require_scope(scope):
@@ -785,18 +617,18 @@ def edit_catalog(
     if expect and not apply:
         raise catalog.CatalogError("--expect is only valid with --apply")
 
-    snap = _source_snapshot(cwd=cwd, config_dir=config_dir)
-    if scope == "project" and snap["git_root"] is None:
+    snap = _read(cwd, config_dir)
+    if scope == "project" and snap.git_root is None:
         raise catalog.CatalogError(
             "scope 'project' needs a git root so the .delegate files can be written"
         )
-    if apply and snap["revision"] != expect:
-        raise catalog.CatalogError(
-            "intervening edit: source documents or resolved paths changed; preview again"
-        )
+    if apply and snap.revision != expect:
+        raise catalog.CatalogError(INTERVENING_EDIT)
 
-    lanes_doc, routing_doc, project_doc, project_lanes_doc = _load_docs_from_snapshot(snap)
-    files = snap["files"]
+    _require_globals(snap)
+    lanes_doc, routing_doc = snap.lanes, snap.routing
+    project_doc, project_lanes_doc = snap.project, snap.project_lanes
+    files = snap.files
     # One edit is a plan of one operation: the planning path the staged view of
     # the dashboard uses is the path this write uses.
     plan = plan_edits(
@@ -867,28 +699,21 @@ def edit_catalog(
     if dest == "project_lanes" and project_lanes_doc is None:
         noop = not (proposed_project_lanes or {}).get("lanes")
 
-    target = _target_from_scope(snap, scope, dest)
+    target = _target(snap, dest)
     written = False
     if apply and not noop:
-        if _source_snapshot(cwd=cwd, config_dir=config_dir)["revision"] != snap["revision"]:
-            raise catalog.CatalogError(
-                "intervening edit: source documents or resolved paths changed; preview again"
-            )
-        write_doc = proposed_by_dest[dest]
-        _write_preserving_link(target["file"], write_doc)
+        if not _unchanged_since(snap, cwd, config_dir):
+            raise catalog.CatalogError(INTERVENING_EDIT)
+        catalog.write_json(target["file"], proposed_by_dest[dest])
         written = True
 
     return {
         "op": op,
         "scope": scope,
-        "revision": snap["revision"],
+        "revision": snap.revision,
         "target": target,
-        "sources": {
-            "lanes": _source_public(snap["lanes"]),
-            "routing": _source_public(snap["routing"]),
-            "project": _source_public(snap["project"]),
-            "project_lanes": _source_public(snap["project_lanes"]),
-        },
+        "sources": {name: (None if snap.sources[name] is None else dict(snap.sources[name]))
+                    for name in catalog_commit.DOCUMENTS},
         "values": values,
         "changed": changed,
         "picks": {"before": picks_before, "after": picks_after},

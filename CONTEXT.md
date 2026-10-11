@@ -117,7 +117,7 @@ The catalog's documents as one session read them, with where each file resolved 
 _Avoid_: snapshot (alone), cache, revision (which is only its hash)
 
 **Catalog commit**:
-The one write of catalog documents. It refuses an Intervening edit, writes through links, backs up what it replaces, keeps the Agent files in step and forgets the Model queue entries its read returned.
+The one write of catalog documents. It refuses an Intervening edit, writes through links and backs up what it replaces.
 _Avoid_: save (when you mean the write path), apply, flush
 
 **Intervening edit**:

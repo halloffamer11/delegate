@@ -20,6 +20,7 @@ catalog` command in `catalog_cli`, bulk Tier lines in `tier_lines` and the
 published-name reconciliation in `published_names`.
 """
 import copy
+import errno
 import json
 import os
 import re
@@ -83,10 +84,36 @@ def format_json(doc):
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
+def link_target(path):
+    """Where a catalog document at `path` lives: the file a link there names,
+    or `path` itself when it is no link.
+
+    The link rule (deepening decision D.1): a catalog document is written
+    through a link to an existing file, and the link stays. A dangling link or
+    a loop raises CatalogError naming the link and its target, so a write never
+    creates the file a dangling link names.
+    """
+    full_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.islink(full_path):
+        return full_path
+    if not os.path.exists(full_path):
+        try:
+            os.stat(full_path)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise CatalogError(f"{path}: link loop through {os.readlink(full_path)}")
+        raise CatalogError(
+            f"{path}: dangling link to {os.path.realpath(full_path)}, which does not exist; "
+            "point the link at the file or remove it"
+        )
+    return os.path.realpath(full_path)
+
+
 def write_json(path, doc):
     """Writes format_json(doc) atomically (temp file in the same directory, then os.replace).
-    Creates parent directory if needed."""
-    full_path = os.path.abspath(os.path.expanduser(path))
+    Creates parent directory if needed. A link at `path` is written through and
+    stays; a dangling link or a loop is refused (`link_target`)."""
+    full_path = link_target(path)
     parent_dir = os.path.dirname(full_path)
     os.makedirs(parent_dir, exist_ok=True)
     text = format_json(doc)
