@@ -138,13 +138,15 @@ _ONE_CELL = frozenset(
 
 EFFORT = {"low": "L", "medium": "M", "high": "H", "xhigh": "XH", "max": "Max", "ultra": "U"}
 
-# The closed reason set.  Every `reason` rank.py writes maps into one of these,
-# and each one is written out at the foot of the pane in its own colour.
+# The closed set of codes.  Every `cause` rank.py gives a row maps into one of
+# these through CAUSE_CODES, and each one is written out at the foot of the pane
+# in its own colour.
 CODES = (
     ("PICK", "gold", "Ranking selects this Lane for the next job."),
-    ("STEAL", "steal", "Its Pace took the job from the Lane that sorted ahead of it."),
+    ("STEAL", "steal", "It took the job from the Lane that sorted ahead of it, "
+                       "because its Meter was ahead by the Margin."),
     ("ELIG", "fg", "Eligible. It sorts after the Pick and takes the job if the Pick cannot."),
-    ("NOMTR", "mute", "Its Meter has no reading, so ranking sorts it last."),
+    ("NOMTR", "mute", "Its Meter has no value to rank by, so ranking sorts it last."),
     ("GATE", "veto", "Its Meter's Remaining is under the Gate, so it takes no job."),
     ("CLI", "veto", "Its harness is not on PATH, so nothing can run it here."),
     ("FLOOR", "mute", "Its Tier is below the floor of the Class asking for a Lane."),
@@ -419,27 +421,28 @@ def code_color(code: str) -> str:
     return PAL.get(CODE_ROLE.get(code, "fg"), PAL["fg"])
 
 
+# rank's `cause` to its code.  The model never shows a disabled Lane, so
+# `disabled` has no code of its own; it and any cause this table does not know
+# read as VETO.
+CAUSE_CODES = {
+    "pick": "PICK",
+    "steal": "STEAL",
+    "eligible": "ELIG",
+    "unknown": "NOMTR",
+    "gate": "GATE",
+    "cli": "CLI",
+    "floor": "FLOOR",
+    "ceiling": "CEIL",
+}
+
+
 def reason_code(row: dict[str, Any]) -> tuple[str, str]:
-    """One code from the closed set, with the colour the scale gives it."""
-    reason = str(row.get("reason") or "")
-    if reason == "pick":
-        code = "PICK"
-    elif reason.startswith("stolen by pace"):
-        code = "STEAL"
-    elif reason.startswith("unknown meter") or row.get("remaining") is None:
-        code = "NOMTR"
-    elif reason.startswith("vetoed:gate"):
-        code = "GATE"
-    elif reason.startswith("vetoed:cli"):
-        code = "CLI"
-    elif reason.startswith("vetoed:floor"):
-        code = "FLOOR"
-    elif reason.startswith("vetoed:ceiling"):
-        code = "CEIL"
-    elif reason.startswith("vetoed:"):
-        code = "VETO"
-    else:
-        code = "ELIG"
+    """The code for the row's `cause`, with the colour the scale gives it.
+
+    It reads only the cause rank gives the row, never the `reason` text and
+    never the Meter reading: a Lane with no reading reads as rank ranks it.
+    """
+    code = CAUSE_CODES.get(row.get("cause"), "VETO")
     return code, code_color(code)
 
 

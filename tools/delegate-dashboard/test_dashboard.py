@@ -172,7 +172,7 @@ class DashboardModelTest(ProjectFixture):
         row = state["tiers"][1]["rows"][0]
         self.assertEqual(
             set(row),
-            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "gated", "eligible", "reason", "order", "order_source", "tier_source", "staged"},
+            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "gated", "eligible", "cause", "reason", "order", "order_source", "tier_source", "staged"},
         )
         self.assertEqual(state["usage"]["label"], "Global subscription usage")
 
@@ -943,6 +943,57 @@ class DashboardModelTest(ProjectFixture):
         self.assertNotEqual(deck.remaining_color(entry, state), deck.PAL["veto"])
         terra = next(row for row in state["tiers"][1]["rows"] if row["lane"] == "terra-high@codex")
         self.assertNotEqual(deck.remaining_color(terra, state), deck.PAL["veto"])
+
+    def test_a_plan_dollars_steal_reads_as_a_steal(self):
+        # Ticket 20: the deck codes each Lane by the cause rank gives it, so a
+        # steal by plan dollars (0.65 against 0.5 x 1.2, never 0.5 + 0.2 by
+        # Pace) reads STEAL, and the aid says its Meter holds the Pick.
+        routing = json.loads((self.config / "routing.json").read_text())
+        routing["quota_unit"] = "plan_dollars"
+        write_json(self.config / "routing.json", routing)
+        self.write_meters(a_r=0.7, a_pace=0.5, b_r=0.7, b_pace=0.65)
+        state = self.make_model().state
+        tier = state["tiers"][1]
+        self.assertEqual(tier["leader"], "sol-high@codex")
+        sol = next(row for row in tier["rows"] if row["lane"] == "sol-high@codex")
+        self.assertEqual(deck.reason_code(sol)[0], "STEAL")
+        entry = next(e for e in deck.meter_rows(state) if e["meter"] == "codex-b")
+        verdict = deck.meter_verdict(entry, state, deck.steal_thresholds(state))
+        self.assertEqual(verdict[2], "holds the Pick in T2")
+
+    def test_a_lane_without_its_cli_or_a_reading_reads_as_cli(self):
+        # Ticket 20: a harness that is not installed is not probed either, so
+        # its Lane has no reading; the CLI veto is still what stops it.
+        write_json(self.meters, {"probed_at": 100, "lanes": [
+            meter("codex-a", 0.7, 0.5),
+            meter("codex-b", 0.7, 0.6),
+            meter("claude", 0.8, 0.7),
+        ]})
+        dashboard = DashboardModel(
+            cwd=self.nested, config_dir=self.config, meters_path=self.meters,
+            present={"codex", "claude"},
+        )
+        grok = next(row for row in dashboard.state["tiers"][3]["rows"]
+                    if row["lane"] == "grok46-high@grok")
+        self.assertIsNone(grok["remaining"])
+        self.assertEqual(deck.reason_code(grok)[0], "CLI")
+
+    def test_with_meters_off_a_lane_without_a_reading_follows_rank(self):
+        # Ticket 20 (decision E.3): with Meters off ranking sorts by Tier,
+        # Order and name, so a Lane with no reading is not sorted last; the
+        # deck follows rank's cause, eligible, and never says NOMTR.
+        routing = json.loads((self.config / "routing.json").read_text())
+        routing["meters"] = False
+        write_json(self.config / "routing.json", routing)
+        write_json(self.meters, {"probed_at": 100, "lanes": [
+            meter("codex-a", 0.7, 0.5),
+            meter("claude", 0.8, 0.7),
+            meter("grok", 0.9, 0.8),
+        ]})
+        state = self.make_model().state
+        sol = next(row for row in state["tiers"][1]["rows"] if row["lane"] == "sol-high@codex")
+        self.assertIsNone(sol["remaining"])
+        self.assertEqual(deck.reason_code(sol)[0], "ELIG")
 
     def test_intervening_edit_mark_matches_catalog_message(self):
         source = inspect.getsource(catalog_edit)

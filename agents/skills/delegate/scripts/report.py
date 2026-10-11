@@ -823,7 +823,7 @@ def handover(preview, meter, margin, gate):
         weekly = meter["weekly"] - spent
         remaining = weekly if five is None else min(five, weekly)
         if remaining < gate:
-            # the leader's Meter is vetoed: the rest of the Tier decides
+            # the leader's Meter is vetoed, so the rest of the Tier decides
             pool = sorted(others, key=lambda r: eligible_order(r, True))
             return min(spent, meter["weekly"]), (choose(pool, margin, True)[0]["lane"] if pool else None)
         trial = [dict(r, pace=weekly / meter["left"]) if r["meter"] == lead["meter"] else r for r in rows]

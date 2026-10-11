@@ -50,7 +50,10 @@ is the same Meter with x more of its week spent (the Weekly figure falls by x, P
 take only a snapshot: `rank_range` reads each Lane's Meter once into a map, Meter to
 Readout, and a private core ranks over that map, so a what-if replaces one Readout and
 ranks again with no second read (ticket 18); the dashboard and `catalog_edit` hand it
-the snapshot they read (ticket 16). The statusline, the
+the snapshot they read (ticket 16). Every row carries one `cause` from `rank.CAUSES`
+(pick, steal, eligible, unknown, or the veto: disabled, floor, ceiling, gate, cli);
+`eligible` and `pick` follow from it, the `reason` text is its display, and the
+dashboard and the deck read `cause`, never the text (ticket 20). The statusline, the
 popup's Meter rows, `report.py limits` and the deck's Gate draw each Meter's Readout,
 so every display shows one Weekly figure and one Gate per Meter (ticket 17).
 One validity rule serves every reader: valid envelope and legacy map formats keep their

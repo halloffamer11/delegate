@@ -484,11 +484,7 @@ class DashboardModel:
         staged_fields = set(staged["fields"])
         tiers = []
         for preview in previews:
-            carried = [
-                row
-                for row in preview["rows"]
-                if not row["reason"].startswith("vetoed:disabled")
-            ]
+            carried = [row for row in preview["rows"] if row["cause"] != "disabled"]
             carried.sort(key=self._display_order)
             rows = [
                 {
@@ -502,6 +498,8 @@ class DashboardModel:
                     # the Gate rank applies to this Meter, so off with metering off
                     "gated": meters.readout(row["meter"], effective).gated,
                     "eligible": row["eligible"],
+                    # what the deck codes the row by; `reason` is its display text
+                    "cause": row["cause"],
                     "reason": row["reason"],
                     "order": row["order"],
                     "order_source": sources.get(f"lanes.{row['lane']}.order"),
@@ -1274,11 +1272,7 @@ class DashboardModel:
         for preview in previews:
             if preview["tier"] != tier_number:
                 continue
-            carried = [
-                row
-                for row in preview["rows"]
-                if not row["reason"].startswith("vetoed:disabled")
-            ]
+            carried = [row for row in preview["rows"] if row["cause"] != "disabled"]
             carried.sort(key=self._display_order)
             return [row["lane"] for row in carried]
         return []

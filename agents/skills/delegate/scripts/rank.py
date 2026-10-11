@@ -53,16 +53,33 @@ The selection rule:
      cli-absent with no gate veto among them, `routing.meters` off (no gate
      vetoes exist) or `routing.overflow` false all keep the stop.
 
-Reason vocabulary (exactly one per lane):
-  - pick: chosen lane when it is eligible[0] (or when all meters unknown)
-  - stolen by pace: <pace> >= <pick0 pace> + <margin>: steal rule moved pick
-  - eligible: any other eligible lane
-  - unknown meter, sorted last: eligible lane with unknown pace (overrides eligible)
-  - vetoed:disabled, <lane>
-  - vetoed:floor, <lane> (tier t) < <class> floor (tier f)
-  - vetoed:ceiling, <lane> (tier t) > <class> ceiling (tier c)
-  - vetoed:gate, <lane>: <meter> meter N% left < gate G%
-  - vetoed:cli, <lane>: <harness> not on PATH
+Cause vocabulary (``CAUSES``; exactly one per row, in its `cause` field):
+  - pick: the Pick, eligible[0], which nothing took the job from (also when
+    every Meter is unknown, or Meters are off)
+  - steal: the Pick, a Lane after eligible[0] that took the job by the Margin,
+    in either quota unit
+  - eligible: any other eligible Lane
+  - unknown: an eligible Lane with no value to rank by (Meters on, and its
+    Pace or plan price unknown); it sorts last. With Meters off nothing ranks
+    by value, so a Lane with no reading is `eligible`.
+  - disabled, floor, ceiling, gate, cli: the veto that stopped the Lane, in
+    that precedence
+  A row's `eligible` is true exactly for pick, steal, eligible and unknown,
+  and its `pick` exactly for pick and steal. Callers read `cause`; the
+  `reason` text below is display only, built from the cause and the numbers,
+  and no caller parses it.
+
+Reason text, one per cause:
+  - pick: pick
+  - steal: stolen by pace: <pace> >= <pick0 pace> + <margin>
+           stolen by plan dollars: <value> >= <pick0 value> x (1 + <margin>)
+  - eligible: eligible
+  - unknown: unknown meter, sorted last
+  - disabled: vetoed:disabled, <lane>
+  - floor: vetoed:floor, <lane> (tier t) < <class> floor (tier f)
+  - ceiling: vetoed:ceiling, <lane> (tier t) > <class> ceiling (tier c)
+  - gate: vetoed:gate, <lane>: <meter> meter N% left < gate G%
+  - cli: vetoed:cli, <lane>: <harness> not on PATH
 
 CLI forms:
   rank.py <class> [--tier N] [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
@@ -81,6 +98,13 @@ import catalog
 import harnesses
 from catalog import CatalogError, CLASSES, load_catalog
 import usage
+
+# Every row's `cause` (see the module docstring): the two causes a Pick has,
+# the two other eligible ones, then the vetoes in precedence order.
+CAUSES = ("pick", "steal", "eligible", "unknown",
+          "disabled", "floor", "ceiling", "gate", "cli")
+_ELIGIBLE_CAUSES = frozenset(CAUSES[:4])
+_PICK_CAUSES = frozenset(CAUSES[:2])
 
 
 def restrict_to_harness(cat, harness):
@@ -250,9 +274,12 @@ def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
             "remaining_weekly": remaining_weekly,
             "meter_status": meter_status,
             "eligible": veto_reason is None,
-            # the machine-readable half of `reason`: None, or one of
-            # disabled, floor, ceiling, gate, cli
+            # None, or one of disabled, floor, ceiling, gate, cli: the veto
+            # half of `cause`, until `cause` replaces it (ticket 22)
             "veto": veto_kind,
+            # one of CAUSES: the veto, or for an eligible row the cause set
+            # below once the Pick is known
+            "cause": veto_kind,
             "pick": False,
             # only a Pick admitted past its Ceiling carries a record here
             "overflow": None,
@@ -274,20 +301,23 @@ def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
 
         for r in eligible_rows:
             if r is pick_row:
-                r["pick"] = True
-                if beaten_pace is not None and dollars:
-                    r["reason"] = (f"stolen by plan dollars: {score(r):.2f} >= "
-                                   f"{beaten_pace:.2f} x (1 + {margin})")
-                elif beaten_pace is not None:
-                    r["reason"] = f"stolen by pace: {r['pace']} >= {beaten_pace} + {margin}"
-                else:
-                    r["reason"] = "pick"
+                r["cause"] = "pick" if beaten_pace is None else "steal"
+            elif metering and score(r) is None:
+                r["cause"] = "unknown"
             else:
-                r["pick"] = False
-                if metering and score(r) is None:
-                    r["reason"] = "unknown meter, sorted last"
-                else:
-                    r["reason"] = "eligible"
+                r["cause"] = "eligible"
+            r["eligible"] = r["cause"] in _ELIGIBLE_CAUSES
+            r["pick"] = r["cause"] in _PICK_CAUSES
+            # the display text for the cause; nothing parses it
+            if r["cause"] == "steal" and dollars:
+                r["reason"] = (f"stolen by plan dollars: {score(r):.2f} >= "
+                               f"{beaten_pace:.2f} x (1 + {margin})")
+            elif r["cause"] == "steal":
+                r["reason"] = f"stolen by pace: {r['pace']} >= {beaten_pace} + {margin}"
+            elif r["cause"] == "unknown":
+                r["reason"] = "unknown meter, sorted last"
+            else:
+                r["reason"] = r["cause"]
 
         ordered_eligible = [pick_row] + [r for r in eligible_rows if r is not pick_row]
     else:

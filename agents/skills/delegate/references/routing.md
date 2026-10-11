@@ -47,6 +47,13 @@ range; only overflow reaches past the ceiling.
 When nothing is eligible the command prints `STOP: no lane eligible for
 <class>` with the reasons, exits 1, and starts nothing.
 
+Each `--json` row carries a `cause`, why that lane holds its place: `pick`,
+`steal` (the pick, which took the job by the margin), `eligible`, `unknown`
+(no meter value to rank by, so it sorts last), or the veto that stopped it:
+`disabled`, `floor`, `ceiling`, `gate` or `cli`. `eligible` is true for the
+first four, and `pick` for `pick` and `steal`. Read `cause`; the `reason`
+text only displays it.
+
 ## Plan dollars
 
 Pace is a ratio, so by default 1% of one plan's week counts the same as 1% of

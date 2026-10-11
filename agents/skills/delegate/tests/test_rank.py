@@ -485,7 +485,7 @@ with tempfile.TemporaryDirectory() as td:
     required_row_keys = {
         "lane", "harness", "model", "effort", "tier", "order", "meter",
         "pace", "r", "remaining_weekly", "meter_status", "eligible", "veto",
-        "pick", "overflow", "reason"
+        "cause", "pick", "overflow", "reason"
     }
     top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "overflow", "pick", "rows"))
     pick_matches = (data12["pick"] == data12["rows"][0]["lane"] and data12["rows"][0]["pick"] is True)
@@ -1530,5 +1530,78 @@ record("case 31c rank_range reads each Meter once and the core ranks a replaced 
        and whatif31[0]["lane"] == "terra-high@codex"
        and next(r for r in whatif31 if r["lane"] == "grok46-high@grok")["pace"] == 0.5,
        (reads31, rows31[0]["lane"], whatif31[0]["lane"]))
+
+# case 32 (ticket 20): every row carries one machine-readable `cause` from
+# rank.CAUSES, the value the deck and the dashboard read in place of the
+# `reason` text. `eligible` is true exactly for pick, steal, eligible and
+# unknown; `pick` exactly for pick and steal.
+EXPECTED_CAUSES32 = ("pick", "steal", "eligible", "unknown",
+                     "disabled", "floor", "ceiling", "gate", "cli")
+
+
+def cause_of32(rows, lane_name):
+    return next(r for r in rows if r["lane"] == lane_name).get("cause")
+
+
+steal32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(steal_meters20), ALL_HARNESSES)
+gate32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(gate_meters20), ALL_HARNESSES)
+unknown32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(unknown_meters20), ALL_HARNESSES)
+nocli32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES - {"claude"})
+sample32 = rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES)
+range32 = rank.rank_range(cat, usage.Snapshot.of(doc1), ALL_HARNESSES, floor=2, ceiling=3)
+off_cat32 = copy.deepcopy(cat)
+off_cat32["routing"]["meters"] = False
+off32 = rank.rank("impl", off_cat32, usage.Snapshot.of(doc6), ALL_HARNESSES)
+got32 = {
+    "terra steal (case 20)": cause_of32(steal32[1]["rows"], "terra-high@codex"),
+    "grok eligible (case 20)": cause_of32(steal32[1]["rows"], "grok46-high@grok"),
+    "grok gate (case 20)": cause_of32(gate32[1]["rows"], "grok46-high@grok"),
+    "grok unknown (case 20)": cause_of32(unknown32[1]["rows"], "grok46-high@grok"),
+    "fable cli (case 20)": cause_of32(nocli32[3]["rows"], "fable-xhigh@claude"),
+    "grok disabled (case 13)": cause_of32(rows13, "grok46-high@grok"),
+    "luna disabled (case 13)": cause_of32(rows13, "luna-low@codex"),
+    "terra pick (case 13)": cause_of32(rows13, "terra-high@codex"),
+    "grok pick (sample impl)": cause_of32(sample32, "grok46-high@grok"),
+    "luna floor (sample impl)": cause_of32(sample32, "luna-low@codex"),
+    "fable ceiling (sample impl)": cause_of32(sample32, "fable-xhigh@claude"),
+    "fable plan-dollars steal (case 29b)": cause_of32(rows29c, "fable-xhigh@claude"),
+    "terra unknown (case 6)": cause_of32(rows6, "terra-high@codex"),
+    "terra eligible with meters off and no reading": cause_of32(off32, "terra-high@codex"),
+}
+want32 = {
+    "terra steal (case 20)": "steal",
+    "grok eligible (case 20)": "eligible",
+    "grok gate (case 20)": "gate",
+    "grok unknown (case 20)": "unknown",
+    "fable cli (case 20)": "cli",
+    "grok disabled (case 13)": "disabled",
+    "luna disabled (case 13)": "disabled",
+    "terra pick (case 13)": "pick",
+    "grok pick (sample impl)": "pick",
+    "luna floor (sample impl)": "floor",
+    "fable ceiling (sample impl)": "ceiling",
+    "fable plan-dollars steal (case 29b)": "steal",
+    "terra unknown (case 6)": "unknown",
+    "terra eligible with meters off and no reading": "eligible",
+}
+record("case 32a rank.CAUSES names the nine causes",
+       getattr(rank, "CAUSES", None) == EXPECTED_CAUSES32, getattr(rank, "CAUSES", None))
+record("case 32b each fixture's Lanes carry the cause rank gives them",
+       got32 == want32, {k: got32[k] for k in got32 if got32[k] != want32[k]})
+
+every32 = [row for previews in (steal32, gate32, unknown32, nocli32, previews20)
+           for preview in previews for row in preview["rows"]]
+every32 += rows1 + rows6 + rows6_all + rows7 + rows13 + rows_off + rows29a + rows29b + rows29c
+every32 += sample32 + range32 + off32 + held30
+bad32 = [
+    (r["lane"], r.get("cause"), r["eligible"], r["pick"])
+    for r in every32
+    if r.get("cause") not in EXPECTED_CAUSES32
+    or r["eligible"] != (r.get("cause") in ("pick", "steal", "eligible", "unknown"))
+    or r["pick"] != (r.get("cause") in ("pick", "steal"))
+]
+record("case 32c every row from rank_range, rank and tier_leaders has one cause, "
+       "eligible exactly for pick/steal/eligible/unknown and pick exactly for pick/steal",
+       bool(every32) and not bad32, bad32[:6])
 
 sys.exit(1 if fails else 0)
