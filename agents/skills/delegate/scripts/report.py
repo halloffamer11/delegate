@@ -816,13 +816,14 @@ def axis_labels(top, x, width, c):
     return c["DIM"] + "".join(cells) + c["R"]
 
 
-def track(top, x, width, c, dot=None, steal=None, steal_col=""):
-    """One row of the Pace axis: the grid, Pace 1 as │, the steal line, the dot."""
+def track(top, x, width, c, dot=None, need=None, need_col=""):
+    """One row of the Pace axis: the grid, Pace 1 as │, the Pace to lead as ┊
+    (on the last cell when it lies past the axis), the dot."""
     cells = [(c["MUTE"], "─")] * width
     for k in range(int(top) + 1):
         cells[x(k)] = (c["MUTE"], "│" if k == 1 else "┼")
-    if steal is not None:
-        cells[x(steal)] = (steal_col, "┊")
+    if need is not None:
+        cells[x(need)] = (need_col, "┊")
     if dot is not None and dot[0] is not None:
         cells[x(dot[0])] = (dot[1], dot[2])
     return "".join(f"{col}{ch}{c['R']}" for col, ch in cells)

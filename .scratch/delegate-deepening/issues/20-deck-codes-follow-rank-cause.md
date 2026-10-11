@@ -23,7 +23,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decision E.3)
 
 **Blocked by:** 18 A job reads the Meters once, by freshness, with no probed flag (rank takes a Snapshot and ranks over a map of Readouts)
 
-**Status:** landed 2026-10-11. Every row from `rank_range`, `rank` and `tier_leaders` carries one `cause` from `rank.CAUSES`, the dashboard copies it into its state and filters disabled Lanes on it, and `deck.reason_code` maps it to a code through `CAUSE_CODES`, so a plan-dollars steal reads STEAL and a Lane with no CLI and no reading reads CLI. test_rank case 32 (the spec's case 30, renumbered) and test_dashboard `test_a_plan_dollars_steal_reads_as_a_steal`, `test_a_lane_without_its_cli_or_a_reading_reads_as_cli` and `test_with_meters_off_a_lane_without_a_reading_follows_rank` verify it. No box is left open.
+**Status:** landed 2026-10-11 (f08b47b). Every row from `rank_range`, `rank` and `tier_leaders` carries one `cause` from `rank.CAUSES`, the dashboard copies it into its state and filters disabled Lanes on it, and `deck.reason_code` maps it to a code through `CAUSE_CODES`, so a plan-dollars steal reads STEAL and a Lane with no CLI and no reading reads CLI. test_rank case 32 (the spec's case 30, renumbered) and test_dashboard `test_a_plan_dollars_steal_reads_as_a_steal`, `test_a_lane_without_its_cli_or_a_reading_reads_as_cli` and `test_with_meters_off_a_lane_without_a_reading_follows_rank` verify it. No box is left open.
 
 - [x] test_dashboard `test_a_plan_dollars_steal_reads_as_a_steal` (`quota_unit` plan_dollars, `write_meters` a_pace=0.5, b_pace=0.65) fails before this ticket with ELIG and "no Tier it can take" for codex-b, and passes with STEAL and "holds the Pick in T2".
 - [x] test_dashboard `test_a_lane_without_its_cli_or_a_reading_reads_as_cli` (present without grok, no grok row in the meters document) fails before this ticket with NOMTR and passes with CLI.
@@ -35,6 +35,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decision E.3)
 - [x] `make test` is green on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: f08b47b.
 
 `rank.py` has `CAUSES = ("pick", "steal", "eligible", "unknown", "disabled", "floor",
 "ceiling", "gate", "cli")`, and its docstring gives the Cause vocabulary and, separately,

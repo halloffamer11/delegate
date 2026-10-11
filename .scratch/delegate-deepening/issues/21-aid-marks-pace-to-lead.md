@@ -23,7 +23,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decisions E.2 a
 
 **Blocked by:** 20 The deck codes every Lane by the cause rank gives it; 19 Harness probes hand the Meters module their Windows, and usage.py exposes only its interface (`usage.MAX_PACE`)
 
-**Status:** landed 2026-10-11. Each `tier_leaders` preview carries `steal_threshold` in routing's quota unit and each other Meter's `pace_to_lead`, found by rerunning rank's core with one Readout's Pace replaced; the dashboard copies both into its tiers and the deck's aid reads them. test_rank case 33 (the spec's case 31, renumbered) and test_dashboard `test_the_aid_marks_the_pace_rank_says_a_meter_needs` verify it. No box is left open.
+**Status:** landed 2026-10-11 (a67811d). Each `tier_leaders` preview carries `steal_threshold` in routing's quota unit and each other Meter's `pace_to_lead`, found by rerunning rank's core with one Readout's Pace replaced; the dashboard copies both into its tiers and the deck's aid reads them. test_rank case 33 (the spec's case 31, renumbered) and test_dashboard `test_the_aid_marks_the_pace_rank_says_a_meter_needs` verify it. No box is left open.
 
 - [x] test_dashboard `test_the_aid_marks_the_pace_rank_says_a_meter_needs` (terra and sol unordered, `write_meters` a_pace=0.6, b_pace=0.5) fails before this ticket with "needs 0.80× to take T2" for codex-b and passes with "needs 0.60× to take T2".
 - [x] test_rank case 31a: sample catalog with fixture `meters.json`, Tier 2 `pace_to_lead == {'codex': 0.91}` and `steal_threshold == {'unit': 'pace', 'value': 1.1}` within 1e-9.
@@ -37,6 +37,14 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decisions E.2 a
 - [x] `make test` is green on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: a67811d.
+
+Review, 2026-10-11: the commit "delegate-deepening E: review fixes" moves the replay both
+searches share into rank's private `_pick_with`, and `references/routing.md` now says a
+`pace_to_lead` key needs an eligible Lane of known Pace and names the Meters that have
+none. `tools/delegate-dashboard/CLAUDE.md` credits the state's copy of `steal_threshold`
+and `pace_to_lead` to this ticket.
 
 `rank.tier_leaders` reads the Snapshot once into the Meter-to-Readout map (`_readouts`,
 which `rank_range` shares) and ranks each exact Tier over it with the private core.

@@ -18,7 +18,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decisions E.1 a
 
 **Blocked by:** 21 The deck's aid marks the Pace rank says each Meter needs to lead
 
-**Status:** landed 2026-10-11. The popup reads each Tier's `pace_to_lead` and each row's `cause` from `tier_leaders`, scales its Pace axis from Meter Paces and Paces to lead, and prints a Pace to lead past the axis as its value; ranked rows carry `cause` and no `veto`. test_report's popup checks "with plan dollars gives a rival past the Meters' axis its Pace to lead", "scales its axis to reach the Paces to lead" and "shows a Pace to lead past the axis as its value, its mark at the edge", and test_rank case 12, verify it. Ticket 23 closed its last box when it deleted `report.handover` and the `eligible_order` import.
+**Status:** landed 2026-10-11 (db5716b; its last box closed with ticket 23 in bec3ba5). The popup reads each Tier's `pace_to_lead` and each row's `cause` from `tier_leaders`, scales its Pace axis from Meter Paces and Paces to lead, and prints a Pace to lead past the axis as its value; ranked rows carry `cause` and no `veto`. test_report's popup checks "with plan dollars gives a rival past the Meters' axis its Pace to lead", "scales its axis to reach the Paces to lead" and "shows a Pace to lead past the axis as its value, its mark at the edge", and test_rank case 12, verify it. Ticket 23 closed its last box when it deleted `report.handover` and the `eligible_order` import.
 
 - [x] A new test_report popup check (copy of the samples with `quota_unit` plan_dollars and sol-high@codex at Tier 4, existing `pp_cache`) fails before this ticket with "cannot lead on Pace" on the Tier 4 codex row and passes with `needs {v:.2f}`, where v is `tier_leaders(...)[3]['pace_to_lead']['codex']` and lies above the axis top.
 - [x] The existing popup checks "needs 0.96 (+0.26)" and "→ luna-low@codex leads after agy drops 18.5 pts" pass unchanged.
@@ -28,6 +28,11 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview; decisions E.1 a
 - [x] `make test` is green on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commits: db5716b, and bec3ba5 (ticket 23) for the last box.
+
+Review, 2026-10-11: the commit "delegate-deepening E: review fixes" renames
+`report.track`'s `steal` argument to `need`, since the ┊ it draws is the Pace to lead.
 
 `report.popup_lines` scales the Pace axis from each Meter's Pace and every Pace to lead
 the Tier previews give, up to `pace_axis`'s cap of 8. The popup's `steals` list (the

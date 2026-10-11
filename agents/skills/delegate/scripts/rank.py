@@ -512,6 +512,14 @@ def _tier_rows(cat, readouts, present, tier):
     return [row for row in rows if row["tier"] == tier]
 
 
+def _pick_with(cat, readouts, present, tier, meter, readout):
+    """The what-if both searches ask: the Pick row of `tier` with `meter`
+    reading `readout` and every other Meter as `readouts` has it, or None."""
+    trial = dict(readouts)
+    trial[meter] = readout
+    return next((row for row in _tier_rows(cat, trial, present, tier) if row["pick"]), None)
+
+
 def _steal_threshold(routing, leader):
     """The value a Lane after `leader` must reach to take its Tier, in
     routing's quota unit."""
@@ -570,9 +578,8 @@ def _pace_to_lead(cat, readouts, present, tier, rows, meter):
         step = max(0, math.ceil(round(crossing * 100, 9)))
         steps.update(s for s in (step, step + 1) if s <= top)
     for step in sorted(steps):
-        trial = dict(readouts)
-        trial[meter] = dataclasses.replace(readouts[meter], pace=step / 100)
-        pick = next((r for r in _tier_rows(cat, trial, present, tier) if r["pick"]), None)
+        pick = _pick_with(cat, readouts, present, tier, meter,
+                          dataclasses.replace(readouts[meter], pace=step / 100))
         if pick is not None and pick["meter"] == meter:
             return step / 100
     return None
@@ -600,9 +607,8 @@ def _handover(tier_cat, meters, readouts, present, tier, leader):
         return None
     for step in range(1, _HANDOVER_STEPS + 1):
         spend = step / _HANDOVER_STEPS
-        trial = dict(readouts)
-        trial[meter] = meters.readout(meter, tier_cat, spend=spend)
-        pick = next((r for r in _tier_rows(tier_cat, trial, present, tier) if r["pick"]), None)
+        pick = _pick_with(tier_cat, readouts, present, tier, meter,
+                          meters.readout(meter, tier_cat, spend=spend))
         if pick is None or pick["lane"] != leader["lane"]:
             return {"points": min(spend, reading.weekly), "to": pick["lane"] if pick else None}
         if spend >= reading.weekly:

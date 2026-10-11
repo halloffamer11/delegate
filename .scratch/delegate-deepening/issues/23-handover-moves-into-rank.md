@@ -21,7 +21,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview)
 
 **Blocked by:** 22 The popup shows the Pace to lead rank gives, even past its axis; 17 Every display shows one weekly figure and one Gate per Meter (`Snapshot.readout(spend=)`)
 
-**Status:** landed 2026-10-11. Each `tier_leaders` preview carries `handover` (`{points, to}` or None), which rank finds by spending the leader's Meter through `Snapshot.readout(spend=)` in half-point steps; the popup only renders it, `report.handover` is gone, and rank's `score`, `eligible_order`, `steals` and `choose` are private. test_rank cases 34a to 34h and the replaced 29c, test_dashboard `test_each_tier_carries_the_handover_rank_gives` and the unchanged popup checks in test_report verify it. No box is open.
+**Status:** landed 2026-10-11 (bec3ba5). Each `tier_leaders` preview carries `handover` (`{points, to}` or None), which rank finds by spending the leader's Meter through `Snapshot.readout(spend=)` in half-point steps; the popup only renders it, `report.handover` is gone, and rank's `score`, `eligible_order`, `steals` and `choose` are private. test_rank cases 34a to 34h and the replaced 29c, test_dashboard `test_each_tier_carries_the_handover_rank_gives` and the unchanged popup checks in test_report verify it. No box is open.
 
 - [x] test_rank case 32: with a@x on mx (weekly 0.5, `cycle_left` 0.5, order 1), b@y on my (Pace 0.9, order 2), Margin 0.2 and Gate 0.05, handover is points ≈ 0.15 to b@y; a lone leader gives ≈ 0.45 to None; plan dollars with weights 20 and 10 gives ≈ 0.3125 to b@y; Meters off gives None (tolerance 0.006).
 - [x] The popup CLI checks in test_report pass unchanged, including "→ luna-low@codex leads after agy drops 18.5 pts".
@@ -33,6 +33,13 @@ Spec: `.scratch/delegate-deepening/spec.md` (E. Routing preview)
 - [x] `make test` is green on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: bec3ba5.
+
+Review, 2026-10-11: the commit "delegate-deepening E: review fixes" has `_handover` ask
+the same private `_pick_with` as the Pace to lead. The Handover can sit one 0.005 step
+from exact arithmetic at a tie (see Deviations); that precision is
+`Snapshot.readout(spend=)`'s and is left to ticket 17 (B2).
 
 What shipped:
 - `rank.tier_leaders` gives each Tier a `handover`. A private `_handover` reruns the

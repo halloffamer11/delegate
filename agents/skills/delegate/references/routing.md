@@ -59,11 +59,13 @@ text only displays it. Rows carry no `veto` field: `cause` replaced it.
 `steal_threshold` is `{unit, value}`: what a lane that sorts after the leader
 must reach to take the tier, in the quota unit (the leader's pace plus the
 margin, or with plan dollars its value times `1 + margin`). `pace_to_lead`
-maps each other meter with an eligible lane in the tier to the lowest pace, in
-steps of 0.01, at which a lane on it would lead, every other meter as it reads
-now; null when no pace a meter can read (up to 50) would. With metering off the
-value is null and the map is empty. The usage popup prints each pace to lead
-as it is, even past the end of its pace axis. `handover` is `{points, to}`:
+maps each other meter with an eligible lane of known pace in the tier to the
+lowest pace, in steps of 0.01, at which a lane on it would lead, every other
+meter as it reads now; null when no pace a meter can read (up to 50) would. A
+gated meter, a meter with no CLI and a meter with an unknown pace have no key.
+With metering off the value is null and the map is empty. The usage popup
+prints each pace to lead as it is, even past the end of its pace axis.
+`handover` is `{points, to}`:
 how far the leader's meter can fall, in quota points of its week on a grid of
 0.005, before another lane leads the tier or the meter falls under the gate,
 and that lane, or null when no other lane is eligible. It is never a time.
