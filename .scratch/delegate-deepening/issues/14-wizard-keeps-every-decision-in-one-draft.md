@@ -49,7 +49,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (F. Catalog draft; decisions F.2, F.
 
 **Blocked by:** 13 The plain wizard writes the Order it prints
 
-**Status:** landed 2026-10-11. `setup_tui.Wizard` keeps every carry, Tier, Order and routing decision in one public `self.draft` (`catalog_draft.CatalogDraft`, `whole=True` in the full wizard, `whole=False` on a focused screen); `result()` is `draft.documents()`, a focused save commits only the documents `draft.changes()` touches, and the five structures, their materialisations and `tier_lines.unnamed_carried` are gone. Verified by test_setup_tui 39, 44b and 53 on the new starting order, the new 75 case (a tick undone on a tier page leaves `r` a rescan), the two test_catalog_draft cases that took over 20, 21 and 53's written-document checks, and all 140 test_setup_tui cases with no private read; no box is open.
+**Status:** landed 2026-10-11 (cab402d, with the review fixes in "delegate-deepening F: review fixes"). `setup_tui.Wizard` keeps every carry, Tier, Order and routing decision in one public `self.draft` (`catalog_draft.CatalogDraft`, `whole=True` in the full wizard, `whole=False` on a focused screen); `result()` is `draft.documents()`, a focused save commits only the documents `draft.changes()` touches, and the five structures, their materialisations and `tier_lines.unnamed_carried` are gone. Verified by test_setup_tui 39, 44b and 53 on the new starting order, the new 75 case (a tick undone on a tier page leaves `r` a rescan), the two test_catalog_draft cases that took over 20, 21 and 53's written-document checks, and all 140 test_setup_tui cases with no private read; no box is open.
 
 - [x] `Wizard` has no `_enabled`, `_assigned`, `_marks`, `_tier_order`, `_line_order`, `_review_order`, `_original_lanes`, `_original_routing` or `_loaded` attribute, and no `current_lanes`, `_final_tier`, `_focused_lanes`, `_meter_coverage`, `_start_key`, `_arrange_review` or `_choices` method.
 - [x] `grep -nE '\b(w|w2|full|focused|fresh|carry_wizard|tier|trip|undone|first|second|plain|pressed|q)\._[a-z]'` over `tests/test_setup_tui.py` and `tests/test_tier_proposal.py` finds nothing, and no test reads `__dict__`.
@@ -62,6 +62,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (F. Catalog draft; decisions F.2, F.
 - [x] `make test` is green on Python 3.9 and on `python3.13`.
 
 ## Landed, 2026-10-11
+
+Commits: `cab402d` ("delegate-deepening 14: The setup wizard keeps every decision in one
+draft"), then the review fixes in "delegate-deepening F: review fixes".
 
 What shipped:
 
@@ -145,3 +148,15 @@ Deviations:
 - A routing edit now refuses a rescan (F.7), where the old Wizard allowed one.
 - Known leftover: the Wizard still takes 18 constructor parameters. H3 adds `epoch_rows`
   on top of that.
+
+Review fixes ("delegate-deepening F: review fixes"):
+
+- The focused half of decision F.6 had no test: no case unticked a Lane ticked onto a
+  focused Tier, and none pressed space on a focused tier 1, before or after this ticket.
+  New test_setup_tui 61b: on `--screen tier3` over a catalog with luna and flash numbered
+  in Tier 1, luna ticked onto Tier 3 joins it after sol, and unticked returns to Tier 1
+  before flash, so the confirm page says nothing will be written and `y` writes the
+  catalog back; on `--screen tier1` an untick is refused and decides nothing. Making a
+  focused untick always go one Tier down, or dropping the tier 1 refusal, fails it.
+- `references/architecture.md`'s last focused-setup sentence said an unmark always moves
+  a Lane one Tier down; it now names the return to the lower start Tier as well.

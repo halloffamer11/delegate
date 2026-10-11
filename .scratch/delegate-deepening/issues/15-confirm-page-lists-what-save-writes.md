@@ -23,7 +23,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (F. Catalog draft; decision F.3)
 
 **Blocked by:** 14 The setup wizard keeps every decision in one draft; 11 A focused setup screen saves only the change made on it
 
-**Status:** landed 2026-10-11. The full confirm page gives each Lane `setup_tui.placement_text`, read from `draft.documents()["lanes"]` (`tier N, order M`, or `tier N` for an off Lane), and `--plain`'s confirm listing prints the same text; `handle` takes the confirm and routing cursor bounds from the row builders the view draws. Verified by test_setup_tui 81, the test_setup case "plain and the TUI confirm print the same placement for every Lane", and the focused-rows assertion added to D3's focused tier case; no box is open.
+**Status:** landed 2026-10-11 (21ec914, with the review fixes in "delegate-deepening F: review fixes"). The full confirm page gives each Lane `setup_tui.placement_text`, read from `draft.documents()["lanes"]` (`tier N, order M`, or `tier N` for an off Lane), and `--plain`'s confirm listing prints the same text; `handle` takes the confirm and routing cursor bounds from the row builders the view draws. Verified by test_setup_tui 81, the test_setup case "plain and the TUI confirm print the same placement for every Lane", and the focused-rows assertion added to D3's focused tier case; no box is open.
 
 - [x] Test 81 fails before this ticket (value "tier 2" with no order) and passes after.
 - [x] On a focused screen (refresh-2026-09-22 fixtures, `--fixture-dir`, `--no-bench`, `--screen tier3`, one Lane unticked, under a temporary `HOME`), the confirm page's change rows equal `draft.changes()`.
@@ -33,6 +33,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (F. Catalog draft; decision F.3)
 - [x] `make test` is green on Python 3.9 and on `python3.13`.
 
 ## Landed, 2026-10-11
+
+Commits: `21ec914` ("delegate-deepening 15: The confirm page lists exactly what save
+writes"), then the review fixes in "delegate-deepening F: review fixes".
 
 What shipped:
 
@@ -88,3 +91,10 @@ Deviations:
   used to print `tier N, order M, off`; it now prints `tier N, off`, as the TUI does.
 - At 80 places the item column's 24-place cap still cuts `classes.mechanical.ceiling`, as on
   the base; every Lane value and path reads whole. That cap is outside this ticket.
+
+Review fixes ("delegate-deepening F: review fixes"):
+
+- The review confirmed the live bug's tests: test_setup_tui 81 fails on `cab402d` (the
+  ticket's base) with every value read `tier N`, and test_setup "plain and the TUI
+  confirm print the same placement for every Lane" fails on `28500b9` on the TUI side.
+  That case now builds its catalog with test_setup's shared `numbered_sample_catalog`.

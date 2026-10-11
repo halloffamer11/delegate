@@ -1337,20 +1337,26 @@ def case_a_focused_save_on_a_first_run_writes_the_whole_catalog():
 
 # --- deepening F1: the plain wizard writes the Order it prints ---------------
 
+def numbered_sample_catalog(root):
+    """The sample catalog under <root>/cfg with every carried Lane numbered in
+    its Tier: (config dir, lanes.json path, the lanes document written)."""
+    cfg = sample_catalog(root)
+    lanes_path = os.path.join(cfg, "lanes.json")
+    doc = catalog.load_json(lanes_path)
+    for name, order in (("fable-xhigh@claude", 1), ("sol-high@codex", 1), ("terra-high@codex", 1),
+                        ("grok46-high@grok", 2), ("luna-low@codex", 1), ("flash-high@agy", 2)):
+        doc["lanes"][name]["order"] = order
+    catalog.write_json(lanes_path, doc)
+    return cfg, lanes_path, doc
+
+
 def case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier():
     """On a catalog whose every carried Lane is numbered in its Tier, a --plain
     prompt that moves terra from Tier 2 to Tier 3 puts it at the end of Tier 3,
     after sol, and closes the gap it left in Tier 2; the confirm listing prints
     the Order written (deepening F, bug 1)."""
-    numbered = {"fable-xhigh@claude": 1, "sol-high@codex": 1, "terra-high@codex": 1,
-                "grok46-high@grok": 2, "luna-low@codex": 1, "flash-high@agy": 2}
     with tempfile.TemporaryDirectory() as td:
-        cfg = sample_catalog(td)
-        lanes_path = os.path.join(cfg, "lanes.json")
-        doc = catalog.load_json(lanes_path)
-        for name, order in numbered.items():
-            doc["lanes"][name]["order"] = order
-        catalog.write_json(lanes_path, doc)
+        cfg, lanes_path, _doc = numbered_sample_catalog(td)
         # the prompts come in catalog order: fable, sol, terra, grok, luna, flash
         answers = io.StringIO("\n\n3\n\n\n\n" + "\n" + "y\n")
         code, out, err = wizard_in_process(
@@ -1374,8 +1380,6 @@ def case_plain_and_the_tui_confirm_print_the_same_placement_for_every_lane():
     Lane its Tier and Order and an off Lane its Tier alone; --plain says `off`
     after it, where the TUI has its carry column (deepening F.3). Both are
     declined, so neither writes."""
-    numbered = {"fable-xhigh@claude": 1, "sol-high@codex": 1, "terra-high@codex": 1,
-                "grok46-high@grok": 2, "luna-low@codex": 1, "flash-high@agy": 2}
     expected = {"fable-xhigh@claude": ("", "tier 4, order 1"), "terra-high@codex": ("", "tier 3, order 1"),
                 "sol-high@codex": ("", "tier 3, order 2"), "grok46-high@grok": ("", "tier 2, order 1"),
                 "luna-low@codex": ("", "tier 1, order 1"), "flash-high@agy": ("off", "tier 1")}
@@ -1393,19 +1397,14 @@ def case_plain_and_the_tui_confirm_print_the_same_placement_for_every_lane():
         return wizard.result()
 
     with tempfile.TemporaryDirectory() as td:
-        cfg = sample_catalog(td)
-        lanes_path = os.path.join(cfg, "lanes.json")
-        doc = catalog.load_json(lanes_path)
-        for name, order in numbered.items():
-            doc["lanes"][name]["order"] = order
-        catalog.write_json(lanes_path, doc)
+        cfg, lanes_path, doc = numbered_sample_catalog(td)
         lines = os.path.join(td, "tiers.txt")
         with open(lines, "w", encoding="utf-8") as f:
             f.write("fable-xhigh@claude 4\nterra-high@codex 3\nsol-high@codex 3\n"
                     "grok46-high@grok 2\nluna-low@codex 1\nflash-high@agy off\n")
         argv = ["--config-dir", cfg, "--no-discover", "--no-bench", "--tiers-from", lines]
         # six Tier prompts kept as the lines left them, routing kept, then no
-        answers = io.StringIO("\n" * len(numbered) + "\n" + "n\n")
+        answers = io.StringIO("\n" * len(doc["lanes"]) + "\n" + "n\n")
         plain_code, plain_out, plain_err = wizard_in_process(td, argv + ["--plain"], stdin=answers)
         tui_code, tui_out, tui_err = wizard_in_process(td, argv, drive=read_confirm)
         printed = {name: text for name, sep, text in (line.partition(": ") for line in plain_out.splitlines())

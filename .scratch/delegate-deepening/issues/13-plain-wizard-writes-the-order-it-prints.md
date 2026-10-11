@@ -45,7 +45,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (F. Catalog draft; decisions F.1, F.
 
 **Blocked by:** 10 Agent files and the model queue follow every catalog commit; 11 A focused setup screen saves only the change made on it; 12 catalog set and the dashboard write through the one commit (lane order: all of D before F)
 
-**Status:** landed 2026-10-11. `catalog_draft.CatalogDraft` holds `--plain`'s decisions and its `documents()` go whole to `catalog_commit.commit`, so a prompt that moves a Lane to another Tier puts it at that Tier's end and the listing prints the Order written; `catalog.carried_in_tier` is the one tie-break. Verified by test_setup's `case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier` (red on the base first), the eighteen cases of the new `tests/test_catalog_draft.py`, test_catalog 22.1 and test_bench_page 35.4; no box is open.
+**Status:** landed 2026-10-11 (5fdb1e6, with the review fixes in "delegate-deepening F: review fixes"). `catalog_draft.CatalogDraft` holds `--plain`'s decisions and its `documents()` go whole to `catalog_commit.commit`, so a prompt that moves a Lane to another Tier puts it at that Tier's end and the listing prints the Order written; `catalog.carried_in_tier` is the one tie-break. Verified by test_setup's `case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier` (red on the base first), the eighteen cases of the new `tests/test_catalog_draft.py`, test_catalog 22.1 and test_bench_page 35.4; no box is open.
 
 - [x] `case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier` fails before this ticket (terra written 3/1 beside sol 3/1, grok left at 2/2) and passes after: terra 3/2, sol 3/1, grok 2/1, and stdout has "terra-high@codex: tier 3, order 2".
 - [x] `tests/test_catalog_draft.py` exercises every entry point only through the interface and runs under `make test`.
@@ -57,6 +57,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (F. Catalog draft; decisions F.1, F.
 - [x] `make test` is green on Python 3.9 (`$(uv python find 3.9)`) and on `python3.13`.
 
 ## Landed, 2026-10-11
+
+Commits: `5fdb1e6` ("delegate-deepening 13: The plain wizard writes the Order it prints"),
+then the review fixes in "delegate-deepening F: review fixes".
 
 What shipped:
 
@@ -142,3 +145,11 @@ Deviations:
   under F2; it moved here because F1 deletes the helper.
 - `show_bench` takes the draft in place of the two documents, so
   `case_plain_collects_bench_in_process` passes it a draft of the sample proposal.
+
+Review fixes ("delegate-deepening F: review fixes"):
+
+- The review confirmed the live bug's test: run against an export of the base
+  (`28500b9`), `case_a_prompted_tier_change_moves_the_lane_to_the_end_of_its_new_tier`
+  fails with terra written 3/1 beside sol 3/1 and grok left at 2/2.
+- test_setup's two F cases built the same numbered sample catalog line for line; they
+  now share `numbered_sample_catalog`. No assertion changed.

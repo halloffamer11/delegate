@@ -364,7 +364,8 @@ at launch (`catalog_commit`). On every screen a document changed since launch, b
 nothing and exits 1. `tier_lines` owns the bulk tier-line parser and summary, and
 the Draft applies the lines; `setup_tui` keeps aliases. The routing screen exposes
 metering with `[x]`/`[ ]`, space/x or +/-. Legacy absence stays absent on a no-op.
-Focused Tier unmark moves down one Tier; Tier 1 requires Carry to switch off.
+Focused Tier unmark moves down one Tier, or back to the lower Tier a Lane ticked there
+started in, at its starting place; Tier 1 requires Carry to switch off.
 
 - `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their
   efforts, each from the adapter's `models()`. Efforts come from

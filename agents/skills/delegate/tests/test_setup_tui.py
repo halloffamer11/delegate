@@ -2279,6 +2279,37 @@ try:
 except Exception as e:
     record("focused edit preservation regressions", False, repr(e))
 
+try:
+    # 61b. Deepening F.6 on a focused screen: an untick returns a Lane ticked
+    # onto this Tier to the lower Tier it started in, at its starting place,
+    # rather than one Tier down; so tick and untick write nothing. On tier 1
+    # an untick is refused: carry is how a Lane goes off.
+    numbered = copy.deepcopy(LANES)
+    for name, order in (("luna-low@codex", 1), ("flash-high@agy", 2)):
+        numbered["lanes"][name]["order"] = order
+    w = wizard(lanes=numbered, focus="tier3")
+    move_to(w, "luna-low@codex")
+    w.handle("space")
+    ticked = (w.draft.lane("luna-low@codex").tier, w.draft.tier_lanes(3))
+    w.handle("space")
+    unticked = (w.draft.lane("luna-low@codex").tier, w.draft.tier_lanes(1))
+    w.handle("enter")
+    nothing = any("Nothing will be written" in str(row["cells"]) for row in w.view()["rows"])
+    w.handle("y")
+    floor = wizard(lanes=numbered, focus="tier1")
+    move_to(floor, "luna-low@codex")
+    floor.handle("space")
+    refused = (floor.message.startswith("Tier 1 is the lowest Tier")
+               and floor.draft.lane("luna-low@codex").tier == 1 and not floor.made_choice())
+    record("61b a focused untick returns a Lane ticked onto the Tier to its start Tier and place; "
+           "tier 1 refuses an untick",
+           ticked == (3, ["sol-high@codex", "luna-low@codex"])
+           and unticked == (1, ["luna-low@codex", "flash-high@agy"])
+           and nothing and w.result() == {"lanes": numbered, "routing": ROUTING} and refused,
+           repr((ticked, unticked, nothing, floor.message)))
+except Exception as e:
+    record("61b a focused untick returns a Lane ticked onto the Tier to its start Tier", False, repr(e))
+
 
 try:
     # Ticket 29 A: the review page names a Tier whose carried Lanes all drain
