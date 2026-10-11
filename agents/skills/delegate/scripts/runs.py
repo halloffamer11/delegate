@@ -18,7 +18,8 @@ null outcome, and the Ledger start. After it, whatever stopped it:
 return.json (relayed only), the outcome in dispatch.json, the Meter hold, and
 the Ledger finish. A write that fails becomes a note; nothing raises after the
 start. Only this module writes dispatch.json and return.json, and only it
-appends a Run's Ledger lines; everything else reads a Run with `Run.read`.
+writes the Ledger: one v1 line when each Run starts and one when it ends.
+Everything else reads a Run with `Run.read`, and the Ledger with `running`.
 
 `Ended.text` spells the finish and metrics lines (a hand-off: the native and
 spawn lines), or with `as_json` the one object `delegate dispatch --json` and
@@ -41,11 +42,14 @@ import time
 from typing import NamedTuple, Optional
 import uuid
 
-import events
 import harnesses
 import usage
 
 DEFAULT_ROOT = "~/.cache/delegate/runs"
+# The environment variable that moves the Ledger, for a sandbox (the tests, the
+# offline evals). The Ledger's path and its lines are this module's alone.
+LEDGER_ENV = "DELEGATE_LEDGER"
+_DEFAULT_LEDGER = "~/.cache/delegate/ledger.jsonl"
 
 # Every key dispatch.json carries, in the order it is written. A Run starts
 # with the request filled and the outcome null; `execute` fills the outcome.
@@ -196,11 +200,8 @@ def execute(request, prompt, work, runs_dir=None):
     # start and the work still ends the Run.
     previous = _trap_sigterm()
     try:
-        _attempt(notes, "could not write the Ledger start", lambda: events.append(events.start_event(
-            thread_id=doc["thread_id"], lane=request.lane, class_=request.class_name,
-            effort=request.effort, timeout_s=_timeout_s(request.timeout),
-            cwd=request.write or request.cwd, brief=request.brief, out=run.return_path,
-            write=request.write)))
+        _attempt(notes, "could not write the Ledger start",
+                 lambda: _append(_start_line(request, doc["thread_id"], run.return_path)))
         result = work(run)
     except BaseException as e:
         result = blocked(_why(e))
@@ -238,9 +239,8 @@ def execute(request, prompt, work, runs_dir=None):
     held = _settle_meter(request, outcome["status"], text)
     if held:
         notes.append(held)
-    _attempt(notes, "could not write the Ledger finish", lambda: events.append(events.finish_event(
-        thread_id=doc["thread_id"], lane=request.lane, class_=request.class_name, secs=secs,
-        rc=rc, status=outcome["status"], child_session=finish.session_id, out=run.return_path)))
+    _attempt(notes, "could not write the Ledger finish", lambda: _append(_finish_line(
+        request, doc["thread_id"], secs, rc, outcome["status"], finish.session_id, run.return_path)))
 
     status = outcome["status"]
     if handed:
@@ -288,7 +288,7 @@ def _ledger_entries():
     """Every Ledger line that is a JSON object; none when the Ledger cannot be read."""
     entries = []
     try:
-        with open(events.ledger_path(), "r", encoding="utf-8", errors="replace") as f:
+        with open(_ledger_path(), "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     entry = json.loads(line)
@@ -351,6 +351,62 @@ def _start(request, prompt, runs_dir):
     except OSError as e:
         raise StartError(f"could not start a run under {base}: {e}") from e
     return run, doc
+
+
+def _ledger_path():
+    return os.environ.get(LEDGER_ENV) or os.path.expanduser(_DEFAULT_LEDGER)
+
+
+def _append(entry):
+    """Append one line to the Ledger, making its directory. Raises OSError."""
+    path = _ledger_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _ledger_now():
+    """The Ledger's stamp: local time, to the second."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _start_line(request, thread_id, out):
+    """A Run's v1 Ledger start. The keys and their order are the format every
+    earlier delegate wrote; `running` reads them back."""
+    return {
+        "v": 1,
+        "kind": _START_KIND,
+        "ts": _ledger_now(),
+        "thread_id": thread_id,
+        "lane": request.lane,
+        "class": request.class_name or None,
+        "effort": request.effort,
+        "timeout_s": _timeout_s(request.timeout),
+        "cwd": request.write or request.cwd,
+        "brief": request.brief,
+        "out": out,
+        "write": request.write or None,
+    }
+
+
+def _finish_line(request, thread_id, secs, rc, status, child_session, out):
+    """A Run's v1 Ledger finish, in the same v1 format."""
+    return {
+        "v": 1,
+        "kind": _FINISH_KIND,
+        "ts": _ledger_now(),
+        "thread_id": thread_id,
+        "lane": request.lane,
+        "class": request.class_name or None,
+        # null for a native Run: delegate never sees how long its agent runs
+        "secs": None if secs is None else int(secs),
+        "rc": int(rc),
+        "status": status,
+        "child_session": child_session or None,
+        "out": out,
+    }
 
 
 def _attempt(notes, what, write):

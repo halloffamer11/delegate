@@ -4,15 +4,16 @@
 What a run is:
   A single execution of an external worker on a designated lane (harness × model × effort).
   The worker executes against a specific task brief with either read-only or worktree-write permissions.
-  The run manages catalog resolution, prompt assembly, ledger accounting, relay execution,
-  and child return normalization.
+  The run manages catalog resolution, prompt assembly, relay execution and child return
+  normalization; runs.py keeps its records.
 
 Run: `runs.execute` runs every Run from its start to its Outcome
 (dispatch.json, prompt.md, return.json, the Ledger, the Meter hold and the
-finish line); dispatch supplies only the work: `relay_work`, or for a native
-Lane a `runs.HandOff` to the orchestrator's agent, which ends the Run at once
-as native. The relay adds relay.stdout, relay.stderr, result.json, brief.txt,
-final.txt and events.jsonl.
+finish line); runs.py is the Ledger's one writer. Dispatch supplies only the
+work: `relay_work`, or for a native Lane a `runs.HandOff` to the
+orchestrator's agent, which ends the Run at once as native. The relay adds
+relay.stdout, relay.stderr, result.json, brief.txt, final.txt and
+events.jsonl.
 
 Status mapping:
   completed:

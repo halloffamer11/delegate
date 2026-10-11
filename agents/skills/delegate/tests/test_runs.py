@@ -3,7 +3,10 @@
 
 Every case drives `runs.execute` in-process against a temp runs root, a temp
 $DELEGATE_LEDGER and a temp $DELEGATE_CACHE. The work is a plain function.
+Case 13 reads the scripts' source: only runs.py touches the Ledger and a Run's
+records.
 """
+import ast
 import contextlib
 from datetime import datetime
 import json
@@ -14,9 +17,10 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
-sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
+sys.path.insert(0, SCRIPTS)
 import runs  # noqa: E402
 import usage  # noqa: E402
 
@@ -405,16 +409,28 @@ def case_a_start_past_its_timeout_or_ended_is_not_running():
                f"seen={seen} lost_finish={lost_finish} unended={unended}")
 
 
+def v1_start(thread, lane, ts, timeout_s, out, class_="impl", effort="high", cwd="/w",
+             brief="/w/b.md", write=None):
+    """A Ledger start exactly as every delegate since v1 spells it."""
+    return (f'{{"v": 1, "kind": "dispatch.start", "ts": {json.dumps(ts)}, '
+            f'"thread_id": {json.dumps(thread)}, "lane": {json.dumps(lane)}, "class": {json.dumps(class_)}, '
+            f'"effort": {json.dumps(effort)}, "timeout_s": {json.dumps(timeout_s)}, "cwd": {json.dumps(cwd)}, '
+            f'"brief": {json.dumps(brief)}, "out": {json.dumps(out)}, "write": {json.dumps(write)}}}')
+
+
+def v1_finish(thread, lane, ts, secs, rc, status, child_session, out, class_="impl"):
+    """A Ledger finish exactly as every delegate since v1 spells it."""
+    return (f'{{"v": 1, "kind": "dispatch.finish", "ts": {json.dumps(ts)}, "thread_id": {json.dumps(thread)}, '
+            f'"lane": {json.dumps(lane)}, "class": {json.dumps(class_)}, "secs": {json.dumps(secs)}, '
+            f'"rc": {json.dumps(rc)}, "status": {json.dumps(status)}, '
+            f'"child_session": {json.dumps(child_session)}, "out": {json.dumps(out)}}}')
+
+
 def case_running_reads_a_ledger_an_earlier_delegate_wrote():
     def stamp(epoch):
         return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="seconds")
 
-    def start(thread, lane, ts, timeout_s, out):
-        return (f'{{"v": 1, "kind": "dispatch.start", "ts": {json.dumps(ts)}, '
-                f'"thread_id": {json.dumps(thread)}, "lane": {json.dumps(lane)}, "class": "impl", '
-                f'"effort": "high", "timeout_s": {json.dumps(timeout_s)}, "cwd": "/w", '
-                f'"brief": "/w/b.md", "out": {json.dumps(out)}, "write": null}}')
-
+    start = v1_start
     with world() as w:
         now = float(int(time.time()))
         open_run = os.path.join(w.root, "20261011T080000Z-flash-high@agy-0a0a0a0a")
@@ -422,8 +438,9 @@ def case_running_reads_a_ledger_an_earlier_delegate_wrote():
         with open(os.path.join(open_run, "dispatch.json"), "w", encoding="utf-8") as f:
             json.dump({"lane": "flash-high@agy", "status": None, "finished_at": None}, f)
         elsewhere = os.path.join(w.root, "gone", "return.json")
-        # Today's v1 lines, as delegate and its probes write them: a meter event,
-        # an open start, a start past its timeout and a start with its finish.
+        # v1 lines as earlier delegates wrote them: a meter event (probes wrote
+        # them until delegate-deepening 04), an open start, a start past its
+        # timeout and a start with its finish.
         lines = [
             f'{{"v": 1, "kind": "meter", "ts": "{stamp(now - 900)}", "source": "probe", '
             f'"cache_age_s": 0, "probed_at": {now - 900}, "lanes": []}}',
@@ -431,9 +448,7 @@ def case_running_reads_a_ledger_an_earlier_delegate_wrote():
                   os.path.join(open_run, "return.json")),
             start("t-stale", "terra-high@codex", stamp(now - 1000), 300, elsewhere),
             start("t-pair", "grok46-high@grok", stamp(now - 200), 2400, elsewhere),
-            f'{{"v": 1, "kind": "dispatch.finish", "ts": "{stamp(now - 150)}", "thread_id": "t-pair", '
-            f'"lane": "grok46-high@grok", "class": "impl", "secs": 50, "rc": 0, "status": "done", '
-            f'"child_session": null, "out": {json.dumps(elsewhere)}}}',
+            v1_finish("t-pair", "grok46-high@grok", stamp(now - 150), 50, 0, "done", None, elsewhere),
             # lines that are not objects
             "[1]", '"dispatch.start"', "42", "null", "{not json", "",
             # starts it cannot read
@@ -453,6 +468,150 @@ def case_running_reads_a_ledger_an_earlier_delegate_wrote():
                read == [runs.Running("flash-high@agy", open_run, now - 100, now - 100 + 1500)]
                and missing == [] and unreadable == [],
                f"read={read} missing={missing} unreadable={unreadable}")
+
+
+def case_the_ledger_lines_keep_their_v1_keys_in_order():
+    # A relayed Run with a Class, one with a worktree and no Class, and a hand-off;
+    # each with its start's timeout_s, then its finish's secs, rc, status and session.
+    asked = (
+        (request(), lambda run: runs.Finish(RETURNED, relay_exit=0, secs=7, session_id="s-12"),
+         1800, 7, 0, "done", "s-12"),
+        (request(class_name=None, write="/wt", timeout="2h"), lambda run: runs.blocked("no relay"),
+         7200, 0, 1, "blocked", None),
+        (request(lane="opus-high@claude", harness="claude", timeout="40m"),
+         lambda run: runs.HandOff("lane-opus-high", "spawn it"), 2400, None, 0, "native", None),
+    )
+    seen = []
+    with world() as w:
+        for req, work, timeout_s, secs, rc, status, session in asked:
+            ended = runs.execute(req, b"p", work, w.root)
+            with open(w.ledger, encoding="utf-8") as f:
+                wrote = f.read().splitlines()[-2:]
+            start, finish = (json.loads(line) for line in wrote)
+            out = runs.Run(ended.run).return_path
+            thread = start["thread_id"]
+            # the same lines the running() fixture (case 11) reads, byte for byte
+            seen.append((wrote, [
+                v1_start(thread, req.lane, start["ts"], timeout_s, out, class_=req.class_name,
+                         effort=req.effort, cwd=req.write or req.cwd, brief=req.brief, write=req.write),
+                v1_finish(thread, req.lane, finish["ts"], secs, rc, status, session, out,
+                          class_=req.class_name),
+            ]))
+    record("12. the Ledger lines a Run writes keep their v1 keys, in order",
+           len(seen) == 3 and all(wrote == expected for wrote, expected in seen),
+           "".join(f"\n  wrote    {wrote}\n  expected {expected}"
+                   for wrote, expected in seen if wrote != expected))
+
+
+# A Run's two records, and the names a script reaches them by.
+RUN_RECORDS = ("dispatch.json", "return.json")
+RECORD_PATHS = ("dispatch_path", "return_path")
+
+
+def _names_a_record(node, schema):
+    """True for a Run record's name or path. `schema` holds the nodes that
+    spell the return contract's schema, assets/schemas/return.json, which no
+    Run writes."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node not in schema and any(node.value == r or node.value.endswith("/" + r)
+                                          for r in RUN_RECORDS)
+    return isinstance(node, ast.Attribute) and node.attr in RECORD_PATHS
+
+
+def _schema_parts(nodes):
+    parts = set()
+    for node in nodes:
+        if isinstance(node, ast.Call) and any(
+                isinstance(a, ast.Constant) and a.value == "schemas" for a in node.args):
+            parts.update(a for a in node.args if isinstance(a, ast.Constant))
+    return parts
+
+
+def _writes(node):
+    """True for a call that writes a file: open() in a write mode, anything
+    named for writing or dumping, and os or shutil moving a file into place."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+    if name == "open":
+        modes = node.args[1:2] + [k.value for k in node.keywords if k.arg == "mode"]
+        return any(isinstance(m, ast.Constant) and isinstance(m.value, str)
+                   and set(m.value) & set("wax+") for m in modes)
+    if "write" in name.lower() or "dump" in name.lower():
+        return True
+    owner = func.value.id if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) else ""
+    return owner == "shutil" or (owner == "os" and name in ("replace", "rename", "link", "symlink"))
+
+
+def _scopes(tree):
+    """Each function or lambda body, and the module's own statements, as the
+    list of nodes in it, nested scopes left out."""
+    scope_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    found = []
+
+    def collect(root):
+        nodes, todo = [], list(ast.iter_child_nodes(root))
+        while todo:
+            node = todo.pop()
+            if isinstance(node, scope_types):
+                collect(node)
+                continue
+            nodes.append(node)
+            todo.extend(ast.iter_child_nodes(node))
+        found.append(nodes)
+
+    collect(tree)
+    return found
+
+
+def ledger_and_record_writers(scripts_dir, allowed=("runs.py",)):
+    """Every script under `scripts_dir` but `allowed` that names
+    DELEGATE_LEDGER, or that in one scope names a Run record and writes a
+    file; a script that is not Python may not name a Run record at all."""
+    offenders = []
+    for dirpath, dirnames, filenames in os.walk(scripts_dir):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in sorted(filenames):
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, scripts_dir)
+            if rel in allowed:
+                continue
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            if "DELEGATE_LEDGER" in text:
+                offenders.append(f"{rel} names DELEGATE_LEDGER")
+            if not name.endswith(".py"):
+                offenders += [f"{rel} names {r}" for r in RUN_RECORDS if r in text]
+                continue
+            for nodes in _scopes(ast.parse(text, rel)):
+                schema = _schema_parts(nodes)
+                if any(_names_a_record(n, schema) for n in nodes):
+                    offenders += [f"{rel}:{n.lineno} writes beside a Run record"
+                                  for n in nodes if _writes(n)]
+    return sorted(offenders)
+
+
+def case_only_runs_py_writes_the_ledger_and_the_run_records():
+    found = ledger_and_record_writers(SCRIPTS)
+    # The scan is live: it sees runs.py's own writes, and a planted writer.
+    in_runs = ledger_and_record_writers(SCRIPTS, allowed=())
+    with tempfile.TemporaryDirectory() as td:
+        with open(os.path.join(td, "runs.py"), "w") as f:
+            f.write('LEDGER = "DELEGATE_LEDGER"\n')
+        with open(os.path.join(td, "planted.py"), "w") as f:
+            f.write("import json, os\n\n\ndef end(run_dir, doc):\n"
+                    "    with open(os.path.join(run_dir, 'dispatch.json'), 'w') as f:\n"
+                    "        json.dump(doc, f)\n")
+        with open(os.path.join(td, "relay.sh"), "w") as f:
+            f.write('echo "{}" > "$RUN/return.json"\n')
+        planted = ledger_and_record_writers(td)
+    record("13. no script but runs.py names DELEGATE_LEDGER or writes dispatch.json or return.json",
+           found == []
+           and any(o.startswith("runs.py:") for o in in_runs)
+           and planted == ["planted.py:5 writes beside a Run record", "planted.py:6 writes beside a Run record",
+                           "relay.sh names return.json"],
+           f"found={found} in_runs={in_runs} planted={planted}")
 
 
 def case_parse_finish_line():
@@ -497,6 +656,8 @@ def main():
     case_running_lists_a_run_while_its_work_runs()
     case_a_start_past_its_timeout_or_ended_is_not_running()
     case_running_reads_a_ledger_an_earlier_delegate_wrote()
+    case_the_ledger_lines_keep_their_v1_keys_in_order()
+    case_only_runs_py_writes_the_ledger_and_the_run_records()
     case_parse_finish_line()
     case_parse_native_line()
 

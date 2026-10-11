@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_usage_reset.py — test claude_reset format parsing and meter cache write append."""
+"""test_usage_reset.py — test claude_reset format parsing and the meter cache write."""
 import json, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,7 +44,7 @@ def main():
     assert_true(claude_reset("") is None, "claude_reset('') should be None")
     assert_true(claude_reset("invalid text") is None, "claude_reset('invalid text') should be None")
 
-    # 2. Cache write with DELEGATE_LEDGER + DELEGATE_CACHE in a temp dir appends one meter line
+    # 2. Cache write with DELEGATE_LEDGER + DELEGATE_CACHE in a temp dir
     with tempfile.TemporaryDirectory() as tmpdir:
         ledger_path = os.path.join(tmpdir, "ledger.jsonl")
         cache_path = os.path.join(tmpdir, "cache.json")
@@ -83,27 +83,8 @@ def main():
             loaded_doc = json.load(f)
         assert_true(loaded_doc == doc, "cache file content mismatch")
 
-        # Check ledger appended exactly one line
-        assert_true(os.path.exists(ledger_path), f"ledger file not found at {ledger_path}")
-        with open(ledger_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        assert_true(len(lines) == 1, f"expected 1 line in ledger, got {len(lines)}")
-
-        event = json.loads(lines[0])
-        assert_true(event.get("v") == 1, "meter event v != 1")
-        assert_true(event.get("kind") == "meter", "meter event kind != 'meter'")
-        assert_true(event.get("source") == "probe", "meter event source != 'probe'")
-        assert_true(event.get("cache_age_s") == 0, "meter event cache_age_s != 0")
-        assert_true(event.get("probed_at") == now, "meter event probed_at mismatch")
-        assert_true(event.get("lanes") == doc["lanes"], "meter event lanes mismatch")
-        assert_true("ts" in event, "meter event missing ts")
-
-        # Calling load_cache on fresh cache must NOT append to ledger
         loaded = load_cache(max_age_min=10, cache_path=cache_path)
         assert_true(loaded is not None, "load_cache returned None for fresh cache")
-        with open(ledger_path) as f:
-            lines2 = [l.strip() for l in f if l.strip()]
-        assert_true(len(lines2) == 1, f"load_cache unexpectedly appended to ledger; count is {len(lines2)}")
 
         # 3. Test remaining_weekly_model on model meter lane and general lane
         l_fable = lane("claude", "fable", 0.58, 0.46, None, None, remaining_weekly_model=0.59)
@@ -121,14 +102,8 @@ def main():
             "lanes": [l_fable, l_gen],
         }
         write_cache(doc_with_model, cache_path=cache_path)
-        with open(ledger_path) as f:
-            lines3 = [l.strip() for l in f if l.strip()]
-        assert_true(len(lines3) == 2, f"expected 2 lines in ledger, got {len(lines3)}")
-        event2 = json.loads(lines3[1])
-        assert_true(event2["lanes"][0].get("remaining_weekly_model") == 0.59, "ledger event fable remaining_weekly_model mismatch")
-        assert_true(event2["lanes"][1].get("remaining_weekly_model") is None, "ledger event general remaining_weekly_model mismatch")
 
-        # 4. Cached-only reads emit no meter event and launch no vendor probe.
+        # 4. Cached-only reads launch no vendor probe.
         calls = []
         def boom(name):
             def _boom(*a, **k):
@@ -141,9 +116,6 @@ def main():
             cached = load_cached(cache_path=cache_path)
             assert_true(cached.get("lanes")[0].get("remaining_weekly_model") == 0.59,
                         "load_cached dropped remaining_weekly_model")
-            with open(ledger_path) as f:
-                lines4 = [l.strip() for l in f if l.strip()]
-            assert_true(len(lines4) == 2, f"load_cached appended a meter event; count is {len(lines4)}")
             assert_true(calls == [], f"load_cached launched probes: {calls}")
         finally:
             for h in harnesses.REGISTRY:
@@ -283,7 +255,6 @@ def main():
              patch.object(harnesses.get("agy"), "meters", return_value=[]), \
              patch.object(harnesses.get("claude"), "meters", return_value=[]), \
              patch.object(harnesses.get("grok"), "meters", return_value=[]), \
-             patch.object(usage, "append"), \
              patch.object(usage.time, "time", return_value=10000):
             first = usage.probe(refresh=True, cache_path=path)
             assert_true(first["probed_at"] == 10000, "probe must stamp current acquisition time")

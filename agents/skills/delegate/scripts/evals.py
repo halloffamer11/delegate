@@ -175,7 +175,7 @@ class Sandbox:
             if src:
                 os.symlink(src, os.path.join(bin_dir, tool))
         self.env["PATH"] = os.pathsep.join([bin_dir, "/bin", "/usr/bin"])
-        self.env["DELEGATE_LEDGER"] = os.path.join(self.root, "ledger.jsonl")
+        self.env[runs.LEDGER_ENV] = os.path.join(self.root, "ledger.jsonl")
         self.env["DELEGATE_CACHE"] = os.path.join(self.root, "usage.json")
         # the offline world is stubs: no detached model scan runs against them
         self.env["DELEGATE_MODEL_SCAN"] = "off"
