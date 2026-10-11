@@ -67,8 +67,9 @@ test the way a person drives it, `q` and its answer included.
   and value in the count.
 - `Tab` and `Shift+Tab` cycle the three bodies: the Tier list, the Harness table
   (Harnesses down, Tiers across) and the Gate/Margin aid, which draws per Meter the
-  Remaining against the Gate mark and the Pace against the Pick's Pace plus the Margin,
-  the rule at `rank.py:177-183`. `a` reaches the aid and returns.
+  Remaining against the Gate mark and the Pace against the Pace to lead rank gives it
+  (the lowest of its Tiers' `pace_to_lead`), with the steal rule worded for the quota
+  unit. `a` reaches the aid and returns.
 - In the list `h`/`l` close and open a deck. In the table `j`/`k` walk down one Tier
   column and `h`/`l` cross to the nearest Lane one column over.
 - `d` writes the terms and every reason code at the foot, `z` folds the deck or the
@@ -99,7 +100,10 @@ applies: the deck's Remaining colour and the aid's "under the Gate" read it, so 
 metering off neither draws a veto (ticket 17). Each row's `cause` is rank's: the model drops
 `disabled` rows on it, and `deck.reason_code` maps it to the row's code through
 `CAUSE_CODES`, VETO for a cause the table lacks. Nothing reads the `reason` text, which is
-display only (ticket 20). A project Tier drops the Lane's global Order, so such a
+display only (ticket 20). Each tier copies rank's `steal_threshold` and `pace_to_lead`;
+the aid's verdict says a Meter holds the Pick in the first Tier whose leader runs on it,
+or needs its lowest Pace to lead, and draws that Pace as its mark (ticket 21). A
+project Tier drops the Lane's global Order, so such a
 row shows `—` in Ord and sorts after the placed Lanes in its new Tier.
 
 Project policy, project Lanes and global catalog watches compare file bytes; the Meter

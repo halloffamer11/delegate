@@ -514,6 +514,9 @@ class DashboardModel:
                     "color": TIER_COLORS[preview["tier"]],
                     "leader": preview["leader"],
                     "rows": rows,
+                    # what would change the leader, as rank gives it (ticket 21)
+                    "steal_threshold": preview["steal_threshold"],
+                    "pace_to_lead": preview["pace_to_lead"],
                 }
             )
 

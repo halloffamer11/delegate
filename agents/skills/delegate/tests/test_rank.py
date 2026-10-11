@@ -1604,4 +1604,173 @@ record("case 32c every row from rank_range, rank and tier_leaders has one cause,
        "eligible exactly for pick/steal/eligible/unknown and pick exactly for pick/steal",
        bool(every32) and not bad32, bad32[:6])
 
+# case 33 (ticket 21): each Tier preview carries the Steal threshold in
+# routing's quota unit and each other Meter's Pace to lead: the lowest Pace on
+# the 0.01 grid at which a Lane on that Meter leads the Tier, with every other
+# Meter as it reads now, None when no Pace a Meter can read (usage.MAX_PACE)
+# does. The spec's case 31; 31 and 32 were taken on this branch.
+import math  # noqa: E402
+
+with open(_meters28, encoding="utf-8") as f33:
+    fixture33 = json.load(f33)
+samples33 = catalog.load_catalog(config_dir=_samples28)
+WEEK33 = 7 / 30.4375  # a Meter's plan price per month to its price per week
+
+
+def near33(got, want):
+    """Two previews' facts equal, numbers within 1e-9."""
+    if isinstance(want, dict):
+        return (isinstance(got, dict) and set(got) == set(want)
+                and all(near33(got[k], want[k]) for k in want))
+    if want is None or isinstance(want, str):
+        return got == want
+    return isinstance(got, (int, float)) and abs(got - want) < 1e-9
+
+
+def facts33(preview):
+    return {"steal_threshold": preview.get("steal_threshold"),
+            "pace_to_lead": preview.get("pace_to_lead")}
+
+
+def with_pace33(doc, meter_name, pace):
+    out = copy.deepcopy(doc)
+    next(row for row in out["lanes"] if row["lane"] == meter_name)["pace"] = pace
+    return out
+
+
+def leads33(cat_, doc, tier, meter_name):
+    preview = rank.tier_leaders(cat_, usage.Snapshot.of(doc), ALL_HARNESSES)[tier - 1]
+    leader = next((r for r in preview["rows"] if r["lane"] == preview["leader"]), None)
+    return leader is not None and leader["meter"] == meter_name
+
+
+# (a) the sample catalog's Tier 2 is unordered: grok leads at 0.90, and codex
+# leads once it sorts ahead of grok, at 0.91, below the Steal threshold 1.1.
+a33 = rank.tier_leaders(samples33, usage.Snapshot.of(fixture33), ALL_HARNESSES)
+record("case 33a sample Tier 2: codex needs 0.91 to lead, the Steal threshold is Pace 1.1",
+       near33(facts33(a33[1]), {"steal_threshold": {"unit": "pace", "value": 1.1},
+                                "pace_to_lead": {"codex": 0.91}}),
+       facts33(a33[1]))
+
+# (b) case 20's layout puts grok first in the Order, so codex must steal.
+b33 = rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+record("case 33b grok at order 1 and terra at order 2: codex needs 1.1 by Pace",
+       near33(facts33(b33[1]), {"steal_threshold": {"unit": "pace", "value": 1.1},
+                                "pace_to_lead": {"codex": 1.1}}),
+       facts33(b33[1]))
+
+# (c) the same with plan dollars: the steal is 0.9 x grok's weight x 1.2, and
+# codex reaches it at that value over codex's weight, up to the next 0.01 step.
+dollars_cat33 = copy.deepcopy(tier_cat)
+dollars_cat33["routing"]["quota_unit"] = "plan_dollars"
+c33 = rank.tier_leaders(dollars_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+steal_c33 = 0.9 * (30 * WEEK33) * 1.2
+need_c33 = math.ceil(round(steal_c33 / (20 * WEEK33) * 100, 9)) / 100
+record("case 33c with plan dollars the Steal threshold is in plan dollars and codex's "
+       "Pace to lead is the first 0.01 step that reaches it",
+       near33(facts33(c33[1]), {"steal_threshold": {"unit": "plan_dollars", "value": steal_c33},
+                                "pace_to_lead": {"codex": need_c33}})
+       and abs(need_c33 - 1.62) < 1e-9,
+       (facts33(c33[1]), steal_c33, need_c33))
+
+# (d) every Pace to lead above, read back through tier_leaders: a document
+# with that Meter at its Pace to lead puts a Lane on it in the lead, and the
+# same document 0.01 lower does not.
+checked33 = []
+for cat33, doc33, previews33 in ((samples33, fixture33, a33),
+                                 (tier_cat, tier_meters, b33),
+                                 (dollars_cat33, tier_meters, c33)):
+    for preview33 in previews33:
+        for meter33, need33 in sorted((preview33.get("pace_to_lead") or {}).items()):
+            if need33 is None:
+                continue
+            below33 = round(need33 - 0.01, 2)
+            checked33.append((preview33["tier"], meter33, need33,
+                              leads33(cat33, with_pace33(doc33, meter33, need33),
+                                      preview33["tier"], meter33),
+                              leads33(cat33, with_pace33(doc33, meter33, below33),
+                                      preview33["tier"], meter33)))
+record("case 33d at its Pace to lead a Meter leads the Tier, and 0.01 below it does not",
+       len(checked33) >= 3 and all(at and not below for _t, _m, _n, at, below in checked33),
+       checked33)
+
+# (e) what has no Pace to lead: Meters off, a gated Meter, an unknown Meter,
+# and a Meter priced at 1 against 100 under plan dollars, which would need a
+# Pace no Meter can read (108 > usage.MAX_PACE).
+off_cat33 = copy.deepcopy(tier_cat)
+off_cat33["routing"]["meters"] = False
+off33 = rank.tier_leaders(off_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+gate33 = rank.tier_leaders(tier_cat, usage.Snapshot.of(gate_meters20), ALL_HARNESSES)[1]
+unknown33 = rank.tier_leaders(tier_cat, usage.Snapshot.of(unknown_meters20), ALL_HARNESSES)[1]
+cheap_cat33 = copy.deepcopy(dollars_cat33)
+cheap_cat33["meters"]["grok"]["price_month"] = 100
+cheap_cat33["meters"]["codex"]["price_month"] = 1
+cheap33 = rank.tier_leaders(cheap_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)[1]
+record("case 33e Meters off: an empty Pace to lead and no Steal threshold value",
+       all(p.get("pace_to_lead") == {}
+           and p.get("steal_threshold") == {"unit": "pace", "value": None} for p in off33),
+       [facts33(p) for p in off33])
+record("case 33e a gated Meter and an unknown Meter have no Pace to lead",
+       gate33["leader"] == "terra-high@codex" and gate33.get("pace_to_lead") == {}
+       and unknown33["leader"] == "terra-high@codex" and unknown33.get("pace_to_lead") == {},
+       (facts33(gate33), facts33(unknown33)))
+record("case 33e a Meter priced at 1 against 100 under plan dollars reads None",
+       cheap33["leader"] == "grok46-high@grok"
+       and cheap33.get("pace_to_lead") == {"codex": None},
+       facts33(cheap33))
+
+# Rank reads the highest readable Pace as usage.MAX_PACE: raise it, and the
+# same Meter reads the Pace that steals at 1 against 100.
+saved33 = usage.MAX_PACE
+usage.MAX_PACE = 200
+try:
+    raised33 = rank.tier_leaders(cheap_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)[1]
+finally:
+    usage.MAX_PACE = saved33
+record("case 33e the highest Pace rank tries is usage.MAX_PACE",
+       near33(raised33.get("pace_to_lead"), {"codex": 108.0}),
+       facts33(raised33))
+
+# The what-if substitutes Readouts: one tier_leaders call reads each Meter of
+# the Snapshot once, whatever it asks about.
+reads33 = []
+
+
+class Counted33(usage.Snapshot):
+    def readout(self, meter, cat, **kw):
+        reads33.append(meter)
+        return usage.Snapshot.readout(self, meter, cat, **kw)
+
+
+snap33 = usage.Snapshot.of(fixture33)
+counted33 = Counted33(path=None, status=snap33.status, detail=None, taken_at=snap33.taken_at,
+                      signature=snap33.signature, _rows=snap33._rows, _held=snap33._held)
+counted_previews33 = rank.tier_leaders(samples33, counted33, ALL_HARNESSES)
+meters33 = {lane["meter"] for lane in samples33["lanes"].values()}
+record("case 33f tier_leaders reads each Meter once, Paces to lead included",
+       sorted(reads33) == sorted(meters33)
+       and [facts33(p) for p in counted_previews33] == [facts33(p) for p in a33],
+       sorted(reads33))
+
+# JSON-safe previews, and `rank tiers --json` carries both facts.
+try:
+    for previews33 in (a33, b33, c33, off33, [gate33, unknown33, cheap33]):
+        json.dumps(previews33, allow_nan=False)
+    json33 = True
+except ValueError as e:
+    json33 = str(e)
+res33 = subprocess.run(
+    [sys.executable, RANK_PY, "tiers", "--config-dir", _samples28, "--meters", _meters28,
+     "--harnesses", ALL_HARNESSES_ARG, "--json"],
+    capture_output=True, text=True)
+try:
+    tiers33 = json.loads(res33.stdout)["tiers"]
+except (ValueError, KeyError):
+    tiers33 = []
+record("case 33g previews pass json.dumps(allow_nan=False) and rank tiers --json carries both facts",
+       json33 is True and res33.returncode == 0 and len(tiers33) == 4
+       and all("steal_threshold" in t and "pace_to_lead" in t for t in tiers33)
+       and near33(facts33(tiers33[1]), facts33(a33[1])),
+       (json33, res33.stdout[-400:], res33.stderr))
+
 sys.exit(1 if fails else 0)

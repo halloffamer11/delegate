@@ -926,7 +926,7 @@ class DashboardModelTest(ProjectFixture):
 
         def codex_a(state):
             entry = next(e for e in deck.meter_rows(state) if e["meter"] == "codex-a")
-            return entry, deck.meter_verdict(entry, state, deck.steal_thresholds(state))
+            return entry, deck.meter_verdict(entry, state)
 
         state = self.make_model().state
         entry, verdict = codex_a(state)
@@ -958,8 +958,28 @@ class DashboardModelTest(ProjectFixture):
         sol = next(row for row in tier["rows"] if row["lane"] == "sol-high@codex")
         self.assertEqual(deck.reason_code(sol)[0], "STEAL")
         entry = next(e for e in deck.meter_rows(state) if e["meter"] == "codex-b")
-        verdict = deck.meter_verdict(entry, state, deck.steal_thresholds(state))
+        verdict = deck.meter_verdict(entry, state)
         self.assertEqual(verdict[2], "holds the Pick in T2")
+
+    def test_the_aid_marks_the_pace_rank_says_a_meter_needs(self):
+        # Ticket 21: Terra and Sol share Tier 2 with no Order, so Sol needs
+        # only to sort ahead of Terra's 0.60, and wins the name tie there; the
+        # Pick's Pace plus the Margin (0.80) is not what it needs.
+        lanes = json.loads((self.config / "lanes.json").read_text())
+        lanes["lanes"]["terra-high@codex"].pop("order")
+        lanes["lanes"]["sol-high@codex"].pop("order")
+        write_json(self.config / "lanes.json", lanes)
+        self.write_meters(a_r=0.7, a_pace=0.6, b_r=0.7, b_pace=0.5)
+        state = self.make_model().state
+        self.assertEqual(state["tiers"][1]["leader"], "terra-high@codex")
+        lines = deck.aid_lines(state, 100)
+        at = next(i for i, segs in enumerate(lines) if segs and segs[0][0].strip() == "codex-b")
+        pace_line = lines[at + 1]
+        self.assertEqual(pace_line[-1][0].strip(), f"needs 0.60{deck.TIMES} to take T2")
+        # The bar is 34 cells at width 100 on an axis 2.0 wide (no Pace or
+        # mark reaches 1.74), so 0.60 stands on cell 10, where 0.80 took 14.
+        bar = [text for text, _color, _bold in pace_line[2:36]]
+        self.assertEqual(bar.index(deck.MARK), 10)
 
     def test_a_lane_without_its_cli_or_a_reading_reads_as_cli(self):
         # Ticket 20: a harness that is not installed is not probed either, so

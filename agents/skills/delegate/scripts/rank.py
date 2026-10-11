@@ -81,12 +81,19 @@ Reason text, one per cause:
   - gate: vetoed:gate, <lane>: <meter> meter N% left < gate G%
   - cli: vetoed:cli, <lane>: <harness> not on PATH
 
+Tier preview (``tier_leaders``, and ``rank.py tiers --json``): each exact
+Tier's rows and leader, the Steal threshold in routing's quota unit, and each
+other Meter's Pace to lead, which rank finds by rerunning its ranking core with
+that Meter's Readout at a trial Pace (ticket 21).
+
 CLI forms:
   rank.py <class> [--tier N] [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
   rank.py tiers [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
 """
 import argparse
+import dataclasses
 import json
+import math
 import os
 import sys
 
@@ -189,6 +196,12 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     """
     if floor is not None and ceiling is not None and floor > ceiling:
         raise ValueError(f"invalid tier range [{floor}, {ceiling}]")
+    return _rank_readouts(cat, _readouts(cat, meters), present, floor, ceiling, reason_label)
+
+
+def _readouts(cat, meters):
+    """Meter to Readout for every Lane's Meter, each read once from the
+    Snapshot `meters`; anything but a Snapshot raises TypeError."""
     if not isinstance(meters, usage.Snapshot):
         raise TypeError(f"rank takes a usage.Snapshot, not {type(meters).__name__}; "
                         "wrap a usage document with usage.Snapshot.of")
@@ -197,7 +210,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         meter = lane_def.get("meter")
         if meter not in readouts:
             readouts[meter] = meters.readout(meter, cat)
-    return _rank_readouts(cat, readouts, present, floor, ceiling, reason_label)
+    return readouts
 
 
 def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
@@ -436,26 +449,122 @@ def rank(cls, cat, meters, present, tier=None):
 
 
 def tier_leaders(cat, meters, present):
-    """Return the leader and ranked rows for each exact Tier from 1 to 4.
+    """The four exact-Tier previews, Tier 1 to 4. Each is a dict:
+      tier             int
+      leader           lane name, or None
+      rows             the Tier's rows, Pick first, each with "cause"
+      steal_threshold  {"unit": "pace" | "plan_dollars", "value": float | None}
+      pace_to_lead     {meter: float | None}
 
-    Each preview delegates selection to ``rank_range`` with equal floor and
-    ceiling bounds, then projects away rows from other Tiers. A leader is the
-    exact-Tier preview, not the Pick for any Class range.
+    Each Tier is ranked by the selection rule with equal floor and ceiling,
+    and rows from other Tiers are dropped. A leader is the exact-Tier
+    preview, not the Pick for any Class range.
+
+    `steal_threshold.unit` is routing's quota unit, and its value is what a
+    Lane that sorts after the leader must reach to take the Tier: the
+    leader's Pace plus the Margin, or with plan dollars the leader's value
+    times (1 + Margin). None with no leader, an unknown leader value, or
+    Meters off.
+
+    `pace_to_lead` has a key for every Meter with an eligible Lane of known
+    Pace in the Tier, except the leader's Meter: the lowest Pace on the 0.01
+    grid at which a Lane on it leads the Tier, every other Meter as it reads
+    now, or None when no Pace a Meter can read (up to usage.MAX_PACE) does.
+    Empty with Meters off.
+
+    The Snapshot is read once: every what-if replaces one Readout in that
+    map and reranks it. The preview does no I/O and is JSON-safe.
     """
+    readouts = _readouts(cat, meters)
+    routing = cat.get("routing", {})
     previews = []
     for tier in range(1, 5):
-        rows = rank_range(
-            cat,
-            meters,
-            present,
-            floor=tier,
-            ceiling=tier,
-            reason_label=f"Tier {tier}",
-        )
-        rows = [row for row in rows if row["tier"] == tier]
-        leader = next((row["lane"] for row in rows if row["pick"]), None)
-        previews.append({"tier": tier, "leader": leader, "rows": rows})
+        rows = _tier_rows(cat, readouts, present, tier)
+        leader = next((row for row in rows if row["pick"]), None)
+        previews.append({
+            "tier": tier,
+            "leader": leader["lane"] if leader else None,
+            "rows": rows,
+            "steal_threshold": _steal_threshold(routing, leader),
+            "pace_to_lead": _paces_to_lead(cat, readouts, present, tier, rows, leader),
+        })
     return previews
+
+
+def _tier_rows(cat, readouts, present, tier):
+    """The ranking of one exact Tier over `readouts`, its own rows only."""
+    rows = _rank_readouts(cat, readouts, present, tier, tier, f"Tier {tier}")
+    return [row for row in rows if row["tier"] == tier]
+
+
+def _steal_threshold(routing, leader):
+    """The value a Lane after `leader` must reach to take its Tier, in
+    routing's quota unit."""
+    unit = catalog.quota_unit(routing)
+    value = score(leader) if leader is not None and catalog.meters_enabled(routing) else None
+    if value is not None:
+        margin = routing["margin"]
+        value = value * (1 + margin) if unit == "plan_dollars" else value + margin
+    return {"unit": unit, "value": value}
+
+
+def _paces_to_lead(cat, readouts, present, tier, rows, leader):
+    """Meter to its Pace to lead the Tier (see tier_leaders)."""
+    if leader is None or not catalog.meters_enabled(cat.get("routing", {})):
+        return {}
+    # Every Lane has a Tier (catalog validation), so the Tier's rows are its
+    # Lanes, and a replay ranks those alone.
+    names = {row["lane"] for row in rows}
+    tier_cat = dict(cat, lanes={name: lane for name, lane in (cat.get("lanes") or {}).items()
+                                if name in names})
+    out = {}
+    for row in rows:
+        meter = row["meter"]
+        if (row["eligible"] and row["pace"] is not None
+                and meter != leader["meter"] and meter not in out):
+            out[meter] = _pace_to_lead(tier_cat, readouts, present, tier, rows, meter)
+    return out
+
+
+def _pace_to_lead(cat, readouts, present, tier, rows, meter):
+    """The lowest Pace on the 0.01 grid, up to usage.MAX_PACE, at which a Lane
+    on `meter` leads `tier`, or None.
+
+    Who leads changes only where a Lane on `meter` crosses a rival's value in
+    the sort or in a steal: at the rival's value, or that value plus or minus
+    the Margin (with plan dollars, times or over 1 + Margin), each over the
+    Meter's weight. Between crossings the outcome holds, so the Pick is replayed
+    at 0 and at the first and second grid step at or above each crossing, in
+    ascending order, and the first that leads is the answer. A step is in
+    hundredths, so a Pace on the grid is exact.
+    """
+    routing = cat["routing"]
+    margin = routing["margin"]
+    dollars = catalog.quota_unit(routing) == "plan_dollars"
+    weight = readouts[meter].week_dollars if dollars else 1.0
+    crossings = [0.0]
+    if weight:
+        for row in rows:
+            value = score(row)
+            if not row["eligible"] or row["meter"] == meter or value is None:
+                continue
+            if dollars:
+                crossings += [value, value * (1 + margin), value / (1 + margin)]
+            else:
+                crossings += [value, value + margin, value - margin]
+        crossings = [c / weight for c in crossings]
+    top = math.floor(round(usage.MAX_PACE * 100, 9))
+    steps = set()
+    for crossing in crossings:
+        step = max(0, math.ceil(round(crossing * 100, 9)))
+        steps.update(s for s in (step, step + 1) if s <= top)
+    for step in sorted(steps):
+        trial = dict(readouts)
+        trial[meter] = dataclasses.replace(readouts[meter], pace=step / 100)
+        pick = next((r for r in _tier_rows(cat, trial, present, tier) if r["pick"]), None)
+        if pick is not None and pick["meter"] == meter:
+            return step / 100
+    return None
 
 
 def format_rows(rows):

@@ -27,7 +27,7 @@ Lane loses its global place in the Tier it left; `catalog.project_tier_changes()
 names the Lanes in effect for `show` and the rank header, and `edit_catalog(op="set",
 field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
 preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
-use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
+use `rank.tier_leaders()`; it and the Class-facing `rank()` share the ranking core.
 `usage.read(routing, freshness, path=...)` returns the Meter snapshot, with the
 usage-limit holds in `limits.json` beside the document it read (`usage.hold`,
 `usage.release`); `Snapshot.of(document)` reads an in-memory document, which carries no
@@ -53,7 +53,12 @@ ranks again with no second read (ticket 18); the dashboard and `catalog_edit` ha
 the snapshot they read (ticket 16). Every row carries one `cause` from `rank.CAUSES`
 (pick, steal, eligible, unknown, or the veto: disabled, floor, ceiling, gate, cli);
 `eligible` and `pick` follow from it, the `reason` text is its display, and the
-dashboard and the deck read `cause`, never the text (ticket 20). The statusline, the
+dashboard and the deck read `cause`, never the text (ticket 20). `tier_leaders` reads
+the snapshot once and gives each Tier its `steal_threshold` (`{unit, value}` in the quota
+unit) and `pace_to_lead` (`{meter: pace or None}`): it reruns the core with one Readout's
+Pace replaced (`dataclasses.replace`) at 0 and at the first two 0.01 steps at or above
+each value where that Meter's Lanes cross a rival in the sort or a steal, up to
+`usage.MAX_PACE`, and the deck's aid draws those (ticket 21). The statusline, the
 popup's Meter rows, `report.py limits` and the deck's Gate draw each Meter's Readout,
 so every display shows one Weekly figure and one Gate per Meter (ticket 17).
 One validity rule serves every reader: valid envelope and legacy map formats keep their
