@@ -3,7 +3,7 @@ import json
 import published_names
 import re
 
-from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness
+from .base import EFFORTS, EFFORTS_LONGEST_FIRST, Harness, iso_time, run_cli
 
 COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
                  "not a vendor bound")
@@ -52,9 +52,8 @@ class Agy(Harness):
         bills the two groups `/usage` reports separately, and every model of
         the second shares its 5h and weekly limits, so Opus on agy drains the
         pool Sonnet and GPT-OSS do, not Claude Code's Meters."""
-        import usage
         gemini = (slug or "").split("-")[0] == self.vendor
-        return usage.meter_name(self.name, self.meter_groups[0 if gemini else 1])
+        return self.meter_name(self.meter_groups[0 if gemini else 1])
 
     def family(self, slug):
         """The agy slug family a model slug belongs to: (base, effort).
@@ -121,24 +120,23 @@ class Agy(Harness):
         return (model.get("members") or {}).get(effort, model["slug"])
 
     def read_meters(self):
-        import usage
-        r = usage.run(["agy", "--print", "/usage", "--output-format", "json"], timeout=90, stdin_data="")
-        if not r or r.returncode != 0: return [usage.meter_row(self.name, None, note="probe failed")]
+        r = run_cli(["agy", "--print", "/usage", "--output-format", "json"], timeout=90, stdin_data="")
+        if not r or r.returncode != 0: return [self.windows(None, note="probe failed")]
         try:
             groups = json.loads(r.stdout)["command"]["data"]["groups"]
         except Exception as e:
-            return [usage.meter_row(self.name, None, note=f"unexpected output: {e}")]
+            return [self.windows(None, note=f"unexpected output: {e}")]
         out = []
         for g in groups:
-            meter = self.meter_groups[0] if "gemini" in g["name"].lower() else self.meter_groups[1]
+            group = self.meter_groups[0] if "gemini" in g["name"].lower() else self.meter_groups[1]
             f5 = fw = r5 = rw = None
             for b in g.get("buckets", []):
-                if b.get("window") == "5h": f5, r5 = b.get("remaining_fraction"), usage.iso(b.get("reset_time", ""))
-                elif b.get("window") == "weekly": fw, rw = b.get("remaining_fraction"), usage.iso(b.get("reset_time", ""))
+                if b.get("window") == "5h": f5, r5 = b.get("remaining_fraction"), iso_time(b.get("reset_time", ""))
+                elif b.get("window") == "weekly": fw, rw = b.get("remaining_fraction"), iso_time(b.get("reset_time", ""))
             # No vendor bound joins the two windows, so the note says what the
             # combined figure is: the lower window, an assumption (ticket 31).
-            out.append(usage.meter_row(self.name, meter, f5, fw, r5, rw, note=COMBINED_NOTE))
-        return out or [usage.meter_row(self.name, None, note="no groups")]
+            out.append(self.windows(group, f5, fw, r5, rw, note=COMBINED_NOTE))
+        return out or [self.windows(None, note="no groups")]
 
     def run_args(self, effort, timeout, write_dir):
         # agy has no effort flag: the slug carries it.

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """usage.py — read subscription usage for each installed agent CLI, headlessly.
 
-Emits one JSON document of *lanes* (harness × meter). Per lane:
+Emits one JSON document with one row per Meter (under its `lanes` key). Each
+harness's adapter probes its CLI and hands back Windows (`harnesses.base`);
+this module builds the rows from them. Per Meter:
   r      = min(remaining_5h, remaining_weekly): the gate (availability).
            Every meter with two windows is read this way, agy included; no
            vendor publishes a joint bound, so agy carries a note saying the
@@ -21,14 +23,14 @@ Codex, agy, and grok probes are status/RPC commands. The Claude probe runs
   usage.py --refresh  force re-probe
   usage.py --max-age-min N   override TTL (default 10)
   usage.py --cache PATH      the document to read and write (default cache_path())
-  usage.py --pretty   human table instead of JSON
+  usage.py --pretty   one line per Meter, from its Readout, instead of JSON
 
 Cache: cache_path() — the explicit path, else $DELEGATE_CACHE, else
 $CONSULT_CACHE, else ~/.cache/delegate/usage.json. Absence of a CLI, auth
 failure, or a probe timeout marks that lane "unknown" — never a crash. Exit 0
 always. A probe writes nothing to the Ledger, which records Runs only.
 
-The Meters module (tickets 16 and 18): `read(routing, freshness, path=...)`
+The Meters module (tickets 16 to 19): `read(routing, freshness, path=...)`
 returns a Meter snapshot, and `Snapshot.readout(meter, cat)` answers one
 Meter's Remaining, Pace, Weekly figure, Gate and plan price for a given
 catalog. Freshness is CACHED (never probes), FRESH (probes when the reading
@@ -37,16 +39,19 @@ a child process with `--refresh --cache PATH` under one 180 s bound, and
 with routing.meters off neither FRESH nor FORCED probes. Validation, the
 legacy rows, the derived figures and the usage-limit hold (`hold`,
 `release`, in `limits.json` beside the document read) live behind them.
+Its public names are CACHED, FRESH, FORCED, MAX_PACE, read, hold, release,
+cache_path, Snapshot, Readout and main; everything else here is private.
 """
 from __future__ import annotations
 
-import hashlib, json, math, os, re, subprocess, sys, time
+import hashlib, json, math, os, subprocess, sys, time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# Each harness's probe lives in its adapter (scripts/harnesses/); this module
-# owns the rows they build, the cache and the combined figures.
+# Each harness's probe lives in its adapter (scripts/harnesses/) and hands back
+# Windows; this module owns the rows built from them, the cache and the
+# combined figures.
 import harnesses  # noqa: E402
 import catalog  # noqa: E402
 
@@ -59,9 +64,10 @@ _MAX_AGE_MIN = 10     # FRESH's age, in minutes
 _PROBE_BOUND = 180    # seconds: the one bound around the probe child (decision B.5)
 _WEEK_DAYS = 7
 _DAYS_PER_MONTH = 30.4375
-WEEK = _WEEK_DAYS * 86400   # assumed weekly-cycle length for pace
-CYCLE_FLOOR = 0.02    # ~3.4h: pace denominator floor near a reset
-ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
+_WEEK = _WEEK_DAYS * 86400   # assumed weekly-cycle length for pace
+_CYCLE_FLOOR = 0.02   # ~3.4h: pace denominator floor near a reset
+_ROLLOVER_MIN = 30    # binding window resets within this → ask user whether to wait
+MAX_PACE = 1 / _CYCLE_FLOOR   # the highest Pace a Meter can read: a full week at its reset (50)
 
 
 def cache_path(path=None):
@@ -71,12 +77,6 @@ def cache_path(path=None):
         os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE")
         or "~/.cache/delegate/usage.json")
     return os.path.expanduser(chosen)
-
-
-def get_cache_path():
-    """cache_path() under its old name, until its last callers move (B2, B4)."""
-    return cache_path()
-CACHE = get_cache_path()
 
 
 def _week_dollars(meter_def):
@@ -99,7 +99,15 @@ def _valid_meter_number(value, *, fraction=False):
     return math.isfinite(number) and (0 <= number <= 1 if fraction else number >= 0)
 
 
-def combined(five_h, weekly, reset_5h=None, reset_wk=None, now=None):
+def _binding(five_h, weekly):
+    """The Window that sets Remaining: "weekly" when it is the lower one or
+    the only one read, "5h" when that is, None when neither was read."""
+    if weekly is not None and (five_h is None or weekly <= five_h):
+        return "weekly"
+    return "5h" if five_h is not None else None
+
+
+def _combined(five_h, weekly, reset_5h=None, reset_wk=None, now=None):
     """The figures every Meter derives from its raw Window values.
 
     Remaining is the lower of the Window fractions, and Pace divides the weekly
@@ -110,13 +118,11 @@ def combined(five_h, weekly, reset_5h=None, reset_wk=None, now=None):
     now = time.time() if now is None else now
     known = [x for x in (five_h, weekly) if x is not None]
     r = min(known) if known else None
-    binding = None
-    if r is not None:
-        binding = "weekly" if (weekly is not None and (five_h is None or weekly <= five_h)) else "5h"
+    binding = _binding(five_h, weekly)
     reset = reset_wk if binding == "weekly" else reset_5h
     cycle_left = pace = None
     if weekly is not None and reset_wk:
-        cycle_left = min(1.0, max(CYCLE_FLOOR, (reset_wk - now) / WEEK))
+        cycle_left = min(1.0, max(_CYCLE_FLOOR, (reset_wk - now) / _WEEK))
         pace = round(weekly / cycle_left, 3)
     return {"r": r, "binding": binding, "reset_binding": reset,
             "cycle_left": cycle_left, "pace": pace,
@@ -125,7 +131,7 @@ def combined(five_h, weekly, reset_5h=None, reset_wk=None, now=None):
             "status": "unknown" if r is None else "ok"}
 
 
-def row_meter(entry):
+def _row_meter(entry):
     """The Meter a usage row is for. A row written before ticket 25 named it
     under `lane` and kept the probe group under `meter`."""
     if not isinstance(entry, dict):
@@ -162,8 +168,8 @@ def _filled(observation, now=None):
     if observation.get("remaining_5h") is None and observation.get("remaining_weekly") is None:
         return observation
     out = dict(observation)
-    out.update(combined(out.get("remaining_5h"), out.get("remaining_weekly"),
-                        out.get("reset_5h"), out.get("reset_weekly"), now=now))
+    out.update(_combined(out.get("remaining_5h"), out.get("remaining_weekly"),
+                         out.get("reset_5h"), out.get("reset_weekly"), now=now))
     note = out.get("note")
     for h in harnesses.REGISTRY:
         for old, new in h.note_renames:
@@ -259,7 +265,7 @@ def release(meter, *, path=None):
 
 
 def _limited(observation, holds, now):
-    until = (_hold_until(holds.get(row_meter(observation)), observation.get("reset_weekly"), now)
+    until = (_hold_until(holds.get(_row_meter(observation)), observation.get("reset_weekly"), now)
              if isinstance(observation, dict) else None)
     if until is None:
         return observation
@@ -309,7 +315,7 @@ def _parse(document):
         for entry in document["lanes"]:
             if not isinstance(entry, dict):
                 return None
-            entries.append((row_meter(entry), entry))
+            entries.append((_row_meter(entry), entry))
     else:
         taken_at = None
         entries = list(document.items())
@@ -545,52 +551,38 @@ def read(routing, freshness, *, path=None, max_age_min=None) -> Snapshot:
         return _unknown(p, "unreadable", f"Meter cache cannot be read; every Meter is unknown: {exc}")
 
 
-def run(cmd, timeout=60, stdin_data=None, cwd=None):
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=stdin_data, cwd=cwd)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-
-def remaining(fraction):
-    """A Remaining fraction held to [0, 1], or None.
+# ---------------------------------------------------------------- rows from Windows
+def _fraction(value):
+    """A remaining fraction held to [0, 1], or None.
 
     A vendor can print more than 100% used (an overage, or a rounding past the
     cap), which reads as a negative fraction. One such row would fail the
-    document's validation and take every Meter's figures, and so the Gate, with it;
-    an overspent Window has nothing left, so it reads 0.
+    document's validation and take every Meter's figures, and so the Gate,
+    with it; an overspent Window has nothing left, so it reads 0.
     """
-    if fraction is None or isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
-        return fraction
-    if math.isnan(fraction):
-        return fraction
-    return min(1.0, max(0.0, fraction))
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    if math.isnan(value):
+        return value
+    return min(1.0, max(0.0, value))
 
 
-def meter_name(harness, group):
-    """The Meter a probe group reports: `<harness>-<group>`, or the harness's
-    own name for a harness with one Meter. The catalog's Meter names are these
-    (`Harness.reports_meter` checks them)."""
-    return f"{harness}-{group}" if group else harness
-
-
-def meter_row(harness, group, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
-    """One usage row: the Meter (`meter`), its harness, the probe's own group
-    word (`group`, None for a harness with one Meter) and its figures.
-    five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None.
-    A fraction outside 0..1 is held to it (`remaining`)."""
-    five_h, weekly = remaining(five_h), remaining(weekly)
-    remaining_weekly_model = remaining(remaining_weekly_model)
-    row = {"meter": meter_name(harness, group), "harness": harness, "group": group,
+def _row(harness, windows, now):
+    """One usage row from the Windows a probe of `harness` handed back: the
+    fractions held to 0..1 and the combined figures at `now`. A Model meter's
+    Weekly figure (`remaining_weekly`) is the lower of its own week and its
+    harness's week for all models (decision B.1); its own week stays in
+    `remaining_weekly_model`."""
+    five_h, weekly, own_week = (_fraction(x) for x in (windows.five_h, windows.weekly, windows.weekly_model))
+    if own_week is not None:
+        weekly = own_week if weekly is None else min(weekly, own_week)
+    row = {"meter": windows.meter, "harness": harness, "group": windows.group,
            "remaining_5h": five_h, "remaining_weekly": weekly,
-           "remaining_weekly_model": remaining_weekly_model,
-           "reset_5h": reset_5h, "reset_weekly": reset_wk,
-           "rollover_soon": False, "note": note}
-    row.update(combined(five_h, weekly, reset_5h, reset_wk))
+           "remaining_weekly_model": own_week,
+           "reset_5h": windows.reset_5h, "reset_weekly": windows.reset_weekly,
+           "rollover_soon": False, "note": windows.note}
+    row.update(_combined(five_h, weekly, windows.reset_5h, windows.reset_weekly, now=now))
     return row
-
-def iso(s):
-    try: return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
-    except Exception: return None
 
 
 # ---------------------------------------------------------------- main: the probe child
@@ -606,10 +598,9 @@ def _young_document(path, max_age_min):
     return d if 0 <= time.time() - parsed[0] <= max_age_min * 60 else None
 
 
-def write_cache(d, cache_path=None):
-    """Write the usage document at `cache_path` (cache_path()), whole or not
-    at all. Nothing goes to the Ledger: it records Runs only (decision C.2)."""
-    p = cache_path or get_cache_path()
+def _write_document(d, p):
+    """Write the usage document at `p`, whole or not at all. Nothing goes to
+    the Ledger: it records Runs only (decision C.2)."""
     parent = os.path.dirname(p)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -620,16 +611,36 @@ def write_cache(d, cache_path=None):
 
 
 def _probe_document(path):
-    """Run every harness's probe and write the document at `path`. Timeouts
-    and per-harness failures stay inside each adapter's `meters` (unknown rows)."""
-    lanes = []
-    for h in harnesses.REGISTRY:
-        lanes += h.meters()
+    """Run every harness's probe and write the document at `path`, one row per
+    Meter from the Windows each adapter hands back, its figures at the moment
+    of the reading. Timeouts and per-harness failures stay inside each
+    adapter's `meters` (Windows with nothing read)."""
+    probed = [(h.name, windows) for h in harnesses.REGISTRY for windows in h.meters()]
     now = time.time()
     d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
-         "rollover_min": ROLLOVER_MIN, "lanes": lanes}
-    write_cache(d, cache_path=path)
+         "rollover_min": _ROLLOVER_MIN, "lanes": [_row(name, w, now) for name, w in probed]}
+    _write_document(d, path)
     return d
+
+
+def _pretty(snap, from_cache):
+    """`--pretty`: one line per Meter from its Readout (decision B.4), with
+    Pace, Remaining, both Windows (the weekly one the Weekly figure), the
+    binding Window and its reset, and the note, any hold applied."""
+    def pct(x):
+        return "  ?" if x is None else f"{int(round(x * 100)):3d}%"
+    age = "?" if snap.taken_at is None else int((time.time() - snap.taken_at) / 60)
+    lines = [f"# usage (cache age {age} min, from_cache={from_cache})"]
+    for name in snap.names():
+        m = snap.readout(name, None)
+        binding = _binding(m.five_h, m.weekly)
+        reset = m.reset_weekly if binding == "weekly" else m.reset_5h if binding == "5h" else None
+        stamp = datetime.fromtimestamp(reset).strftime("%b %d %H:%M") if reset else "-"
+        pace = "   ?" if m.pace is None else f"{m.pace:4.2f}"
+        state = "held" if m.held_until is not None else "unknown" if m.remaining is None else "ok"
+        lines.append(f"{name:<18} pace={pace}  r={pct(m.remaining)}  5h={pct(m.five_h)}  wk={pct(m.weekly)}  "
+                     f"binding={binding or '-':<6} reset={stamp:<12} {state}  {m.note or ''}".rstrip())
+    return lines
 
 
 def main(argv=None):
@@ -644,20 +655,13 @@ def main(argv=None):
     path = cache_path(args[args.index("--cache") + 1] if "--cache" in args else None)
     d = None if refresh else _young_document(path, ttl)
     from_cache = d is not None
-    d = _fill_document(d if from_cache else _probe_document(path), path)
-    d["from_cache"] = from_cache
+    if not from_cache:
+        d = _probe_document(path)
     if pretty:
-        age = int((time.time() - d["probed_at"]) / 60)
-        print(f"# usage (cache age {age} min, from_cache={d['from_cache']})")
-        for L in d["lanes"]:
-            def f(x): return "  ?" if x is None else f"{int(round(x*100)):3d}%"
-            rb = L.get("reset_binding")
-            rb = datetime.fromtimestamp(rb).strftime("%b %d %H:%M") if rb else "-"
-            pace = "   ?" if L.get('pace') is None else f"{L['pace']:4.2f}"
-            print(f"{L['lane']:<18} pace={pace}  r={f(L['r'])}  5h={f(L['remaining_5h'])}  wk={f(L['remaining_weekly'])}  "
-                  f"binding={L['binding'] or '-':<6} reset={rb:<12} {L['status']}"
-                  f"{' ROLLOVER-SOON' if L['rollover_soon'] else ''}  {L.get('note') or ''}")
+        print("\n".join(_pretty(_cached(path), from_cache)))
     else:
+        d = _fill_document(d, path)
+        d["from_cache"] = from_cache
         print(json.dumps(d, indent=1))
 
 if __name__ == "__main__":

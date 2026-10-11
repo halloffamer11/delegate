@@ -56,13 +56,16 @@ so every display shows one Weekly figure and one Gate per Meter (ticket 17).
 One validity rule serves every reader: valid envelope and legacy map formats keep their
 behavior; any malformed observation makes the whole document unknown. Envelope observations require a finite
 timestamp; raw Window/reset fields are validated before display. Every Meter
-derives its combined figures through one arithmetic, `usage.combined()`: Remaining is
+derives its combined figures through one private arithmetic in `usage.py`: Remaining is
 the lower Window fraction and Pace comes from the weekly Window. agy runs through it
 like the Claude Meters, and its note says the combined figure is the lower Window, an
 assumption, not a vendor bound (ticket 31, reversing modular ticket 13). A cache
 written under that older rule holds the Windows beside a null Remaining and Pace, so a
-read derives them (`usage._filled`) rather than probing again. This intentionally
-replaces partial use of invalid documents.
+read derives them rather than probing again. This intentionally
+replaces partial use of invalid documents. `usage.py`'s public names are its interface:
+CACHED, FRESH, FORCED, `MAX_PACE` (one over the cycle floor, 50: the highest Pace a Meter can
+read), `read`, `hold`, `release`, `cache_path`, `Snapshot`, `Readout` and `main`, and
+`usage.py --pretty` prints one line per Meter from its Readout (ticket 19).
 
 ## Scripts and assets
 
@@ -153,10 +156,15 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing
   replaces it.
 - `scripts/usage.py`: cached subscription-meter probes; each harness's probe is in its adapter.
-  A usage row is keyed by `meter`, the full Meter name (`usage.meter_name`), with `group` the
-  probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
-  on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
-  its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
+  An adapter's `read_meters` hands back `harnesses.base.Windows` (meter, group, five_h, weekly,
+  reset_5h, reset_weekly, note, weekly_model) through `Harness.windows(group, ...)`, with the
+  probe helpers `run_cli` and `iso_time` beside them in `base.py`, and imports no usage;
+  `usage.py` builds each row from them, holding fractions to 0..1, taking a Model meter's lower
+  week as its Weekly figure and deriving the combined figures (ticket 19). A usage row is keyed
+  by `meter`, the full Meter name (`Harness.meter_name(group)`), with `group` the probe's own
+  word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded on read.
+  Each adapter's `meter_names()`/`reports_meter()` say which Meters its probe reports, and
+  `catalog check` refuses a Lane on any other (ticket 25).
   `scripts/events.py`: the ledger encoder (schema unchanged); the statusline reads the ledger.
 - `scripts/model_queue.py`: models the catalog lacks, queued for the next `delegate global`
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own

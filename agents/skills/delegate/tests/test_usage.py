@@ -535,7 +535,106 @@ def case_a_probe_past_its_bound_falls_back_only_to_a_fresh_enough_reading():
                failed.status == "stale" and failed.names() == (), failed)
 
 
+USAGE_PY = os.path.abspath(os.path.join(HERE, "..", "scripts", "usage.py"))
+
+
+def case_pretty_prints_one_line_per_meter():
+    """`usage.py --pretty` (decision B.4) draws each Meter from its Readout:
+    Pace, the Weekly figure, the binding Window and the note, with any hold."""
+    with tempfile.TemporaryDirectory() as td:
+        now = time.time()
+        cache = write_doc(os.path.join(td, "usage.json"), [
+            row("codex", 0.5, 0.6, reset_weekly=now + 3 * 86400, pace=1.2, note="plan=pro"),
+            row("claude-fable", 0.7, 0.46, pace=0.9, remaining_weekly_model=0.59),
+            row("grok", None, 0.9, reset_weekly=now + 86400, pace=0.8)], taken_at=now - 60)
+        usage.hold("grok", "limit", path=cache, now=now)
+        child = subprocess.run([sys.executable, USAGE_PY, "--pretty", "--max-age-min", "60", "--cache", cache],
+                               capture_output=True, text=True,
+                               env=dict(os.environ, PATH=os.path.join(td, "no-bin")))
+    lines = child.stdout.splitlines()
+    by_meter = {line.split()[0]: line for line in lines[1:] if line.strip()}
+    codex, fable, grok = (by_meter.get(m, "") for m in ("codex", "claude-fable", "grok"))
+    record("12. usage.py --pretty prints one line per Meter",
+           child.returncode == 0 and lines[:1] and lines[0].startswith("# usage")
+           and list(by_meter) == ["codex", "claude-fable", "grok"] and len(lines) == 4
+           and "pace=1.20" in codex and "r= 50%" in codex and "wk= 60%" in codex
+           and "binding=5h" in codex and "plan=pro" in codex
+           and "wk= 46%" in fable and "binding=weekly" in fable
+           and "r=  0%" in grok and "usage limit reached" in grok,
+           child.stdout + child.stderr)
+
+
+def case_a_probe_builds_its_rows_from_the_windows():
+    """usage.py builds each row from the Windows an adapter hands over: it
+    holds each fraction to 0..1, so an overspent Window reads as nothing left
+    rather than failing the whole document, and it gives a Model meter the
+    lower of its own week and the harness's week as its Weekly figure."""
+    import contextlib
+    import io
+    from unittest.mock import patch
+    import harnesses
+    claude = harnesses.get("claude")
+    windows = [claude.windows("general", five_h=-0.04, weekly=0.7),
+               claude.windows("fable", five_h=-0.04, weekly=0.7, weekly_model=1.2),
+               claude.windows("sonnet", five_h=0.6, weekly=0.7, weekly_model=0.04)]
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "usage.json")
+        saved = os.environ.get("PATH")
+        os.environ["PATH"] = os.path.join(td, "no-bin")
+        printed = io.StringIO()
+        try:
+            with patch.object(claude, "installed", return_value=True), \
+                 patch.object(claude, "read_meters", return_value=windows), \
+                 contextlib.redirect_stdout(printed):
+                usage.main(["--refresh", "--cache", cache])
+        finally:
+            os.environ["PATH"] = saved
+        rows = {r["meter"]: r for r in json.loads(printed.getvalue())["lanes"]}
+        snap = usage.read(None, usage.CACHED, path=cache)
+    general, fable, sonnet = (snap.readout(m, None) for m in ("claude-general", "claude-fable", "claude-sonnet"))
+    record("13a. an overspent Window reads as nothing left",
+           snap.status == "ok" and general.five_h == 0.0 and general.remaining == 0.0
+           and fable.remaining == 0.0 and fable.weekly == 0.7
+           and rows["claude-fable"]["remaining_weekly_model"] == 1.0
+           and rows["claude-fable"]["r"] == 0.0 and rows["claude-general"]["harness"] == "claude"
+           and snap.readout("codex", None).note == "absent",
+           (snap, rows))
+    record("13b. a Model meter's Weekly figure is the lower of its own week and the harness's week",
+           sonnet.weekly == 0.04 and sonnet.remaining == 0.04 and sonnet.shares_five_h
+           and rows["claude-sonnet"]["remaining_weekly_model"] == 0.04
+           and not general.shares_five_h,
+           (sonnet, rows.get("claude-sonnet")))
+
+
+def case_the_interface_is_only_its_public_names():
+    """usage.py's public names are its interface (ticket B4), and MAX_PACE is
+    the highest Pace a Meter can read: the whole week over the cycle floor."""
+    import ast
+    with open(USAGE_PY, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    defined = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.Assign):
+            defined.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            defined.add(node.target.id)
+    public = sorted(n for n in defined if not n.startswith("_"))
+    record("14a. usage.py's public names are exactly its interface",
+           public == sorted(["CACHED", "FRESH", "FORCED", "MAX_PACE", "read", "hold", "release",
+                             "cache_path", "Snapshot", "Readout", "main"]),
+           public)
+    top = usage.Snapshot.of({"probed_at": time.time(), "lanes": [
+        row("codex", 1.0, 1.0, reset_weekly=time.time() + 60, r=None)]}).readout("codex", None)
+    record("14b. MAX_PACE is 50 with today's cycle floor, and a full week read at its reset reaches it",
+           usage.MAX_PACE == 50 and top.pace == usage.MAX_PACE, (usage.MAX_PACE, top.pace))
+
+
 def main():
+    case_pretty_prints_one_line_per_meter()
+    case_a_probe_builds_its_rows_from_the_windows()
+    case_the_interface_is_only_its_public_names()
     case_freshness_decides_when_a_read_probes()
     case_usage_does_not_import_events()
     case_a_probe_past_its_bound_falls_back_only_to_a_fresh_enough_reading()

@@ -54,7 +54,6 @@ class Codex(Harness):
         return models
 
     def read_meters(self):
-        import usage
         p = subprocess.Popen(["codex", "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, text=True)
         def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
@@ -85,7 +84,7 @@ class Codex(Harness):
             mins = w.get("windowDurationMins") or 0
             wins["weekly" if mins >= 24 * 60 else "5h"] = win(w)
         f5, r5 = wins.get("5h", (None, None)); fw, rw = wins.get("weekly", (None, None))
-        return [usage.meter_row(self.name, None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
+        return [self.windows(None, f5, fw, r5, rw, note=f"plan={rl.get('planType')}")]
 
     def preflight(self, write_dir):
         # Codex runs every command under its own Seatbelt profile, read-only
