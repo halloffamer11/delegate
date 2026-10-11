@@ -168,8 +168,10 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   models nobody runs; each figure names the Lanes that claim it) and `lanes` (each Lane's
   `lane_rows`, with `mean`/`n` over those). `collect(lanes_doc, epoch_rows=None, effort_rows=None)`
   takes rows and acquires nothing; with no Epoch rows it keeps every AA column and reports Epoch
-  skipped (`epoch_skipped`). The report still reads Epoch from `--epoch-csv` or a fetch on every run
-  (`load_epoch`, through the snapshot's parser).
+  skipped (`epoch_skipped`). The report reads one Benchmark snapshot (`read_snapshot`): Epoch from
+  `--epoch-csv`, else from the web through the snapshot's 24-hour cache, and AA only from
+  `--effort-rows`. An Epoch that cannot be fetched is skipped with the reason on its line and the
+  report is still written; a named file that cannot be read exits 1 with "bench: <reason>".
 - `scripts/bench_snapshot.py`: the Benchmark snapshot, the one place benchmark rows are acquired.
   `snapshot(row_files, aa=, epoch=, renew=)` takes one adapter per source: `web()` (the web through
   the cache), `fixture(dir)` (`aa-accepted.json` and `epoch.csv`) or `local(path)` (one named file).
@@ -189,8 +191,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `lane_order`), and so does the carry wording (`carry_reason`); the carry policy itself is
   `scripts/carry.py` (ticket 27): `beats()` and `decisions(lanes_doc, evidence)`, which returns
   structured decisions `{lane, enabled, kind, source, competitor}`; renderers own the wording.
-  `format_collection` turns a `collect()` result into the Markdown report. `bench.py model MODEL`
-  reads accepted rows and optional local Epoch CSV without fetching: the query names a Model as a
+  `format_collection(data, snapshot, date)` turns a `collect()` result into the Markdown report, and
+  each source's line says where its rows came from by its `Origin`: "fetched <date of the fetch>",
+  "read from <file>" or "skipped (<why>)". `bench.py model MODEL` reads only the named accepted
+  rows and Epoch CSV, never the cache, and never fetches: `inspect_model(query, lanes_doc,
+  effort_rows, epoch_rows)` takes rows and builds its `LaneEvidence`. The query names a Model as a
   printed name does (`identify`), so a member slug shows the whole Model, and each of its Lanes
   lists its `lane_rows`. `evidence_records(evidence)` and `epoch_records(evidence)` turn an
   evidence's `records` into display records with board/version standing, cost basis and

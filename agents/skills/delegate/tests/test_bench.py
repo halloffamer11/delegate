@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -159,8 +161,14 @@ def copy_config(td):
     return cfg
 
 
+# every proxy variable at a closed local port: a run that reaches for the web
+# fails here on every machine, as it does under `make test`
+OFFLINE = {name: "http://127.0.0.1:9" for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")}
+OFFLINE.update(no_proxy="127.0.0.1,localhost", NO_PROXY="127.0.0.1,localhost")
+
+
 def run_bench(args, home):
-    env = dict(os.environ)
+    env = dict(os.environ, **OFFLINE)
     env["HOME"] = home
     return subprocess.run(
         [sys.executable, BENCH_PY, *args],
@@ -231,10 +239,12 @@ with tempfile.TemporaryDirectory() as td:
         res.returncode == 0 and os.path.isfile(report_path) and f"bench: wrote {report_path}" in res.stdout,
         f"code={res.returncode} stdout={res.stdout!r} stderr={res.stderr!r} path_exists={os.path.isfile(report_path)}",
     )
-    # replaces "both attribution lines present with --aa-json" (ticket 19)
+    # replaces "both attribution lines present with --aa-json" (ticket 19); what
+    # the Epoch line says of where its rows came from is
+    # case_the_report_names_the_epoch_file_it_read's
     record(
         "both attribution lines present with --effort-rows",
-        "Source: Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0, fetched 2026-09-09" in report
+        "Source: Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0, " in report
         and f"Source: Artificial Analysis, {AA_URL}, per-effort rows accepted by effort.py aa, observed 2026-09-11" in report
         and "free API" not in report,
         report[:800],
@@ -454,6 +464,124 @@ with tempfile.TemporaryDirectory() as td:
     )
 
 
+# --- the report reads the Benchmark snapshot (H2) -----------------------------
+# The report reads Epoch through `bench_snapshot`: a named CSV, or the web
+# through the 24-hour cache. Each source's line says where its rows came from,
+# and an Epoch that cannot be fetched is a note on that line, never a stop.
+
+def read_report(path):
+    if not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def line_starting(text, prefix):
+    return next((line for line in text.splitlines() if line.startswith(prefix)), "")
+
+
+def case_the_report_names_the_epoch_file_it_read():
+    """A named Epoch CSV is "read from <file>": the line used to say "fetched
+    <report date>" whatever it read."""
+    with tempfile.TemporaryDirectory() as td:
+        home = os.path.join(td, "home")
+        os.makedirs(home)
+        cfg = copy_config(td)
+        out = os.path.join(td, "out")
+        csv_path = os.path.join(td, "epoch.csv")
+        write_epoch_csv(csv_path, fixture_rows())
+        res = run_bench(["--config-dir", cfg, "--out-dir", out, "--date", "2026-09-09",
+                         "--epoch-csv", csv_path], home)
+        report = read_report(os.path.join(out, "2026-09-09.md"))
+    line = line_starting(report, "Source: Epoch AI")
+    return (res.returncode == 0
+            and line == f"Source: Epoch AI, Benchmarking Hub, {bench.EPOCH_URL}, CC-BY 4.0, "
+                        f"read from {csv_path}"
+            and "fetched" not in line,
+            f"code={res.returncode} stderr={res.stderr!r} line={line!r}")
+
+
+def case_an_epoch_outage_still_writes_the_report():
+    """With no --epoch-csv the report reads Epoch from the web through the
+    cache under HOME. Behind a closed proxy that fetch fails: the report is
+    still written, with the Artificial Analysis table, Epoch skipped and the
+    reason on Epoch's line, and no Epoch artifact cached (decision H.3). It
+    used to exit 1 and throw the AA rows away."""
+    with tempfile.TemporaryDirectory() as td:
+        home = os.path.join(td, "home")
+        os.makedirs(home)
+        cfg = copy_config(td)
+        rows = os.path.join(td, "aa-accepted.json")
+        with open(rows, "w", encoding="utf-8") as f:
+            json.dump(aa_rows(), f)
+        res = run_bench(["--config-dir", cfg, "--date", "2026-09-09", "--effort-rows", rows], home)
+        cache = os.path.join(home, ".cache", "delegate", "bench")
+        report = read_report(os.path.join(cache, "2026-09-09.md"))
+        cached = os.path.exists(os.path.join(cache, "epoch", "eci_benchmarks.csv"))
+    line = line_starting(report, "Epoch AI: skipped (")
+    aa_section = report[report.find("## Artificial Analysis"):] if "## Artificial Analysis" in report else ""
+    return (res.returncode == 0
+            and "| Lane(s) | Model | Effort | Terminal-Bench 2.1 |" in aa_section
+            and line.endswith(")") and bench.EPOCH_NO_ROWS not in line
+            and len(line) > len("Epoch AI: skipped ()")
+            and "## Epoch AI\n\n" + line in report
+            and not cached,
+            f"code={res.returncode} stderr={res.stderr!r} line={line!r} cached={cached} "
+            f"report={report[:600]!r}")
+
+
+def case_the_report_dates_a_cached_epoch_fetch():
+    """Epoch's line names the day its rows left the web, never the report's
+    date; a copy kept after a fetch that failed also says why that failed."""
+    def utc_day(stamp):
+        return datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%d")
+
+    def refused(url):
+        raise OSError("cannot fetch: refused")
+
+    with open(EPOCH_FIXTURE, "rb") as f:
+        served = f.read()
+    lines, days = {}, {}
+    with tempfile.TemporaryDirectory() as td:
+        for label, age in (("fresh", 3 * 3600), ("stale", 3 * 86400)):
+            artifact = os.path.join(td, label, "epoch", "eci_benchmarks.csv")
+            os.makedirs(os.path.dirname(artifact))
+            with open(artifact, "wb") as f:
+                f.write(served)
+            stamp = time.time() - age
+            os.utime(artifact, (stamp, stamp))
+            days[label] = utc_day(stamp)
+            snap = bench_snapshot.snapshot(
+                (), epoch=bench_snapshot.web(cache_dir=os.path.join(td, label), get=refused))
+            data = bench.collect(ATTRIB_LANES_FOR_REPORT, epoch_rows=snap.epoch_rows)
+            lines[label] = line_starting(bench.format_collection(data, snap, "2026-09-09"),
+                                         "Source: Epoch AI")
+    head = f"Source: Epoch AI, Benchmarking Hub, {bench.EPOCH_URL}, CC-BY 4.0, fetched "
+    return (lines["fresh"] == head + days["fresh"]
+            and lines["stale"] == head + days["stale"] + " (a newer fetch failed: cannot fetch: refused)",
+            repr(lines))
+
+
+ATTRIB_LANES_FOR_REPORT = {"version": "delegate-lanes.v1", "lanes": {
+    "sol-high@codex": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                       "tier": 4, "meter": "codex"}}}
+
+
+for case in (case_the_report_names_the_epoch_file_it_read,
+             case_an_epoch_outage_still_writes_the_report,
+             case_the_report_dates_a_cached_epoch_fetch):
+    try:
+        record(case.__name__, *case())
+    except Exception as e:
+        record(case.__name__, False, repr(e))
+
+# the snapshot is the one place rows are acquired: `effort.fetch_page` opens
+# every URL and `bench_snapshot.load_effort_rows` reads every accepted-rows file
+gone = [name for name in ("fetch_bytes", "load_epoch", "load_effort_rows", "read_text_file",
+                          "urllib", "csv", "io") if hasattr(bench, name)]
+record("bench acquires no rows itself: no fetch, no file reader, no urllib", gone == [], str(gone))
+
+
 # --- attribution: a figure reaches only the lane that ran its effort ----------
 # Ticket 17. Two lanes on one model at different efforts is the case that was
 # wrong: every figure of the model landed on both, so the six astra lanes read
@@ -629,7 +757,7 @@ try:
             write_epoch_csv(path, [epoch_row("claude-fable-5-1-20260901", "high", "DeepSWE", "0.61",
                                              "alpha", display)])
             data = bench.collect(doc, epoch_rows=epoch_rows_of(path))
-            view = bench.inspect_model("claude-fable-5-1", doc, epoch_csv=path)
+            view = bench.inspect_model("claude-fable-5-1", doc, epoch_rows=epoch_rows_of(path))
             cell = data["lanes"]["fable-high@claude"]["cells"].get("DeepSWE") or {}
             seen[tag] = (cell.get("performance"),
                          [r["score"] for v in view["lane_view"] if v["lane"] == "fable-high@claude"
@@ -1041,20 +1169,11 @@ INSPECT_ROWS = [
 ]
 
 
+# inspect_model takes rows and so cannot fetch; the model CLI's subprocess case
+# below runs under the network tripwire
 try:
-    called = []
-    orig_fetch = bench.fetch_bytes
-
-    def boom(*a, **k):
-        called.append(a)
-        raise AssertionError("network")
-
-    bench.fetch_bytes = boom
-    try:
-        doc = bench.inspect_model("gpt-5.6-sol", INSPECT_LANES, effort_rows=INSPECT_ROWS)
-        text = bench.format_inspection(doc)
-    finally:
-        bench.fetch_bytes = orig_fetch
+    doc = bench.inspect_model("gpt-5.6-sol", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    text = bench.format_inspection(doc)
     high = next(r for r in doc["family_view"]
                 if r["source"] == "aa" and r["benchmark"] == "Terminal-Bench 2.1"
                 and r["effort"] == "high")
@@ -1145,8 +1264,7 @@ try:
         empty["fetched"] is False and empty["inputs"]["effort_rows"] is False
         and empty["inputs"]["epoch_csv"] is False
         and empty["family_view"] == []
-        and "No accepted rows or Epoch CSV given" in bench.format_inspection(empty)
-        and called == [],
+        and "No accepted rows or Epoch CSV given" in bench.format_inspection(empty),
         str(empty["inputs"]),
     )
     human = bench.format_inspection(doc)
@@ -1179,18 +1297,16 @@ try:
         routing_path = os.path.join(cfg, "routing.json")
         before_lanes = open(lanes_path, encoding="utf-8").read()
         before_routing = open(routing_path, encoding="utf-8").read()
-        orig_fetch = bench.fetch_bytes
-
-        def boom(*a, **k):
-            raise AssertionError("network")
-
-        env = dict(os.environ)
+        # under the network tripwire: a run that reached for the web would fail,
+        # and one that read through the cache would leave it under HOME
+        env = dict(os.environ, **OFFLINE)
         env["HOME"] = home
         res = subprocess.run(
             [sys.executable, BENCH_PY, "model", "gpt-5.6-sol",
              "--config-dir", cfg, "--effort-rows", rows_a, "--effort-rows", rows_b, "--json"],
             capture_output=True, text=True, env=env,
         )
+        home_after = os.listdir(home)
         after_lanes = open(lanes_path, encoding="utf-8").read()
         after_routing = open(routing_path, encoding="utf-8").read()
         payload = json.loads(res.stdout) if res.returncode == 0 and res.stdout.strip() else {}
@@ -1204,13 +1320,13 @@ try:
         )
         record(
             "model CLI is read-only, concatenates --effort-rows, and leaves the report CLI intact",
-            res.returncode == 0 and payload.get("fetched") is False
+            res.returncode == 0 and payload.get("fetched") is False and home_after == []
             and ("aa", "Terminal-Bench 2.1") in benches
             and ("tbench", "Terminal-Bench 4.0") in benches
             and before_lanes == after_lanes and before_routing == after_routing
             and report.returncode == 0 and "bench: wrote" in report.stdout
             and "Lane view" not in report.stdout,
-            f"code={res.returncode} stderr={res.stderr!r} benches={benches} "
+            f"code={res.returncode} stderr={res.stderr!r} benches={benches} home={home_after} "
             f"report={report.returncode} {report.stderr!r}",
         )
         epoch_csv = os.path.join(td, "epoch.csv")

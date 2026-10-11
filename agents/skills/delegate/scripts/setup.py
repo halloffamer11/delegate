@@ -189,7 +189,7 @@ def show_bench(args, lanes_doc, routing_doc, snapshot):
             print(f"bench: {e}")
         return
     data = collect_bench(args, lanes_doc, snapshot)
-    print(bench.format_collection(data, effort_rows=snapshot.effort_rows), end="")
+    print(bench.format_collection(data, snapshot), end="")
 
 
 def read_answer(prompt):

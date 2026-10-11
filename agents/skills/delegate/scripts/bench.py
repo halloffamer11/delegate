@@ -4,12 +4,17 @@
 Evidence for the human's tier decisions; never read by routing
 or any other script, skill, or hook.
 
-Sources:
-  Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0
+Sources, read through the Benchmark snapshot (bench_snapshot.py):
+  Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0:
+    the report reads `--epoch-csv`, else the web through the snapshot's 24-hour
+    cache; an Epoch that cannot be fetched is skipped with the reason, and the
+    report is still written. `bench.py model` reads `--epoch-csv` only.
   Artificial Analysis, https://artificialanalysis.ai, the per-effort rows that
-    `effort.py aa` reads out of a /models/<slug> page and accepts (ticket 19).
+    `effort.py aa` reads out of a /models/<slug> page and accepts (ticket 19),
+    only from `--effort-rows`; the wizard is the one command that fetches them.
     No API and no key: the free API held one entry per model on a first page
     of 200, so most lanes had no figure at their own effort.
+  A named file that cannot be read exits 1 with "bench: <reason>".
 
   python3 bench.py [--config-dir DIR] [--out-dir DIR] [--date YYYY-MM-DD]
                    [--epoch-csv FILE] [--effort-rows FILE ...]
@@ -21,8 +26,7 @@ import json
 import os
 import re
 import sys
-import tempfile
-import urllib.request
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -179,34 +183,21 @@ def md_table(headers, rows):
     return "\n".join(lines)
 
 
-def read_text_file(path):
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        return f.read()
-
-
-def fetch_bytes(url, headers=None, timeout=60):
-    req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
-
-
-def load_epoch(epoch_csv):
-    """The report's Epoch rows, read through the Benchmark snapshot: the
-    named CSV, else a fetch into a throwaway cache, so the report keeps
-    fetching on every run as before. Raises BenchError when there are none.
-    `bench.run` moves onto the snapshot and its cache in H2."""
+def read_snapshot(effort_rows, epoch_csv, fetch):
+    """The Benchmark snapshot a bench CLI reads. Artificial Analysis comes only
+    from the named accepted-rows files (decision H.5). Epoch comes from
+    `epoch_csv`, else, when `fetch`, from the web through the snapshot's
+    24-hour cache, and else not at all (decision H.4). A named file that
+    cannot be read raises BenchError; a fetch that fails is the Epoch
+    Origin's `failure`, and the report says it (decision H.3)."""
     if epoch_csv:
         epoch = bench_snapshot.local(os.path.abspath(os.path.expanduser(epoch_csv)))
-        snap = bench_snapshot.snapshot((), epoch=epoch)
     else:
-        with tempfile.TemporaryDirectory() as scratch:
-            snap = bench_snapshot.snapshot(
-                (), epoch=bench_snapshot.web(cache_dir=scratch, get=fetch_bytes))
+        epoch = bench_snapshot.web() if fetch else None
+    snap = bench_snapshot.snapshot(effort_rows or (), epoch=epoch)
     if snap.errors:
-        raise BenchError(snap.errors[0])
-    if snap.epoch_rows is None:
-        raise BenchError(f"cannot read Epoch CSV: {snap.origins['epoch'].failure}")
-    return snap.epoch_rows
+        raise BenchError("; ".join(snap.errors))
+    return snap
 
 
 def choose_effort(available, lane_efforts):
@@ -366,23 +357,6 @@ def build_epoch_section(models, records):
     return sort_report_rows(items)
 
 
-def load_effort_rows(paths):
-    """Every row from one accepted-rows file or several, in order."""
-    rows = []
-    for path in paths or ():
-        full = os.path.abspath(os.path.expanduser(path))
-        try:
-            doc = json.loads(read_text_file(full))
-        except OSError as e:
-            raise BenchError(f"cannot read effort rows: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BenchError(f"effort rows {path}: invalid JSON: {e}") from e
-        if not isinstance(doc, list):
-            raise BenchError(f"effort rows {path}: expected a JSON list")
-        rows.extend(doc)
-    return rows
-
-
 def aa_component(row):
     """Whether an accepted row is an Artificial Analysis component figure:
     its source, a benchmark, a number, and never the composite index."""
@@ -505,8 +479,45 @@ def build_notes(models, epoch_items, aa_models, aa_skipped, epoch_skipped=None):
     return notes
 
 
-def aa_source_line(effort_rows):
-    """Where the AA rows came from: the page URLs and the dates observed."""
+def origin_phrase(origin):
+    """Where one source's rows came from, from its Origin in the Benchmark
+    snapshot: "fetched <date of the fetch>" (UTC) or "read from <file>"; None
+    for a source with no Origin or no rows. Rows kept because no fresh ones
+    could be had say why."""
+    if origin is None or origin.how == "none":
+        return None
+    if origin.how in ("fetched", "cache"):
+        stamp = time.time() - (origin.age or 0.0)
+        phrase = f"fetched {datetime.fromtimestamp(stamp, timezone.utc).strftime('%Y-%m-%d')}"
+        if origin.failure:
+            phrase += f" (a newer fetch failed: {origin.failure})"
+        return phrase
+    if origin.how == "file":
+        return f"read from {origin.path}"
+    # "rows": the named --effort-rows, when the source's adapter gave none
+    return "read from --effort-rows" + (f" ({origin.failure})" if origin.failure else "")
+
+
+def skipped_line(name, skipped, origin=None):
+    """A skipped source's line: why it has no rows, the failed fetch or the
+    unreadable file when its Origin says so."""
+    why = origin.failure if origin is not None and origin.how == "none" and origin.failure else skipped
+    return f"{name}: skipped ({why})"
+
+
+def epoch_source_line(skipped, origin=None):
+    """Epoch's line: where its rows came from, or why it was skipped."""
+    if skipped is not None:
+        return skipped_line("Epoch AI", skipped, origin)
+    phrase = origin_phrase(origin)
+    return f"Source: Epoch AI, Benchmarking Hub, {EPOCH_URL}, CC-BY 4.0" + (f", {phrase}" if phrase else "")
+
+
+def aa_source_line(effort_rows, origin=None, skipped=None):
+    """Artificial Analysis's line: the page URLs, the dates observed and, when
+    it has an Origin, where its rows came from; or why it was skipped."""
+    if skipped is not None:
+        return skipped_line("Artificial Analysis", skipped, origin)
     urls, dates = [], []
     for row in effort_rows or []:
         if isinstance(row, dict) and row.get("source") == AA_SOURCE:
@@ -516,38 +527,34 @@ def aa_source_line(effort_rows):
                 dates.append(row["observed"])
     where = ", ".join(urls) if urls else "https://artificialanalysis.ai"
     when = f", observed {', '.join(sorted(dates))}" if dates else ""
-    return f"Source: Artificial Analysis, {where}, per-effort rows accepted by effort.py aa{when}"
+    phrase = origin_phrase(origin)
+    return (f"Source: Artificial Analysis, {where}, per-effort rows accepted by effort.py aa{when}"
+            + (f", {phrase}" if phrase else ""))
 
 
-def render_report(
-    date,
-    epoch_table,
-    aa_table,
-    aa_skipped,
-    notes,
-    aa_source=None,
-    epoch_skipped=None,
-):
-    epoch_line = (f"Source: Epoch AI, Benchmarking Hub, {EPOCH_URL}, CC-BY 4.0, fetched {date}"
-                  if epoch_skipped is None else f"Epoch AI: skipped ({epoch_skipped})")
+def render_report(date, epoch_table, aa_table, notes, epoch_source, aa_source):
+    """The Markdown report. `epoch_source` and `aa_source` are each source's
+    line; a source whose table is None was skipped, and its line stands in
+    its section."""
     lines = [
         f"# Lane benchmark ranking {date}",
         "",
         "This report is evidence for the human's tier edits and is read by no script.",
         "",
-        epoch_line,
+        epoch_source,
+        aa_source,
+        "",
+        "## Epoch AI",
+        "",
+        epoch_table if epoch_table is not None else epoch_source,
+        "",
+        "## Artificial Analysis",
+        "",
+        aa_table if aa_table is not None else aa_source,
+        "",
+        "## Gaps and notes",
+        "",
     ]
-    if aa_skipped is None:
-        lines.append(aa_source or aa_source_line(None))
-    else:
-        lines.append(f"Artificial Analysis: skipped ({aa_skipped})")
-    lines.extend(["", "## Epoch AI", "", epoch_table if epoch_skipped is None else epoch_line,
-                  "", "## Artificial Analysis", ""])
-    if aa_skipped is None:
-        lines.append(aa_table)
-    else:
-        lines.append(f"Artificial Analysis: skipped ({aa_skipped})")
-    lines.extend(["", "## Gaps and notes", ""])
     if notes:
         for note in notes:
             lines.append(f"- {note}")
@@ -823,18 +830,21 @@ def collect(lanes_doc, epoch_rows=None, effort_rows=None):
     }
 
 
-def format_collection(data, effort_rows=None, date=None):
-    """Markdown report from a collect() result. Shared by the CLI and plain setup."""
-    epoch_table = epoch_table_from_collection(data)
-    aa_table = None if data["aa_skipped"] is not None else aa_table_from_collection(data)
+def format_collection(data, snapshot=None, date=None):
+    """Markdown report from a collect() result and the Benchmark snapshot its
+    rows came from: each source's line says where from its `Origin`. Shared
+    by the CLI and plain setup."""
+    origins = snapshot.origins if snapshot is not None else {}
+    epoch_skipped = data.get("epoch_skipped")
+    aa_skipped = data["aa_skipped"]
     return render_report(
         date or utc_today(),
-        epoch_table,
-        aa_table,
-        data["aa_skipped"],
+        None if epoch_skipped is not None else epoch_table_from_collection(data),
+        None if aa_skipped is not None else aa_table_from_collection(data),
         data["notes"],
-        aa_source=aa_source_line(effort_rows),
-        epoch_skipped=data.get("epoch_skipped"),
+        epoch_source_line(epoch_skipped, origins.get(bench_snapshot.EPOCH)),
+        aa_source_line(snapshot.effort_rows if snapshot is not None else None,
+                       origins.get(bench_snapshot.AA), aa_skipped),
     )
 
 
@@ -1183,8 +1193,10 @@ def _absent_for_family(all_recs, family_recs, targets):
     return absent
 
 
-def inspect_model(query, lanes_doc, effort_rows=None, epoch_csv=None):
-    """Read-only all-board inspection. Never fetches; never writes policy.
+def inspect_model(query, lanes_doc, effort_rows=None, epoch_rows=None):
+    """Read-only all-board inspection of the rows it is given (the accepted
+    rows and the Epoch rows of a Benchmark snapshot). It acquires nothing, so
+    it never fetches; it never writes policy.
 
     The query names a Model the way a row's printed name does
     (`LaneEvidence.identify`), so a member slug, the Model's own name and a
@@ -1193,7 +1205,7 @@ def inspect_model(query, lanes_doc, effort_rows=None, epoch_csv=None):
     shows the rows printing that name.
     """
     accepted = lane_evidence.LaneEvidence(lanes_doc, effort_rows)
-    epoch = lane_evidence.LaneEvidence(lanes_doc, load_epoch(epoch_csv) if epoch_csv else None)
+    epoch = lane_evidence.LaneEvidence(lanes_doc, epoch_rows)
     # standing stays per source; combining lists would mix Epoch with accepted
     # rows of the same printed board name, so they stay separate snapshots
     all_recs = evidence_records(accepted) + epoch_records(epoch)
@@ -1231,9 +1243,11 @@ def inspect_model(query, lanes_doc, effort_rows=None, epoch_csv=None):
         "absent": _absent_for_family(all_recs, family_recs, targets),
         "references": load_reference_notes(),
         "fetched": False,
+        # whether accepted rows and an Epoch CSV were read; the keys are the
+        # JSON's, and inspection reads only named files
         "inputs": {
             "effort_rows": effort_rows is not None,
-            "epoch_csv": bool(epoch_csv),
+            "epoch_csv": epoch_rows is not None,
         },
     }
 
@@ -1376,15 +1390,16 @@ def format_inspection(doc):
 
 
 def run_model(args):
-    """Inspect one model. Stdout only; does not write the catalog or fetch."""
+    """Inspect one model. Stdout only; does not write the catalog or fetch:
+    it reads the named files only, and never the cache (decision H.4)."""
     config_dir = os.path.expanduser(args.config_dir or catalog.CONFIG_DIR)
     cat = catalog.load_catalog(config_dir=config_dir)
-    effort_rows = load_effort_rows(args.effort_rows) if args.effort_rows else None
+    snap = read_snapshot(args.effort_rows, args.epoch_csv, fetch=False)
     doc = inspect_model(
         args.model,
         {"lanes": cat["lanes"]},
-        effort_rows=effort_rows,
-        epoch_csv=args.epoch_csv,
+        effort_rows=snap.effort_rows,
+        epoch_rows=snap.epoch_rows,
     )
     if args.json:
         print(json.dumps(doc, indent=2, ensure_ascii=False))
@@ -1400,13 +1415,9 @@ def run(args):
     date = args.date or utc_today()
 
     cat = catalog.load_catalog(config_dir=config_dir)
-    effort_rows = load_effort_rows(args.effort_rows)
-    data = collect(
-        {"lanes": cat["lanes"]},
-        epoch_rows=load_epoch(args.epoch_csv),
-        effort_rows=effort_rows,
-    )
-    text = format_collection(data, effort_rows=effort_rows, date=date)
+    snap = read_snapshot(args.effort_rows, args.epoch_csv, fetch=True)
+    data = collect({"lanes": cat["lanes"]}, epoch_rows=snap.epoch_rows, effort_rows=snap.effort_rows)
+    text = format_collection(data, snap, date)
 
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(os.path.abspath(out_dir), f"{date}.md")
@@ -1451,7 +1462,8 @@ def main(argv=None):
     parser.add_argument("--config-dir", default=None, help="directory holding lanes.json")
     parser.add_argument("--out-dir", default=None, help="directory for <date>.md")
     parser.add_argument("--date", default=None, help="report date YYYY-MM-DD (UTC today)")
-    parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV; skip the fetch")
+    parser.add_argument("--epoch-csv", default=None,
+                        help="local Epoch CSV; else Epoch is fetched through the 24-hour cache")
     parser.add_argument("--effort-rows", action="append", default=[],
                         help="rows effort.py accepted (the aa rows are read); repeat for several files")
     args = parser.parse_args(argv)
