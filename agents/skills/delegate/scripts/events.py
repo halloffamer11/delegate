@@ -70,7 +70,8 @@ def finish_event(thread_id, lane, class_, secs, rc, status, child_session, out):
         "thread_id": thread_id,
         "lane": lane,
         "class": opt_val(class_),
-        "secs": int(secs),
+        # null for a native Run: delegate never sees how long its agent runs
+        "secs": None if secs is None else int(secs),
         "rc": int(rc),
         "status": status,
         "child_session": opt_val(child_session),

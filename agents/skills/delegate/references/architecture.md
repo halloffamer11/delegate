@@ -98,13 +98,17 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   records the orchestrator. `--json` on either prints one object in place of the finish and
   metrics lines (`run --json` sends the ranking to stderr); the courier, the evals and the
   browser probes read that or `runs.parse_finish_line`, never a regex of their own.
-- `scripts/runs.py`: the Run module (ticket 24; delegate-deepening 01). `execute(request, prompt,
-  work)` runs a relayed Run from its start to its Outcome: the run directory, `prompt.md`,
-  `dispatch.json` and the Ledger start, then the work (`delegate.relay_work`, which returns a
-  `Finish`), then `return.json`, the outcome, the Usage-limit hold and the Ledger finish. Anything
-  that stops the work, SIGTERM included, ends the Run blocked with why; a write that fails becomes
-  a note and never stops the Run ending. Only here are `dispatch.json` and `return.json` written;
-  `Ended.text` spells the finish lines and `parse_finish_line` reads them. Run directories under
+- `scripts/runs.py`: the Run module (ticket 24; delegate-deepening 01 and 02). `execute(request,
+  prompt, work)` runs every Run from its start to its Outcome: the run directory, `prompt.md`,
+  `dispatch.json` and the Ledger start, then the work, then `return.json`, the outcome, the
+  Usage-limit hold and the Ledger finish. Relayed work (`delegate.relay_work`) returns a `Finish`.
+  A native Run ends as a hand-off: its work returns a `HandOff` (the agent and the spawn line), and
+  the Run ends at once with status `native`, reason `handed to <agent>`, secs null, no
+  `return.json` and the Meter left as it is; `report.py log --run` reads status `native` for it and
+  still asks for `--secs`. Anything that stops the work, SIGTERM included, ends the Run blocked
+  with why; a write that fails becomes a note and never stops the Run ending. Only here are
+  `dispatch.json` and `return.json` written; `Ended.text` spells the finish lines, or the native
+  and spawn lines, and `parse_finish_line` and `parse_native_line` read them. Run directories under
   `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
@@ -141,7 +145,8 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
   on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
   its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
-  `scripts/events.py`: the ledger encoder (schema unchanged); the statusline reads the ledger.
+  `scripts/events.py`: the ledger encoder (schema unchanged; a native Run's finish has `secs`
+  null and `rc` 0); the statusline reads the ledger.
 - `scripts/model_queue.py`: models the catalog lacks, queued for the next `delegate global`
   (ticket 29). At most once a day, dispatch starts a detached scan that runs the wizard's own
   `discover` and `refresh_catalog` against the global lanes and queues each model no Lane runs.

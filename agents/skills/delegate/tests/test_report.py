@@ -267,6 +267,25 @@ with tempfile.TemporaryDirectory() as tmp:
     check("explicit lane prices are used",
           (exp_rec.get("cost") or {}).get("usd_in") == 0.024, str(exp_rec.get("cost")))
 
+    # A native Run ends handed to its agent, with secs null (delegate never
+    # sees how long the agent ran): log reads its status, and still asks for
+    # the wall time, as SKILL.md step 4 says to pass it.
+    native_run = os.path.join(tmp, "run-native")
+    write_dispatch(native_run, {
+        "lane": "fable-xhigh@claude", "usage": None, "secs": None, "status": "native",
+        "reason": "handed to lane-fable-xhigh", "thread_id": "t-native",
+    })
+    rc, out, err = run(["log", "--work", "Native job", "--run", native_run, "--verdict", "clean"] + cfg, env)
+    check("log --run on a native Run without --secs asks for --secs",
+          rc != 0 and "--secs is required" in err, f"rc={rc} out={out} err={err}")
+    rc, out, err = run(["log", "--work", "Native job", "--run", native_run, "--secs", "95",
+                        "--verdict", "clean"] + cfg, env)
+    native_rec = [json.loads(l) for l in open(env["DELEGATE_RUNS"])][-1]
+    check("log --run on a native Run records status native and the secs given",
+          rc == 0 and native_rec.get("work") == "Native job" and native_rec.get("status") == "native"
+          and native_rec.get("secs") == 95 and native_rec.get("thread_id") == "t-native",
+          f"rc={rc} err={err} rec={native_rec}")
+
     recs = [json.loads(l) for l in open(env["DELEGATE_RUNS"])]
     measured = [r for r in recs if (r.get("cost") or {}).get("measured")]
     n_unm = sum(1 for r in recs if r.get("cost") and not r["cost"].get("measured"))

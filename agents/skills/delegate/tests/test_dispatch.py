@@ -1131,17 +1131,24 @@ def main():
             lines29[1].startswith("delegate: spawn: spawn lane-opus-high with the Agent tool") and
             lines29[0].split("prompt=")[-1] in lines29[1]
         )
+        disp29 = {}
         if ok29:
             dir29 = os.path.join(t_env["runs_dir"], new_runs29[0])
             prompt_in_stdout = lines29[0].split("prompt=")[-1]
             expected_prompt = os.path.abspath(os.path.join(dir29, "prompt.md"))
+            disp29 = json.load(open(os.path.join(dir29, "dispatch.json")))
             ok29 = (
                 prompt_in_stdout == expected_prompt and
                 os.path.isfile(expected_prompt) and
                 not os.path.exists(os.path.join(dir29, "argv.json")) and
-                not os.path.exists(os.path.join(dir29, "relay.stdout"))
+                not os.path.exists(os.path.join(dir29, "relay.stdout")) and
+                # the Run ends at once, handed to its agent: an Outcome and no return
+                disp29.get("status") == "native" and bool(disp29.get("finished_at")) and
+                disp29.get("reason") == "handed to lane-opus-high" and disp29.get("secs") is None and
+                not os.path.exists(os.path.join(dir29, "return.json"))
             )
-        record("29. dispatch native lane prints native line, writes prompt.md, no relay", ok29, f"rc={res29.returncode} stdout={res29.stdout}")
+        record("29. dispatch native lane prints native line, writes prompt.md, no relay", ok29,
+               f"rc={res29.returncode} stdout={res29.stdout} dispatch={disp29}")
 
         # -------------------------------------------------------------
         # 29a. --effort on a native lane: a matching one passes quietly; a

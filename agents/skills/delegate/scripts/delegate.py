@@ -7,10 +7,12 @@ What a run is:
   The run manages catalog resolution, prompt assembly, ledger accounting, relay execution,
   and child return normalization.
 
-Run: `runs.execute` runs a relayed Run from its start to its Outcome
+Run: `runs.execute` runs every Run from its start to its Outcome
 (dispatch.json, prompt.md, return.json, the Ledger, the Meter hold and the
-finish line); dispatch supplies only the work (`relay_work`). The relay adds
-relay.stdout, relay.stderr, result.json, brief.txt, final.txt and events.jsonl.
+finish line); dispatch supplies only the work: `relay_work`, or for a native
+Lane a `runs.HandOff` to the orchestrator's agent, which ends the Run at once
+as native. The relay adds relay.stdout, relay.stderr, result.json, brief.txt,
+final.txt and events.jsonl.
 
 Status mapping:
   completed:
@@ -32,8 +34,8 @@ CLI:
           [--dry-run] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c]
           [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash] [--json]
 
-  --json prints one JSON object (`runs.Ended.text(as_json=True)`, or
-  `runs.native_summary` for a native Lane) in place of the finish and metrics
+  --json prints one JSON object (`runs.Ended.text(as_json=True)`: the summary,
+  or for a native Lane the native object) in place of the finish and metrics
   lines; `run --json` sends the ranking to stderr.
 """
 import argparse
@@ -576,37 +578,24 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         routing=resolved["routing"],
     )
 
-    # The one native-or-relayed decision: a native Lane stops here, with a
-    # Run's prompt for the orchestrator's own agent.
-    if orchestrators.is_native(profile, harness):
-        run = runs.Run.create(
-            runs_dir, prompt_bytes,
-            lane=lane, harness=harness, model=model, effort=eff, timeout=lane_timeout,
-            class_name=class_, cwd=cwd, write=write, brief=brief, leash=effective_leash,
-            orchestrator=profile["name"] if profile else None,
-        )
-        abs_prompt = os.path.abspath(run.prompt_path)
-        agent = orchestrators.agent_name(profile, lane)
-        spawn = orchestrators.spawn_line(profile, lane, abs_prompt)
-        if as_json:
-            print(json.dumps(runs.native_summary(lane, agent, abs_prompt, spawn), indent=2))
-        else:
-            print(runs.native_line(lane, agent, abs_prompt))
-            print(f"delegate: spawn: {spawn}")
-        sys.exit(0)
-
-    # Step 3: the Run, from its start to its Outcome (`runs.execute`); the
-    # relay is its work.
+    # Step 3: the Run, from its start to its Outcome (`runs.execute`). The one
+    # native-or-relayed decision picks its work: a native Lane hands the Run's
+    # prompt to the orchestrator's own agent, and any other Lane runs the relay.
     request = runs.Request(
         lane=lane, harness=harness, model=model, effort=eff, timeout=lane_timeout,
         class_name=class_, cwd=cwd, write=write, brief=brief, leash=effective_leash,
         orchestrator=profile["name"] if profile else None,
         meter=resolved["lane_data"].get("meter"),
     )
-    work = relay_work(
-        harness=harness, model=model, effort=eff, timeout=lane_timeout, child_cwd=child_cwd,
-        write=write, ads_dir=ads_d, no_probe=no_probe, routing=resolved.get("routing"), probed=probed,
-    )
+    if orchestrators.is_native(profile, harness):
+        def work(run):
+            return runs.HandOff(orchestrators.agent_name(profile, lane),
+                                orchestrators.spawn_line(profile, lane, run.prompt_path))
+    else:
+        work = relay_work(
+            harness=harness, model=model, effort=eff, timeout=lane_timeout, child_cwd=child_cwd,
+            write=write, ads_dir=ads_d, no_probe=no_probe, routing=resolved.get("routing"), probed=probed,
+        )
     try:
         ended = runs.execute(request, prompt_bytes, work, runs_dir)
     except runs.StartError as e:

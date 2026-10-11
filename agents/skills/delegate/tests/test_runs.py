@@ -308,6 +308,47 @@ def case_a_runs_root_that_cannot_be_made_starts_nothing():
                f"raised={raised!r} called={called} ledger={w.lines()}")
 
 
+def case_a_hand_off_ends_the_run_at_once_as_native():
+    claude = request(lane="opus-high@claude", harness="claude", model="claude-opus-5",
+                     meter="claude-general")
+    with world() as w:
+        usage.mark_limited("claude-general", "held before the hand-off")
+        seen = {}
+
+        def work(run):
+            seen["prompt"] = run.prompt_path
+            seen["spawn"] = f"spawn lane-opus-high with the Agent tool on {run.prompt_path}"
+            return runs.HandOff("lane-opus-high", seen["spawn"])
+
+        ended = runs.execute(claude, b"p", work, w.root)
+        run = runs.Run(ended.run)
+        disp = run.read()["dispatch"]
+        lines = w.lines()
+        start, finish = (lines + [{}, {}])[:2]
+        prompt, spawn = seen.get("prompt"), seen.get("spawn")
+        native = {"native": True, "lane": "opus-high@claude", "agent": "lane-opus-high",
+                  "prompt": prompt, "spawn": spawn}
+        record("8. a hand-off ends the Run at once as native",
+               ended.status == "native" and ended.exit_code == 0 and ended.notes == ()
+               and ended.lane == "opus-high@claude"
+               # an Outcome in dispatch.json, and no return
+               and not os.path.exists(run.return_path)
+               and disp["status"] == "native" and disp["reason"] == "handed to lane-opus-high"
+               and disp["secs"] is None and disp["finished_at"]
+               and disp["relay_status"] is None and disp["relay_exit"] is None
+               # the Ledger: one start and one finish, native, on one thread
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and start.get("thread_id") == disp["thread_id"] == finish.get("thread_id")
+               and finish.get("status") == "native" and finish.get("secs") is None
+               # the Meter hold is never touched
+               and sorted(usage.read_limits()) == ["claude-general"]
+               # what dispatch prints: the native line, then the spawn line
+               and ended.text() == (f"delegate: native lane=opus-high@claude agent=lane-opus-high "
+                                    f"prompt={prompt}\ndelegate: spawn: {spawn}")
+               and ended.text(as_json=True) == json.dumps(native, indent=2),
+               f"ended={vars(ended)} dispatch={disp} ledger={lines} limits={usage.read_limits()}")
+
+
 def case_parse_finish_line():
     with world() as w:
         ended = runs.execute(request(lane="flash-high@agy", harness="agy"), b"p",
@@ -325,6 +366,19 @@ def case_parse_finish_line():
                runs.parse_finish_line(out))
 
 
+def case_parse_native_line():
+    with world() as w:
+        ended = runs.execute(request(lane="opus-high@claude", harness="claude"), b"p",
+                             lambda run: runs.HandOff("lane-opus-high", "x"), w.root)
+        native = ended.text()
+        record("p7. the native line is not a finish line, and parses as its own",
+               runs.parse_finish_line(native) is None
+               and runs.parse_native_line(native) == {
+                   "lane": "opus-high@claude", "agent": "lane-opus-high",
+                   "prompt": runs.Run(ended.run).prompt_path},
+               native)
+
+
 def main():
     case_a_run_that_returns()
     case_work_that_raises_ends_the_run_blocked()
@@ -333,14 +387,10 @@ def main():
     case_a_ledger_that_cannot_be_written_never_stops_a_run_ending()
     case_a_usage_limit_refusal_holds_the_lanes_meter()
     case_a_runs_root_that_cannot_be_made_starts_nothing()
+    case_a_hand_off_ends_the_run_at_once_as_native()
     case_parse_finish_line()
+    case_parse_native_line()
 
-    native = runs.native_line("opus-high@claude", "lane-opus-high", "/runs/p/prompt.md")
-    record("p7. the native line is not a finish line, and parses as its own",
-           runs.parse_finish_line(native) is None
-           and runs.parse_native_line(native + "\ndelegate: spawn: x") == {
-               "lane": "opus-high@claude", "agent": "lane-opus-high", "prompt": "/runs/p/prompt.md"},
-           native)
     os.environ["DELEGATE_RUNS_DIR"] = "/tmp/delegate-runs-test"
     record("p8. the runs root is the argument, else $DELEGATE_RUNS_DIR",
            runs.root("/x") == "/x" and runs.root() == "/tmp/delegate-runs-test")
