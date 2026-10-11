@@ -63,15 +63,20 @@ replaces partial use of invalid documents.
 - `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
   edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
   `scripts/tier_lines.py`: bulk Tier lines for the wizard.
-- `scripts/lane_evidence.py` (once `published_names.py`): which benchmark rows belong to which
+- `scripts/lane_evidence.py`: which benchmark rows belong to which
   Lane. `LaneEvidence(lanes_doc, rows)` attributes every row once, by the Model its printed name
   names (the lane field `published_as` names the Model, so it reaches every Harness that runs it)
   and the effort it states; a row's printed names are its `model`, then its `slug` (an Epoch
   row). `lane_rows`, `model_rows`, `available`, `unmatched`, `records` (one per row: its identity,
   `model_key`, the Model's display name `lane_model`, `model_lanes` and exactly the `lanes` whose
   `lane_rows` hold it) and `identify(name)` are lookups. The carry pre-screen, the Tier proposal,
-  the wizard, the report, model inspection and the benchmark page read one. It imports only
-  `harnesses`.
+  the wizard, the report, model inspection and the benchmark page read one. `model_identity(lane)`
+  is the key "one Model" means across Harnesses (kiro's `claude-opus-5.5`, agy's
+  `claude-opus-5-5-high` and Claude Code's `claude-opus-5-5` are one), which the pages group Lanes
+  by. `published_as_conflict(lanes)` is `catalog.validate_lanes`'s check that one published name
+  denotes one Model: one name may sit on the Lanes of one Model on several Harnesses, never on two
+  Models, and no entry may be another Model's name. It is the one place a printed name is
+  normalized for Lane attribution, and it imports only `harnesses`.
 - `catalog.single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one
   Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines,
   neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the
@@ -358,8 +363,9 @@ down one Tier; Tier 1 requires Carry to switch off.
   compares no efforts to attribute a row itself. The harness decides what one Model is, never the
   spelling (ticket 30): agy names each effort as its own slug, and the adapter's `family`
   (`harnesses/agy.py`, reached through `harnesses.family`) is the one implementation, which
-  `lane_evidence` names a Model with, `carry.model_of` groups the pages' rows with, and the agy
-  adapter's `group` groups its model listing with.
+  `lane_evidence.model_identity` names a Model with (and `bench.group_lanes`, `bench_order_key`
+  and `bench_page._lane_list` group the pages' Lanes by), and the agy adapter's `group` groups its
+  model listing with.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`,
   `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.

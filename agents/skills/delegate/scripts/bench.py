@@ -704,7 +704,7 @@ def group_lanes(names, lanes_doc):
     lanes = (lanes_doc or {}).get("lanes") or {}
     groups = {}
     for name in names:
-        groups.setdefault(carry.model_of(lanes.get(name)), []).append(name)
+        groups.setdefault(lane_evidence.model_identity(lanes.get(name)), []).append(name)
     out = []
     for members in groups.values():
         out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
@@ -719,8 +719,8 @@ def bench_order_key(bench, name, lanes_doc=None):
     mean = rec.get("mean") if rec else None
     if mean is None and rec:
         lanes = (lanes_doc or {}).get("lanes") or {}
-        group = carry.model_of(lanes.get(name))
-        has_epoch = any(carry.model_of(lane) == group
+        group = lane_evidence.model_identity(lanes.get(name))
+        has_epoch = any(lane_evidence.model_identity(lane) == group
                         and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
                         for other, lane in lanes.items())
         if not has_epoch:

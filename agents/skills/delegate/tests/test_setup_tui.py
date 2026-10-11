@@ -1697,7 +1697,7 @@ def groups_of(names, doc):
     """The model groups in the order they appear, each with its efforts."""
     out = []
     for name in names:
-        group = carry.model_of(doc["lanes"][name])
+        group = lane_evidence.model_identity(doc["lanes"][name])
         if not out or out[-1][0] != group:
             out.append((group, []))
         out[-1][1].append(doc["lanes"][name]["effort"])
@@ -1721,14 +1721,32 @@ try:
            grouped == ["fable-max@claude", "fable-low@claude", "sol-high@codex", "sol-low@codex",
                        "flash-high@agy", "flash-low@agy"]
            # an agy slug family is one model
-           and carry.model_of(doc["lanes"]["flash-low@agy"]) == carry.model_of(doc["lanes"]["flash-high@agy"])
-           and carry.model_of(doc["lanes"]["sol-low@codex"]) != carry.model_of(doc["lanes"]["luna-low@codex"])
+           and (lane_evidence.model_identity(doc["lanes"]["flash-low@agy"])
+                == lane_evidence.model_identity(doc["lanes"]["flash-high@agy"]))
+           and (lane_evidence.model_identity(doc["lanes"]["sol-low@codex"])
+                != lane_evidence.model_identity(doc["lanes"]["luna-low@codex"]))
            and [setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")]
            == sorted(setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")),
            repr(grouped))
 except Exception as e:
     record("43 group_lanes places a group where its first lane sat and runs its efforts most to least",
            False, repr(e))
+
+
+try:
+    doc = copy.deepcopy(LANES)
+    fable = doc["lanes"]["fable-xhigh@claude"]
+    doc["lanes"]["opus-high@claude"] = dict(fable, model="claude-opus-5-5", effort="high")
+    doc["lanes"]["opus-low@kiro"] = dict(fable, harness="kiro", model="claude-opus-5.5", effort="low")
+    doc["lanes"]["opus-medium@agy"] = dict(doc["lanes"]["flash-high@agy"], model="claude-opus-5-5-medium",
+                                           effort="medium")
+    names = ["opus-high@claude", "sol-high@codex", "opus-low@kiro", "opus-medium@agy"]
+    grouped = setup_tui.group_lanes(names, doc)
+    record("43b kiro's Opus groups with Claude Code's and agy's Opus, as one Model",
+           grouped == ["opus-high@claude", "opus-medium@agy", "opus-low@kiro", "sol-high@codex"],
+           repr(grouped))
+except Exception as e:
+    record("43b kiro's Opus groups with Claude Code's and agy's Opus, as one Model", False, repr(e))
 
 
 try:
@@ -1743,7 +1761,7 @@ try:
     t4_groups = groups_of(t4, doc)
     # sol-high leads the benchmark order and fable's measured lane is fable-max,
     # so the sol group comes first and every group is whole, most effort first
-    sol, flash, fable = (carry.model_of(doc["lanes"][n])
+    sol, flash, fable = (lane_evidence.model_identity(doc["lanes"][n])
                          for n in ("sol-high@codex", "flash-high@agy", "fable-max@claude"))
     record("44 the carry page and the tier pages group by model, efforts most to least",
            carry_rows[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"]

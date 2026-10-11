@@ -210,21 +210,6 @@ def validate_lanes(doc, source="lanes.json"):
         "price", "tier", "basis"
     )
     price_keys = ("in", "cache_read", "cache_write", "out")
-    claimed = {}
-    # Which lane models a published name could denote on its own, so that a
-    # published_as entry cannot be pointed at somebody else's model.
-    owners = {}
-    for lane in lanes.values():
-        if not isinstance(lane, dict):
-            continue
-        model = lane.get("model")
-        if not isinstance(model, str) or not model.strip():
-            continue
-        normalized = lane_evidence.normalize_name(model)
-        base, _effort = lane_evidence.strip_effort_suffix(normalized)
-        for key in {normalized, base}:
-            owners.setdefault(key, set()).add(model)
-
     for lane_name, lane in lanes.items():
         if not isinstance(lane, dict):
             raise CatalogError(f"{source}: lane '{lane_name}': must be an object")
@@ -342,25 +327,12 @@ def validate_lanes(doc, source="lanes.json"):
                         f"{source}: lane '{lane_name}': published_as entries must be "
                         f"non-empty strings, got {name!r}"
                     )
-                key = lane_evidence.normalize_name(name)
-                foreign = sorted(m for m in owners.get(key, ()) if m != lane["model"])
-                if foreign:
-                    raise CatalogError(
-                        f"{source}: lane '{lane_name}': published_as {name!r} already names "
-                        f"model '{foreign[0]}', which another lane runs; that would read "
-                        f"'{foreign[0]}' rows as '{lane['model']}'. Drop the entry, or put it "
-                        f"on the lane that runs '{foreign[0]}'"
-                    )
-                first = claimed.get(key)
-                if first is not None and first[2] != lane["model"]:
-                    raise CatalogError(
-                        f"{source}: lane '{lane_name}': published_as {name!r} names the same "
-                        f"model as {first[0]!r} on lane '{first[1]}'; one published name "
-                        f"denotes one model, but this would make it both '{first[2]}' and "
-                        f"'{lane['model']}'"
-                    )
-                if first is None:
-                    claimed[key] = (name, lane_name, lane["model"])
+
+    # One published name denotes one Model, on every Harness that runs it.
+    conflict = lane_evidence.published_as_conflict(lanes)
+    if conflict is not None:
+        lane_name, message = conflict
+        raise CatalogError(f"{source}: lane '{lane_name}': {message}")
 
     return doc
 

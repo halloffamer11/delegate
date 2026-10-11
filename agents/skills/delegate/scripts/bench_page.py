@@ -24,7 +24,7 @@ from collections import defaultdict
 
 import bench
 import carry
-from lane_evidence import LaneEvidence
+from lane_evidence import LaneEvidence, model_identity
 from bench import (
     AA_COST_COLUMN,
     carry_reason,
@@ -466,7 +466,7 @@ def _lane_list(lanes_doc, bench, items, proposals):
         decision = (proposals or {}).get(name) or {}
         out.append({"name": name, "harness": lane.get("harness"), "meter": lane.get("meter"),
                     "model": lane.get("model"),
-                    "group": carry.model_of(lane), "effort": lane.get("effort"),
+                    "group": model_identity(lane), "effort": lane.get("effort"),
                     "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
                     "carried": _carried(lane), "off": off.get(name), "rows": name in drawn,
                     "kind": decision.get("kind"), "source": decision.get("source"),

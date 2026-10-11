@@ -40,14 +40,6 @@ def decision(lane, enabled, kind, source=None, competitor=None):
     }
 
 
-def model_of(lane):
-    """The family key a Lane's model groups under, asked of its harness: an agy
-    slug family (`gemini-3.8-flash-high`, `-low`) is one model at several
-    efforts; on any other harness the model is its own."""
-    lane = lane or {}
-    return harnesses.family(lane.get("harness"), lane.get("model") or "")[0]
-
-
 def beats(other, row, cost="cost_usd"):
     """At least the score for no more money, and strictly better in one of the
     two. An unknown cost never beats and is never beaten. `cost` names the cost

@@ -18,7 +18,11 @@ The catalog is machine-local: each machine keeps its own, never in the repo.
   model, effort, meter, meter weight, timeout, price, tier and basis, and may
   have `enabled`, `order` and `published_as` (the names benchmark sources
   print for its model, such as `["Fable 5.1"]` on a `claude-fable-5-1` lane,
-  needed only where case and separators do not bridge the two).
+  needed only where case and separators do not bridge the two). An entry
+  names the Model, so it reaches every Harness that runs that Model: one entry
+  on Claude Code's `claude-opus-5-5` lane also names agy's
+  `claude-opus-5-5-high`. The same name may sit on several lanes of one Model;
+  `check` refuses one that would name two Models (`lane_evidence`).
 - `~/.config/delegate/routing.json`: `classes` (a floor and a ceiling per
   class), `margin`, `gate`, optional `meters` and `overflow` (booleans, on by
   default), optional `quota_unit` (`pace`, the default, or `plan_dollars`; see

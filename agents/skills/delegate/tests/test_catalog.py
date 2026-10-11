@@ -22,7 +22,6 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog_cli.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
-import lane_evidence
 import class_guides
 import catalog_edit
 import catalog_cli
@@ -702,13 +701,21 @@ record(
     check_catalog_error(catalog.validate_lanes, own) is None,
 )
 
+# 7.10 A published name names the Model, so the Lanes of one Model on two
+#      Harnesses may share it: Claude Code runs Opus as `claude-opus-5-5`, agy as
+#      `claude-opus-5-5-high`, and both are the one Model.
+opus_two = copy.deepcopy(lanes_sample)
+opus_two["lanes"]["opus-high@claude"] = dict(
+    opus_two["lanes"]["fable-xhigh@claude"], model="claude-opus-5-5", effort="high",
+    published_as=["Opus 5.5 Thinking"])
+opus_two["lanes"]["opus-high@agy"] = dict(
+    opus_two["lanes"]["flash-high@agy"], model="claude-opus-5-5-high", effort="high",
+    published_as=["Opus 5.5 Thinking"])
+msg = check_catalog_error(catalog.validate_lanes, opus_two)
 record(
-    "7.8 every effort strips as a suffix, longest first",
-    [lane_evidence.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]
-    == [("m", e) for e in harnesses.EFFORTS]
-    and lane_evidence.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
-    and lane_evidence.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
-    str([lane_evidence.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]),
+    "7.10 one published name on Lanes of one Model on two harnesses is accepted",
+    msg is None,
+    msg,
 )
 
 # 7.5, 7.6, the 7.7 resolve case, the 7.8 published-suffix case and 7.9 moved to
@@ -2904,16 +2911,6 @@ with tempfile.TemporaryDirectory() as td:
     msg = check_catalog_error(catalog.load_catalog, cwd=cwd, config_dir=config)
     record("19.9 a project Class with no ceiling is rejected, by name",
            bool(msg and "triage" in msg and "ceiling" in msg), msg)
-
-# One effort list: the suffixes are EFFORTS longest first, not a copy of it.
-record(
-    "20.1 the effort suffixes are EFFORTS, longest first",
-    sorted(e for _, e in lane_evidence.MODEL_EFFORT_SUFFIXES) == sorted(harnesses.EFFORTS)
-    and all(suffix == f"-{e}" for suffix, e in lane_evidence.MODEL_EFFORT_SUFFIXES)
-    and [len(e) for _, e in lane_evidence.MODEL_EFFORT_SUFFIXES]
-    == sorted((len(e) for e in harnesses.EFFORTS), reverse=True),
-    str(lane_evidence.MODEL_EFFORT_SUFFIXES),
-)
 
 # agy carries the effort in the slug, so a slug agy lists at xhigh is a lane at
 # xhigh, though xhigh is not among the efforts agy was known to offer; an xhigh

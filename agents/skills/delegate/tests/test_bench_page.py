@@ -40,6 +40,7 @@ import catalog
 import harnesses
 import setup_tui
 import tier_lines  # noqa: E402
+import lane_evidence  # noqa: E402
 from lane_evidence import LaneEvidence  # noqa: E402
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
@@ -979,7 +980,8 @@ try:
             lane["effort"] = effort
             doc["lanes"][f"fable-{effort}@claude"] = lane
         doc["lanes"]["flash-low@agy"] = dict(LANES["lanes"]["flash-high@agy"], model="gemini-3.8-flash-low", effort="low")
-        lanes = [{"name": n, "group": carry.model_of(doc["lanes"][n]), "effort": doc["lanes"][n]["effort"]}
+        lanes = [{"name": n, "group": lane_evidence.model_identity(doc["lanes"][n]),
+                  "effort": doc["lanes"][n]["effort"]}
                  for n in sorted(doc["lanes"])]
         ordered = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy", "flash-low@agy"]
         tiers = {"sol-high@codex": 4, "fable-low@claude": 3, "fable-max@claude": 1, "flash-low@agy": 1}

@@ -11,9 +11,9 @@ COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
 SUPERSEDED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
 # `gemini-3.8-flash-high` -> ("gemini-3.8-flash", "high"). Every effort word
-# delegate knows, longest first as `lane_evidence.strip_effort_suffix` reads them, so
-# a `-xhigh` or `-max` slug joins its family instead of standing as a model of
-# its own.
+# delegate knows, longest first, so a `-xhigh` or `-max` slug joins its family
+# instead of standing as a model of its own. `lane_evidence.model_identity`
+# names a Lane's Model through `family`.
 _EFFORT_WORDS = "|".join(EFFORTS_LONGEST_FIRST)
 _SUFFIX = re.compile(rf"^(.+)-({_EFFORT_WORDS})$")
 # `Gemini 3.8 Flash (High)` -> `Gemini 3.8 Flash`

@@ -16,7 +16,8 @@ catalog slug here would be originating an identifier out of local knowledge the
 packet cannot vouch for, which is the same objection as originating a number, so
 the reconciliation happens where that knowledge lives: `lane_evidence`'s
 `LaneEvidence` and the lane field `published_as`, read by whoever consumes the
-rows (ticket 16).
+rows (ticket 16). A `published_as` entry names the Model, so it reaches every
+Harness that runs that Model.
 
 Stage 3 catches invented distinctive numbers and cannot vouch for small
 integers, so a human still reads accepted.json. A badge that sits in different

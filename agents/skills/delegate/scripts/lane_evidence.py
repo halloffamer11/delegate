@@ -2,11 +2,11 @@
 """lane_evidence.py — which benchmark rows belong to which Lane.
 
 The catalog keys on slugs; a leaderboard prints a slug or a display name. This
-is the one reconciliation of the two, used by `catalog.validate_lanes` (a
-`published_as` entry may not name another lane's model) and by every
-benchmark reader through `LaneEvidence`: carry, the Tier proposal, the wizard,
-the report, model inspection and the benchmark page. Split out of catalog.py
-(ticket 26) as `published_names`. It imports only `harnesses`, which decides
+is the one reconciliation of the two, used by `catalog.validate_lanes`
+(`published_as_conflict`: one published name denotes one Model), by the pages
+that group Lanes by Model (`model_identity`) and by every benchmark reader
+through `LaneEvidence`: carry, the Tier proposal, the wizard, the report, model
+inspection and the benchmark page. It imports only `harnesses`, which decides
 what one Model is and which efforts it runs, never the spelling.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import re
 import sys
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import harnesses  # noqa: E402
@@ -23,43 +23,17 @@ import harnesses  # noqa: E402
 # harness accepts (`gpt-5.6-luna`), some a display name (`GPT-6 Astra`,
 # `Fable 5.1`). The catalog keys on slugs, so a consumer of published rows has
 # to reconcile the two. That mapping is local knowledge — which published name
-# denotes which of our lane models — so it lives here, beside the lane, where a
-# human can read and correct it: the optional lane field `published_as`.
-NORM_SEP = re.compile(r"[-_. ]+")
-# Longest first, so `-xhigh` is not read as `-high`. Every effort in EFFORTS
-# belongs here, so the list is made from it: a source names a row
-# `gpt-6-astra-max` as readily as `gpt-6-astra-high`, and while `-max` and
-# `-ultra` were missing such a row matched no lane model at all and the figure
-# was dropped (ticket 17).
-MODEL_EFFORT_SUFFIXES = tuple((f"-{effort}", effort) for effort in harnesses.EFFORTS_LONGEST_FIRST)
+# denotes which Model — so it lives beside the lane, where a human can read and
+# correct it: the optional lane field `published_as`. An entry names the Model,
+# so it reaches every Harness that runs that Model.
+_NORM_SEP = re.compile(r"[-_. ]+")
 
 
-def normalize_name(value):
+def _normalize_name(value):
     """Lower-case, with the -_. and space separators collapsed to one hyphen."""
     if value is None:
         return ""
-    return NORM_SEP.sub("-", str(value).strip().lower()).strip("-")
-
-
-def strip_effort_suffix(model):
-    """Splits a trailing effort off a model slug: gemini-3.8-flash-high -> (base, 'high')."""
-    for suffix, effort in MODEL_EFFORT_SUFFIXES:
-        if model.endswith(suffix):
-            return model[: -len(suffix)], effort
-    return model, None
-
-
-def published_as_map(lanes_doc):
-    """{normalized published name: lane model} from every lane's published_as."""
-    out = {}
-    for lane in (lanes_doc.get("lanes") or {}).values():
-        if not isinstance(lane, dict):
-            continue
-        for name in lane.get("published_as") or []:
-            key = normalize_name(name)
-            if key:
-                out[key] = lane.get("model")
-    return out
+    return _NORM_SEP.sub("-", str(value).strip().lower()).strip("-")
 
 
 # A source that did not state an effort has not said which Lane it measured.
@@ -76,13 +50,78 @@ def _stated_effort(row):
     return None if effort in UNSTATED_EFFORTS else str(effort)
 
 
-def _model_identity(lane):
-    """What "one Model" means across harnesses: the harness's family base,
-    normalized, so agy's `claude-opus-5-5-high` and Claude Code's
-    `claude-opus-5-5` are one Model, and a codex slug ending in an effort word
-    is a Model of its own."""
+def model_identity(lane: Optional[dict]) -> str:
+    """The key "one Model" means across harnesses: the harness's family base,
+    normalized, so kiro's `claude-opus-5.5`, agy's `claude-opus-5-5-high` and
+    Claude Code's `claude-opus-5-5` are one Model, and a codex slug ending in
+    an effort word is a Model of its own. "" for a Lane with no model."""
     lane = lane or {}
-    return normalize_name(harnesses.family(lane.get("harness"), lane.get("model") or "")[0])
+    return _normalize_name(harnesses.family(lane.get("harness"), lane.get("model") or "")[0])
+
+
+def _model_lanes(lanes):
+    """The Lanes of a `{name: lane}` mapping that carry a model string; a Lane
+    with none names no Model and owns nothing."""
+    return {name: lane for name, lane in (lanes or {}).items()
+            if isinstance(lane, dict) and isinstance(lane.get("model"), str)
+            and lane["model"].strip()}
+
+
+def _own_names(lane):
+    """The normalized names a Lane's Model answers to with no `published_as`
+    entry: its Model identity and the Lane's own model string."""
+    return [key for key in (model_identity(lane), _normalize_name(lane["model"])) if key]
+
+
+def _published_as(lane):
+    """A Lane's `published_as` entries that are strings, as written."""
+    names = lane.get("published_as")
+    if not isinstance(names, (list, tuple)):
+        return []
+    return [entry for entry in names if isinstance(entry, str)]
+
+
+def published_as_conflict(lanes: dict) -> Optional[Tuple[str, str]]:
+    """(lane name, message) for the first `published_as` entry that would make
+    one name denote two Models, else None. `lanes` is a lanes document's
+    `{name: lane}` mapping.
+
+    An entry may not be another Model's identity or model string, and one name
+    may not sit on Lanes of two Models. One name on the Lanes of one Model is
+    allowed, whichever Harnesses run them: `Opus 5.5 Thinking` on Claude Code's
+    `claude-opus-5-5` and on agy's `claude-opus-5-5-high` names one Model. Each
+    message names both model strings. Whether `published_as` is a non-empty
+    list of non-empty strings is the catalog's check, not this one.
+    """
+    lanes = _model_lanes(lanes)
+    owners = {}
+    for lane in lanes.values():
+        for key in _own_names(lane):
+            owners.setdefault(key, {}).setdefault(model_identity(lane), set()).add(lane["model"])
+    claimed = {}
+    for lane_name, lane in lanes.items():
+        model = model_identity(lane)
+        for name in _published_as(lane):
+            key = _normalize_name(name)
+            if not key:
+                continue
+            # the model string spelled as the entry first, so the message
+            # names the slug the entry collides with
+            foreign = sorted((spelling for other, spellings in owners.get(key, {}).items()
+                              if other != model for spelling in spellings),
+                             key=lambda spelling: (_normalize_name(spelling) != key, spelling))
+            if foreign:
+                return lane_name, (
+                    f"published_as {name!r} already names model '{foreign[0]}', which another "
+                    f"lane runs; that would read '{foreign[0]}' rows as '{lane['model']}'. Drop "
+                    f"the entry, or put it on the lane that runs '{foreign[0]}'")
+            first = claimed.setdefault(key, (name, lane_name, model, lane["model"]))
+            if first[2] != model:
+                return lane_name, (
+                    f"published_as {name!r} names the same model as {first[0]!r} on lane "
+                    f"'{first[1]}'; one published name denotes one model, but this would make "
+                    f"it both '{first[3]}' and '{lane['model']}'")
+    return None
 
 
 def _printed_names(row):
@@ -103,22 +142,21 @@ class LaneEvidence:
 
     def __init__(self, lanes_doc: dict, rows: Optional[Sequence[dict]]) -> None:
         self._available = rows is not None
-        lanes = {name: lane for name, lane in ((lanes_doc or {}).get("lanes") or {}).items()
-                 if isinstance(lane, dict) and isinstance(lane.get("model"), str)
-                 and lane["model"].strip()}
-        model_of = {name: (lane.get("harness"), _model_identity(lane)) for name, lane in lanes.items()}
+        lanes = _model_lanes((lanes_doc or {}).get("lanes"))
+        harness_model = {name: (lane.get("harness"), model_identity(lane))
+                         for name, lane in lanes.items()}
         # Each Model's display name: a Lane's model string that is the Model's
         # whole name (`claude-opus-5-5`, the exact spelling first), else the
         # harness family base (`gemini-3.8-flash`). It never depends on a row's
         # effort, so one Model draws as one sweep.
         self._display, self._spellings = {}, {}
         for name, lane in lanes.items():
-            model = model_of[name][1]
+            model = harness_model[name][1]
             self._spellings.setdefault(model, set()).add(lane["model"])
         for model in self._spellings:
-            members = [lanes[n] for n in lanes if model_of[n][1] == model]
+            members = [lanes[n] for n in lanes if harness_model[n][1] == model]
             whole = ([m["model"] for m in members if m["model"] == model]
-                     + [m["model"] for m in members if normalize_name(m["model"]) == model])
+                     + [m["model"] for m in members if _normalize_name(m["model"]) == model])
             self._display[model] = whole[0] if whole else harnesses.family(
                 members[0].get("harness"), members[0]["model"])[0]
         # A printed name names a Model when, normalized, it is a `published_as`
@@ -126,10 +164,9 @@ class LaneEvidence:
         # its model string. A name two Models answer to names neither.
         self._names = {}
         for name, lane in lanes.items():
-            spellings = [model_of[name][1], lane["model"]] + [
-                entry for entry in lane.get("published_as") or () if isinstance(entry, str)]
-            for key in filter(None, map(normalize_name, spellings)):
-                self._names.setdefault(key, set()).add(model_of[name][1])
+            published = filter(None, map(_normalize_name, _published_as(lane)))
+            for key in _own_names(lane) + list(published):
+                self._names.setdefault(key, set()).add(harness_model[name][1])
         claimed, identified, self._unmatched = {}, [], []
         for row in rows or ():
             if not isinstance(row, dict):
@@ -142,14 +179,15 @@ class LaneEvidence:
                 self._unmatched.append(ident["published"])
         self._model_rows, self._lane_rows, shared = {}, {}, {}
         for name, lane in lanes.items():
-            if model_of[name] not in shared:
-                harness, model = model_of[name]
-                slugs = [lanes[n]["model"] for n in lanes if model_of[n] == model_of[name]]
-                shared[model_of[name]] = [row for row in claimed.get(model, ())
-                                          if _runs(harness, slugs, _stated_effort(row))]
-            self._model_rows[name] = shared[model_of[name]]
+            if harness_model[name] not in shared:
+                harness, model = harness_model[name]
+                slugs = [lanes[n]["model"] for n in lanes
+                         if harness_model[n] == harness_model[name]]
+                shared[harness_model[name]] = [row for row in claimed.get(model, ())
+                                               if _runs(harness, slugs, _stated_effort(row))]
+            self._model_rows[name] = shared[harness_model[name]]
             effort = _stated_effort(lane)
-            self._lane_rows[name] = [row for row in shared[model_of[name]]
+            self._lane_rows[name] = [row for row in shared[harness_model[name]]
                                      if effort is not None and _stated_effort(row) == effort]
         model_lanes, lane_lanes = {}, {}
         for name in sorted(lanes):
@@ -218,7 +256,7 @@ class LaneEvidence:
         the first that names two says why, and else the first name at all."""
         first = conflict = None
         for name in printed:
-            key = normalize_name(name) if isinstance(name, str) else ""
+            key = _normalize_name(name) if isinstance(name, str) else ""
             if not key:
                 continue
             found = self._names.get(key) or set()

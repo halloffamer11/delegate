@@ -12,6 +12,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
 
+import lane_evidence  # noqa: E402
 from lane_evidence import LaneEvidence  # noqa: E402
 
 fails = 0
@@ -497,5 +498,80 @@ try:
     )
 except Exception as e:
     record("a record's lanes are exactly the Lanes whose lane_rows hold its row", False, repr(e))
+
+
+# --- A3: one Model across Harnesses, and one published name per Model --------
+try:
+    opus = {"lanes": {
+        "opus-high@kiro": lane("kiro", "claude-opus-5.5", "high", meter="kiro"),
+        "opus-high@claude": lane("claude", "claude-opus-5-5", "high", meter="claude-general"),
+        "opus-high@agy": lane("agy", "claude-opus-5-5-high", "high", meter="agy-claude-gpt"),
+        "edge-low@codex": lane("codex", "gpt-6-edge-low", "low", meter="codex"),
+        "edge-high@codex": lane("codex", "gpt-6-edge-high", "high", meter="codex"),
+    }}
+    keys = {name: lane_evidence.model_identity(entry) for name, entry in opus["lanes"].items()}
+    opus_rows = [row("Claude Opus 5.5", "high", "b1", 0.7, 2.0)]
+    ev = LaneEvidence(opus, opus_rows)
+    record(
+        "kiro's claude-opus-5.5, Claude Code's claude-opus-5-5 and agy's claude-opus-5-5-high "
+        "are one Model; codex gpt-6-edge-low and gpt-6-edge-high are two",
+        keys["opus-high@kiro"] == keys["opus-high@claude"] == keys["opus-high@agy"]
+        and keys["edge-low@codex"] != keys["edge-high@codex"]
+        and keys["edge-low@codex"] != keys["opus-high@claude"]
+        # the key the evidence groups a row by is the same Model identity
+        and ev.records()[0]["model_key"] == keys["opus-high@claude"]
+        and ev.records()[0]["lanes"] == ["opus-high@agy", "opus-high@claude", "opus-high@kiro"]
+        # a Lane with no model string has an identity that names no Model
+        and lane_evidence.model_identity({"harness": "codex"}) == ""
+        and lane_evidence.model_identity(None) == "",
+        repr(keys),
+    )
+except Exception as e:
+    record("kiro's claude-opus-5.5, Claude Code's claude-opus-5-5 and agy's claude-opus-5-5-high "
+           "are one Model; codex gpt-6-edge-low and gpt-6-edge-high are two", False, repr(e))
+
+try:
+    def opus_named(published=None):
+        """Claude Code's and agy's Opus, codex's Sol and Luna, with `published_as` per Lane."""
+        lanes = {
+            "opus-high@claude": lane("claude", "claude-opus-5-5", "high", meter="claude-general"),
+            "opus-high@agy": lane("agy", "claude-opus-5-5-high", "high", meter="agy-claude-gpt"),
+            "sol-high@codex": lane("codex", "gpt-5.6-sol", "high", meter="codex"),
+            "luna-low@codex": lane("codex", "gpt-5.6-luna", "low", meter="codex"),
+        }
+        for name, names in (published or {}).items():
+            lanes[name]["published_as"] = names
+        return lanes
+
+    shared = opus_named({"opus-high@claude": ["Opus 5.5 Thinking"],
+                         "opus-high@agy": ["opus 5.5 thinking"], "sol-high@codex": ["GPT-5.6 Sol"]})
+    own = opus_named({"opus-high@agy": ["Claude Opus 5.5", "claude-opus-5-5-high", "claude-opus-5-5"]})
+    across = opus_named({"opus-high@claude": ["Opus 5.5 Thinking"],
+                         "sol-high@codex": ["Opus 5.5 Thinking"]})
+    slug = opus_named({"sol-high@codex": ["gpt-5.6-luna"]})
+    family = opus_named({"sol-high@codex": ["Claude Opus 5.5"]})
+    got = {tag: lane_evidence.published_as_conflict(doc) for tag, doc in (
+        ("shared", shared), ("own", own), ("across", across), ("slug", slug), ("family", family))}
+    across_lane, across_msg = got["across"] or (None, "")
+    slug_lane, slug_msg = got["slug"] or (None, "")
+    family_lane, family_msg = got["family"] or (None, "")
+    record(
+        "published_as_conflict allows one name on one Model's Lanes across harnesses and "
+        "refuses it across Models",
+        got["shared"] is None and got["own"] is None
+        and lane_evidence.published_as_conflict(opus_named()) is None
+        # one name on Lanes of two Models: the later Lane, naming both model strings
+        and across_lane == "sol-high@codex"
+        and "names the same model" in across_msg
+        and "claude-opus-5-5" in across_msg and "gpt-5.6-sol" in across_msg
+        # an entry that is another Model's slug or the name its Model answers to
+        and slug_lane == "sol-high@codex" and "already names model 'gpt-5.6-luna'" in slug_msg
+        and "gpt-5.6-sol" in slug_msg
+        and family_lane == "sol-high@codex" and "already names model 'claude-opus-5-5'" in family_msg,
+        repr(got),
+    )
+except Exception as e:
+    record("published_as_conflict allows one name on one Model's Lanes across harnesses and "
+           "refuses it across Models", False, repr(e))
 
 sys.exit(1 if fails else 0)
