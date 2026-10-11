@@ -20,20 +20,23 @@ Codex, agy, and grok probes are status/RPC commands. The Claude probe runs
   usage.py            serve cache if younger than TTL, else re-probe
   usage.py --refresh  force re-probe
   usage.py --max-age-min N   override TTL (default 10)
+  usage.py --cache PATH      the document to read and write (default cache_path())
   usage.py --pretty   human table instead of JSON
 
 Cache: cache_path() — the explicit path, else $DELEGATE_CACHE, else
 $CONSULT_CACHE, else ~/.cache/delegate/usage.json. Absence of a CLI, auth
 failure, or a probe timeout marks that lane "unknown" — never a crash. Exit 0
-always.
+always. A probe writes nothing to the Ledger, which records Runs only.
 
-The Meters module (ticket 16): `read(routing, CACHED, path=...)` returns a
-Meter snapshot, and `Snapshot.readout(meter, cat)` answers one Meter's
-Remaining, Pace, Weekly figure, Gate and plan price for a given catalog.
-Validation, the legacy rows, the derived figures and the usage-limit hold
-(`hold`, `release`, in `limits.json` beside the document read) live behind
-them. load_cached() and observations() stay over the same rows until
-ticket 18; probe(refresh=...) is the refresh/TTL path.
+The Meters module (tickets 16 and 18): `read(routing, freshness, path=...)`
+returns a Meter snapshot, and `Snapshot.readout(meter, cat)` answers one
+Meter's Remaining, Pace, Weekly figure, Gate and plan price for a given
+catalog. Freshness is CACHED (never probes), FRESH (probes when the reading
+is older than ten minutes) or FORCED (probes now); a probe runs this file as
+a child process with `--refresh --cache PATH` under one 180 s bound, and
+with routing.meters off neither FRESH nor FORCED probes. Validation, the
+legacy rows, the derived figures and the usage-limit hold (`hold`,
+`release`, in `limits.json` beside the document read) live behind them.
 """
 from __future__ import annotations
 
@@ -46,15 +49,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # owns the rows they build, the cache and the combined figures.
 import harnesses  # noqa: E402
 import catalog  # noqa: E402
-try:
-    from events import append, meter_event
-except ImportError:
-    from .events import append, meter_event
 
 CACHED = "cached"     # the document as it is; never probes
-_FRESHNESS = (CACHED,)
+FRESH = "fresh"       # probe when the reading is older than max_age_min (default 10) or absent
+FORCED = "forced"     # probe now
+_FRESHNESS = (CACHED, FRESH, FORCED)
 
-TTL_MIN_DEFAULT = 10
+_MAX_AGE_MIN = 10     # FRESH's age, in minutes
+_PROBE_BOUND = 180    # seconds: the one bound around the probe child (decision B.5)
 _WEEK_DAYS = 7
 _DAYS_PER_MONTH = 30.4375
 WEEK = _WEEK_DAYS * 86400   # assumed weekly-cycle length for pace
@@ -273,7 +275,8 @@ def _fill_document(document, document_path=None):
     """Return a copy whose observations carry their combined figures, and a
     Meter its harness refused for a usage limit reads empty. Does not write.
 
-    The legacy readers' overlay (load_cached, probe, acquire) until ticket 18.
+    The overlay of the document `usage.py` prints (`delegate status --json`);
+    every other reader reads a Snapshot.
     """
     if not isinstance(document, dict):
         return document
@@ -328,51 +331,6 @@ def _parse(document):
             return None
         rows[name] = _upgraded(observation)
     return (None if taken_at is None else float(taken_at)), rows
-
-
-def observations(document):
-    """Return validated observations by Meter, or None for a malformed document.
-
-    The legacy readers' view (rank, report) until ticket 18: the rows `_parse`
-    accepts, with the combined figures a cache never wrote derived from the
-    Windows (`_filled`). This boundary never probes a vendor.
-    """
-    parsed = _parse(document)
-    if parsed is None:
-        return None
-    return {name: _filled(observation) for name, observation in parsed[1].items()}
-
-
-def eligible(observation, gate):
-    """Unknown Remaining never vetoes; Remaining equal to Gate is eligible."""
-    if not observation or not isinstance(observation, dict):
-        return True
-    r = observation.get("r")
-    if r is None:
-        return True
-    try:
-        return float(r) >= float(gate)
-    except (TypeError, ValueError, OverflowError):
-        return True
-
-
-def load_cached(cache_path=None):
-    """Read the usage cache without probing or emitting a meter event.
-
-    Missing or unreadable files become {}. A combined Remaining or Pace the
-    cache lacks is derived in the returned copy; the file on disk is not
-    rewritten. Holds come from beside the default cache, not beside an
-    explicit path; `read` is the reader that keeps them together.
-    """
-    path = cache_path or get_cache_path()
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            doc = json.load(f)
-        if not isinstance(doc, dict) or observations(doc) is None:
-            return {}
-        return _fill_document(doc)
-    except (OSError, ValueError):
-        return {}
 
 
 # ---------------------------------------------------------------- the Meter snapshot
@@ -520,22 +478,69 @@ def _read_document(path):
         return "malformed", "Meter cache is not valid JSON; every Meter is unknown.", None
 
 
+def _cached(path):
+    """The Snapshot of the document at `path` as it is, with the holds beside it."""
+    status, detail, document = _read_document(path)
+    if status != "ok":
+        return _unknown(path, status, detail)
+    return _snapshot(document, path=path, holds=_read_holds(path), now=time.time())
+
+
+def _fresh_enough(snap, max_age_min):
+    """True when `snap` is a reading no older than `max_age_min` minutes."""
+    if snap.status != "ok" or snap.taken_at is None:
+        return False
+    return 0 <= time.time() - snap.taken_at <= max_age_min * 60
+
+
+def _probe(path):
+    """Probe every harness in the usage.py child process, which writes the
+    document at `path`, under the one bound. True when the child finished.
+    It is a child process so that a stream read that blocks despite an
+    adapter's own timeout cannot hold the caller past the bound."""
+    command = [sys.executable, os.path.abspath(__file__), "--refresh", "--cache", path]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=_PROBE_BOUND)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def read(routing, freshness, *, path=None, max_age_min=None) -> Snapshot:
     """The Meter snapshot at `path` (cache_path()), with the holds beside it.
 
-    CACHED reads the document as it is and never probes or writes. Never
-    raises for I/O, JSON or validation: the Snapshot's `status` and `detail`
-    say why its Meters are unknown. It catches Exception only, so a Run's
-    termination passes through. An unknown freshness raises ValueError.
+    CACHED reads the document as it is and never probes or writes. FRESH
+    probes when the reading is older than `max_age_min` (default 10) minutes
+    or absent; FORCED probes now. Either probes only when `routing` has
+    metering on, or when `routing` is None (a person's own `delegate status
+    --refresh`); otherwise it reads as CACHED. A probe writes the document at
+    the read's own path and nothing to the Ledger. A probe that fails or
+    outlasts its 180 s bound gives the last reading when that is fresh
+    enough, and otherwise a Snapshot whose status is `stale`.
+
+    Never raises for I/O, JSON, validation or probe failure: the Snapshot's
+    `status` and `detail` say why its Meters are unknown. It catches
+    Exception only, so a Run's termination passes through. An unknown
+    freshness raises ValueError.
     """
     if freshness not in _FRESHNESS:
         raise ValueError(f"unknown freshness {freshness!r}; expected one of {', '.join(_FRESHNESS)}")
     p = cache_path(path)
     try:
-        status, detail, document = _read_document(p)
-        if status != "ok":
-            return _unknown(p, status, detail)
-        return _snapshot(document, path=p, holds=_read_holds(p), now=time.time())
+        if freshness == CACHED or (routing is not None and not catalog.meters_enabled(routing)):
+            return _cached(p)
+        age = _MAX_AGE_MIN if max_age_min is None else max_age_min
+        if freshness == FRESH:
+            last = _cached(p)
+            if _fresh_enough(last, age):
+                return last
+        if _probe(p):
+            return _cached(p)
+        last = _cached(p)
+        if _fresh_enough(last, age):
+            return last
+        return _unknown(p, "stale", f"Meter probe failed or outlasted {_PROBE_BOUND} s, and the last "
+                                    f"reading is older than {age:g} min; every Meter is unknown.")
     except Exception as exc:  # never BaseException: a Run's SIGTERM passes through
         return _unknown(p, "unreadable", f"Meter cache cannot be read; every Meter is unknown: {exc}")
 
@@ -550,8 +555,8 @@ def remaining(fraction):
     """A Remaining fraction held to [0, 1], or None.
 
     A vendor can print more than 100% used (an overage, or a rounding past the
-    cap), which reads as a negative fraction. One such row would fail
-    `observations` and take every Meter's figures, and so the Gate, with it;
+    cap), which reads as a negative fraction. One such row would fail the
+    document's validation and take every Meter's figures, and so the Gate, with it;
     an overspent Window has nothing left, so it reads 0.
     """
     if fraction is None or isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
@@ -588,81 +593,59 @@ def iso(s):
     except Exception: return None
 
 
-# ---------------------------------------------------------------- main
-def load_cache(max_age_min, cache_path=None):
-    p = cache_path or get_cache_path()
-    try:
-        with open(p) as f: d = json.load(f)
-        if (isinstance(d, dict) and "lanes" in d and observations(d) is not None
-                and _valid_meter_number(d.get("probed_at"))
-                and d.get("probed_at") is not None
-                and 0 <= time.time() - d["probed_at"] <= max_age_min * 60):
-            return d
-    except Exception: pass
-    return None
+# ---------------------------------------------------------------- main: the probe child
+def _young_document(path, max_age_min):
+    """The valid usage document at `path` when it is no older than
+    `max_age_min` minutes, else None."""
+    status, _detail, d = _read_document(path)
+    if status != "ok" or not isinstance(d, dict) or "lanes" not in d:
+        return None
+    parsed = _parse(d)
+    if parsed is None or parsed[0] is None:
+        return None
+    return d if 0 <= time.time() - parsed[0] <= max_age_min * 60 else None
+
 
 def write_cache(d, cache_path=None):
+    """Write the usage document at `cache_path` (cache_path()), whole or not
+    at all. Nothing goes to the Ledger: it records Runs only (decision C.2)."""
     p = cache_path or get_cache_path()
     parent = os.path.dirname(p)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(p, "w") as f:
+    tmp = f"{p}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
         json.dump(d, f, indent=1)
-    append(meter_event(d))
+    os.replace(tmp, p)
 
-def probe(refresh=False, max_age_min=None, cache_path=None):
-    """Return a usage document, probing vendors when the cache is missing or stale.
 
-    refresh=True always probes. A cache hit emits no meter event. Timeout and
-    per-harness failures stay inside each adapter's `meters` (unknown rows).
-    """
-    ttl = TTL_MIN_DEFAULT if max_age_min is None else max_age_min
-    d = None if refresh else load_cache(ttl, cache_path=cache_path)
-    if d is None:
-        lanes = []
-        for h in harnesses.REGISTRY:
-            lanes += h.meters()
-        now = time.time()
-        d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
-             "rollover_min": ROLLOVER_MIN, "lanes": lanes}
-        write_cache(d, cache_path=cache_path)
-        d = _fill_document(d)
-        d["from_cache"] = False
-    else:
-        d = _fill_document(d)
-        d["from_cache"] = True
+def _probe_document(path):
+    """Run every harness's probe and write the document at `path`. Timeouts
+    and per-harness failures stay inside each adapter's `meters` (unknown rows)."""
+    lanes = []
+    for h in harnesses.REGISTRY:
+        lanes += h.meters()
+    now = time.time()
+    d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+         "rollover_min": ROLLOVER_MIN, "lanes": lanes}
+    write_cache(d, cache_path=path)
     return d
 
-def acquire(refresh=False, max_age_min=None, timeout=180):
-    """Shared bounded acquisition for callers; cached-only viewers use load_cached.
 
-    Keep a process boundary around vendor probes: their stream reads may block
-    despite per-vendor timeouts. The CLI process owns probe/cache/event writes.
-    A timeout or failed probe returns a valid, fresh cached document, or {}.
-    """
-    command = [sys.executable, os.path.abspath(__file__)]
-    if refresh:
-        command.append("--refresh")
-    if max_age_min is not None:
-        command.extend(["--max-age-min", str(max_age_min)])
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-        if result.returncode == 0:
-            doc = json.loads(result.stdout)
-            if isinstance(doc, dict) and observations(doc) is not None:
-                return _fill_document(doc)
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        pass
-    cached = load_cache(TTL_MIN_DEFAULT if max_age_min is None else max_age_min)
-    return _fill_document(cached) if cached is not None else {}
-
-
-def main():
-    args = sys.argv[1:]
+def main(argv=None):
+    """usage.py [--refresh] [--max-age-min N] [--cache PATH] [--pretty]: the
+    usage document at PATH (cache_path()), probed when it is older than N
+    minutes (10) or with --refresh. `read` runs this as its probe child with
+    --refresh --cache PATH; `delegate status --json` runs it too."""
+    args = sys.argv[1:] if argv is None else list(argv)
     refresh = "--refresh" in args; pretty = "--pretty" in args
-    ttl = TTL_MIN_DEFAULT
+    ttl = _MAX_AGE_MIN
     if "--max-age-min" in args: ttl = float(args[args.index("--max-age-min") + 1])
-    d = probe(refresh=refresh, max_age_min=ttl)
+    path = cache_path(args[args.index("--cache") + 1] if "--cache" in args else None)
+    d = None if refresh else _young_document(path, ttl)
+    from_cache = d is not None
+    d = _fill_document(d if from_cache else _probe_document(path), path)
+    d["from_cache"] = from_cache
     if pretty:
         age = int((time.time() - d["probed_at"]) / 60)
         print(f"# usage (cache age {age} min, from_cache={d['from_cache']})")

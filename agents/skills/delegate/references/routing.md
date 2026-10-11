@@ -38,7 +38,8 @@ it, until its reset, a new reset read by a probe, a finished run on it, or 24
 hours, whichever comes first. The hold lives in `limits.json` beside the usage
 cache; `delegate status` prints a `Usage-limit hold:` line naming each held meter
 and when its hold ends. With `meters` on
-(the default), meters are probed when a run starts and when it finishes.
+(the default), a run reads the meters fresh before it starts, probing only when
+the last reading is older than ten minutes, and probes them when it finishes.
 
 `--tier <n>` raises the floor for one job. It never admits a tier outside the
 range; only overflow reaches past the ceiling.

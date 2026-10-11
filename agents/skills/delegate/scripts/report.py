@@ -12,7 +12,7 @@ Deterministic rendering, so every report has the same shape:
   report.py cost DIR          token-cost breakdown for one run.
 
 Two ledgers exist and they are not the same file:
-  ledger.jsonl  machine events from delegate.py / usage.py; the statusline reads it.
+  ledger.jsonl  machine events from delegate.py, Runs only; the statusline reads it.
   runs.jsonl    what the LEAD concluded after verifying a dispatch — the work
                 label and whether the definition of done was met. Only the lead
                 knows this, so only the lead writes it.
@@ -157,27 +157,6 @@ def unprobed_meters(catalog, readings):
                   if name in spent and name not in named and meter.get("harness") in read)
 
 
-def usage_doc(refresh=False, max_age_min=None, routing=None):
-    if refresh:
-        return usage.acquire(refresh=True, max_age_min=max_age_min, timeout=180)
-    if routing is not None and not meters_enabled(routing):
-        return usage.load_cached()
-    return usage.acquire(refresh=refresh, max_age_min=max_age_min, timeout=180)
-
-
-def meter_snapshot(refresh=False, max_age_min=None, routing=None):
-    """The Meter snapshot the limits page reads, with the holds beside it.
-
-    `usage_doc` acquires the reading, which probes and writes the cache when
-    it is stale, until ticket 18 reads FRESH in one call; the snapshot is then
-    the cache that acquisition left. One that found nothing valid reads as no
-    Meters, as before.
-    """
-    if not usage_doc(refresh, max_age_min, routing=routing):
-        return usage.Snapshot.of({})
-    return usage.read(None, usage.CACHED)
-
-
 def month_cell(price_month):
     if isinstance(price_month, int) or price_month == int(price_month):
         return f"${int(price_month)}"
@@ -202,7 +181,11 @@ def cmd_limits(a):
     catalog = load_catalog_or_die(a.config_dir)
     routing = catalog.get("routing", {})
     metering = meters_enabled(routing)
-    meters = meter_snapshot(a.refresh, a.max_age_min, routing=routing)
+    # FRESH probes when the reading is older than --max-age-min (10) and
+    # metering is on; --refresh is a person's own request, so it probes now
+    # whatever the switch says (routing None).
+    meters = usage.read(None if a.refresh else routing, usage.FORCED if a.refresh else usage.FRESH,
+                        max_age_min=a.max_age_min)
     gate = routing["gate"]
     by_meter = models_by_meter(catalog)
     readings = sorted((meters.readout(name, catalog) for name in meters.names()),

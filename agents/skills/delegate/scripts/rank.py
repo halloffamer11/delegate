@@ -83,10 +83,6 @@ from catalog import CatalogError, CLASSES, load_catalog
 import usage
 
 
-# Compatibility export until ticket 18 retires it. Validity lives in usage.
-meter_observations = usage.observations
-
-
 def restrict_to_harness(cat, harness):
     """A copy of the catalog holding only this harness's Lanes, so ranking,
     the Gate, overflow and the Margin all run inside the constraint."""
@@ -156,17 +152,33 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     allowing another caller to describe the same range in its own terms.
 
     cat: dict from catalog.load_catalog
-    meters: a usage.Snapshot; a plain usage document (or {}) is read through
-        usage.Snapshot.of until ticket 18 hands every caller a Snapshot
+    meters: a usage.Snapshot (usage.read, or usage.Snapshot.of for a document
+        in memory); anything else raises TypeError
     present: set of harness names
 
     Every Meter fact a row carries comes from the Snapshot's Readout for this
     catalog: Remaining, Pace, the Weekly figure, whether the Gate vetoes it
-    (`gated`, which honours routing.meters) and the plan price per week.
+    (`gated`, which honours routing.meters) and the plan price per week. The
+    Readouts are read once into a map, Meter to Readout, and the ranking core
+    ranks over that map, so a what-if can replace one Readout and rank again
+    without a second read.
     """
     if floor is not None and ceiling is not None and floor > ceiling:
         raise ValueError(f"invalid tier range [{floor}, {ceiling}]")
+    if not isinstance(meters, usage.Snapshot):
+        raise TypeError(f"rank takes a usage.Snapshot, not {type(meters).__name__}; "
+                        "wrap a usage document with usage.Snapshot.of")
+    readouts = {}
+    for lane_def in (cat.get("lanes") or {}).values():
+        meter = lane_def.get("meter")
+        if meter not in readouts:
+            readouts[meter] = meters.readout(meter, cat)
+    return _rank_readouts(cat, readouts, present, floor, ceiling, reason_label)
 
+
+def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
+    """The ranking core: the selection rule over `readouts`, Meter to Readout,
+    holding an entry for every Lane's Meter."""
     routing = cat.get("routing", {})
     # merged routing always carries both (`catalog.load_catalog`); no second
     # default lives here
@@ -176,8 +188,6 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     dollars = catalog.quota_unit(routing) == "plan_dollars"
     reason_label = reason_label or "tier"
 
-    snap = meters if isinstance(meters, usage.Snapshot) else usage.Snapshot.of(meters)
-
     present_set = set(present) if present else set()
     lanes = cat.get("lanes", {})
 
@@ -186,7 +196,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
 
     for lane_name, lane_def in lanes.items():
         meter_name = lane_def.get("meter")
-        reading = snap.readout(meter_name, cat)
+        reading = readouts[meter_name]
         r = reading.remaining
         pace = reading.pace
         remaining_weekly = reading.weekly
@@ -322,7 +332,7 @@ def rank(cls, cat, meters, present, tier=None):
     """Rank catalog lanes for a given class.
 
     cat: dict from catalog.load_catalog
-    meters: a usage.Snapshot, or a plain usage document (see rank_range)
+    meters: a usage.Snapshot (see rank_range)
     present: set of harness names
     tier: optional floor override (must be between class floor and ceiling)
 
@@ -485,38 +495,6 @@ def print_rank_output(cls, cat, rows, tier=None):
     return True
 
 
-def run_usage():
-    """Refresh path: probe vendors when the cache is missing or stale."""
-    try:
-        return usage.acquire(timeout=90)
-    except Exception:
-        return {}
-
-
-def load_cached_usage(cache_path=None):
-    """Read the usage cache without invoking any vendor probe."""
-    return usage.load_cached(cache_path=cache_path)
-
-
-def load_usage(cat, meters_path=None, *, refresh=False):
-    """Observations for ranking. routing.meters off never probes vendors.
-
-    ``meters_path`` is an explicit document and is loaded even when metering
-    is off. ``refresh=True`` is the class-rank path (acquire); False is cache.
-    """
-    if meters_path:
-        try:
-            with open(meters_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    if not catalog.meters_enabled(cat.get("routing", {})):
-        return load_cached_usage()
-    if refresh:
-        return run_usage()
-    return load_cached_usage()
-
-
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -561,7 +539,11 @@ def main(argv=None):
             sys.exit(2)
         cat = restrict_to_harness(cat, args.harness)
 
-    meters_doc = load_usage(cat, args.meters, refresh=not tiers_mode)
+    # A Class reads the Meters FRESH, which probes only when the reading is
+    # older than ten minutes and only with routing.meters on; the tiers
+    # preview and an explicit --meters FILE read the document as it is.
+    meters = usage.read(cat["routing"], usage.CACHED if (tiers_mode or args.meters) else usage.FRESH,
+                        path=args.meters)
 
     if args.harnesses is not None:
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
@@ -569,7 +551,7 @@ def main(argv=None):
         present = harnesses.installed()
 
     if tiers_mode:
-        previews = tier_leaders(cat, meters_doc, present)
+        previews = tier_leaders(cat, meters, present)
         routing = cat["routing"]
         margin = routing["margin"]
         gate = routing["gate"]
@@ -598,7 +580,7 @@ def main(argv=None):
         sys.exit(0)
 
     try:
-        rows = rank(args.target, cat, meters_doc, present, tier=args.tier)
+        rows = rank(args.target, cat, meters, present, tier=args.tier)
     except ValueError as e:
         sys.stderr.write(f"rank: {e}\n")
         sys.exit(2)

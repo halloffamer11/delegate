@@ -44,6 +44,7 @@ import harnesses  # noqa: E402
 import orchestrators  # noqa: E402
 import rank  # noqa: E402
 import runs  # noqa: E402
+import usage  # noqa: E402
 
 # The evals drive delegate the way a harness does: through the `delegate`
 # command, which is the contract.
@@ -242,11 +243,8 @@ def ping_lane(sandbox, harness):
     Gate. Returns (lane, None) or (None, why there is none).
     """
     cat = catalog.load_catalog(cwd=sandbox.cwd, config_dir=sandbox.config_dir)
-    if sandbox.meters:
-        with open(sandbox.meters, encoding="utf-8") as f:
-            meters = json.load(f)
-    else:
-        meters = rank.load_usage(cat, refresh=False)
+    # the offline world's fixture Meters, or this machine's cache, as they are
+    meters = usage.read(cat["routing"], usage.CACHED, path=sandbox.meters)
     rows = [r for r in rank.rank_range(cat, meters, {harness}) if r["harness"] == harness]
     if not rows:
         return None, "no Lane in the catalog"

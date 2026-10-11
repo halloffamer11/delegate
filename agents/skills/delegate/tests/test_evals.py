@@ -27,6 +27,7 @@ os.chdir(_CWD.name)
 import catalog  # noqa: E402
 import harnesses  # noqa: E402
 import rank  # noqa: E402
+import usage  # noqa: E402
 
 fails = 0
 
@@ -100,7 +101,7 @@ CASES = [
 def test_routing_cases():
     for name, overrides, doc, expected, reason in CASES:
         cat = catalog_with(overrides)
-        rows = rank.rank("impl", cat, doc, EVERY)
+        rows = rank.rank("impl", cat, usage.Snapshot.of(doc), EVERY)
         pick = rows[0]["lane"] if rows and rows[0]["pick"] else None
         ok = pick == expected and (reason is None or rows[0]["reason"].startswith(reason))
         record(name, ok, f"pick={pick} reason={rows[0]['reason'] if rows else None}")
@@ -108,7 +109,7 @@ def test_routing_cases():
 
 def test_gate_veto_is_named():
     cat = catalog_with({})
-    rows = rank.rank("impl", cat, meters(codex=(0.05, 2.0), grok=(0.5, 0.5)), EVERY)
+    rows = rank.rank("impl", cat, usage.Snapshot.of(meters(codex=(0.05, 2.0), grok=(0.5, 0.5))), EVERY)
     terra = next(r for r in rows if r["lane"] == "terra-high@codex")
     record("Gate: the vetoed Lane says it is under the Gate",
            terra["veto"] == "gate" and "5% left < gate 10%" in terra["reason"], terra["reason"])

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""test_usage_reset.py — test claude_reset format parsing and meter cache write append."""
+"""test_usage_reset.py — claude_reset format parsing, the usage cache write and the
+usage rows a probe builds, until ticket 19 moves what is left to test_harnesses and
+test_usage."""
 import json, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +16,7 @@ import usage
 import harnesses
 from harnesses.agy import COMBINED_NOTE as AGY_NOTE
 from harnesses.claude import reset as claude_reset
-from usage import write_cache, load_cache, load_cached, meter_row as lane, get_cache_path, eligible, observations
+from usage import write_cache, meter_row as lane, get_cache_path
 
 
 def fail(msg):
@@ -44,7 +46,8 @@ def main():
     assert_true(claude_reset("") is None, "claude_reset('') should be None")
     assert_true(claude_reset("invalid text") is None, "claude_reset('invalid text') should be None")
 
-    # 2. Cache write with DELEGATE_LEDGER + DELEGATE_CACHE in a temp dir appends one meter line
+    # 2. The cache write writes the document and nothing to the Ledger, which
+    #    records Runs only (decision C.2).
     with tempfile.TemporaryDirectory() as tmpdir:
         ledger_path = os.path.join(tmpdir, "ledger.jsonl")
         cache_path = os.path.join(tmpdir, "cache.json")
@@ -82,28 +85,7 @@ def main():
         with open(cache_path) as f:
             loaded_doc = json.load(f)
         assert_true(loaded_doc == doc, "cache file content mismatch")
-
-        # Check ledger appended exactly one line
-        assert_true(os.path.exists(ledger_path), f"ledger file not found at {ledger_path}")
-        with open(ledger_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        assert_true(len(lines) == 1, f"expected 1 line in ledger, got {len(lines)}")
-
-        event = json.loads(lines[0])
-        assert_true(event.get("v") == 1, "meter event v != 1")
-        assert_true(event.get("kind") == "meter", "meter event kind != 'meter'")
-        assert_true(event.get("source") == "probe", "meter event source != 'probe'")
-        assert_true(event.get("cache_age_s") == 0, "meter event cache_age_s != 0")
-        assert_true(event.get("probed_at") == now, "meter event probed_at mismatch")
-        assert_true(event.get("lanes") == doc["lanes"], "meter event lanes mismatch")
-        assert_true("ts" in event, "meter event missing ts")
-
-        # Calling load_cache on fresh cache must NOT append to ledger
-        loaded = load_cache(max_age_min=10, cache_path=cache_path)
-        assert_true(loaded is not None, "load_cache returned None for fresh cache")
-        with open(ledger_path) as f:
-            lines2 = [l.strip() for l in f if l.strip()]
-        assert_true(len(lines2) == 1, f"load_cache unexpectedly appended to ledger; count is {len(lines2)}")
+        assert_true(not os.path.exists(ledger_path), "the cache write appended to the Ledger")
 
         # 3. Test remaining_weekly_model on model meter lane and general lane
         l_fable = lane("claude", "fable", 0.58, 0.46, None, None, remaining_weekly_model=0.59)
@@ -121,33 +103,13 @@ def main():
             "lanes": [l_fable, l_gen],
         }
         write_cache(doc_with_model, cache_path=cache_path)
-        with open(ledger_path) as f:
-            lines3 = [l.strip() for l in f if l.strip()]
-        assert_true(len(lines3) == 2, f"expected 2 lines in ledger, got {len(lines3)}")
-        event2 = json.loads(lines3[1])
-        assert_true(event2["lanes"][0].get("remaining_weekly_model") == 0.59, "ledger event fable remaining_weekly_model mismatch")
-        assert_true(event2["lanes"][1].get("remaining_weekly_model") is None, "ledger event general remaining_weekly_model mismatch")
+        with open(cache_path) as f:
+            written = json.load(f)
+        assert_true(written["lanes"][0].get("remaining_weekly_model") == 0.59, "cache fable remaining_weekly_model mismatch")
+        assert_true(written["lanes"][1].get("remaining_weekly_model") is None, "cache general remaining_weekly_model mismatch")
+        assert_true(not os.path.exists(ledger_path), "the cache write appended to the Ledger")
 
-        # 4. Cached-only reads emit no meter event and launch no vendor probe.
-        calls = []
-        def boom(name):
-            def _boom(*a, **k):
-                calls.append(name)
-                raise AssertionError(f"vendor probe {name}")
-            return _boom
-        for h in harnesses.REGISTRY:
-            h.meters = boom(h.name)
-        try:
-            cached = load_cached(cache_path=cache_path)
-            assert_true(cached.get("lanes")[0].get("remaining_weekly_model") == 0.59,
-                        "load_cached dropped remaining_weekly_model")
-            with open(ledger_path) as f:
-                lines4 = [l.strip() for l in f if l.strip()]
-            assert_true(len(lines4) == 2, f"load_cached appended a meter event; count is {len(lines4)}")
-            assert_true(calls == [], f"load_cached launched probes: {calls}")
-        finally:
-            for h in harnesses.REGISTRY:
-                del h.meters
+        # 4. A cached read probes nothing: test_usage 9a, at usage.read.
 
     # 5. Cache path: DELEGATE_CACHE wins, else CONSULT_CACHE, else default.
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -162,14 +124,7 @@ def main():
         assert_true(get_cache_path() == os.path.expanduser("~/.cache/delegate/usage.json"),
                     f"default cache path mismatch: {get_cache_path()}")
 
-    # 6. eligible: unknown never vetoes; Remaining equal to Gate is eligible.
-    assert_true(eligible(None, 0.1) is True, "missing observation should be eligible")
-    assert_true(eligible({"r": None}, 0.1) is True, "unknown r should be eligible")
-    assert_true(eligible({"r": 0.10}, 0.10) is True, "r equal to gate should be eligible")
-    assert_true(eligible({"r": 0.11}, 0.10) is True, "r above gate should be eligible")
-    assert_true(eligible({"r": 0.09}, 0.10) is False, "r below gate should be ineligible")
-    assert_true(eligible({"r": 0.50, "status": "unavailable"}, 0.10) is True,
-                "cached status must not veto when r is at or above gate")
+    # 6. The Gate predicate is Readout.gated: test_usage 5b, 5c, 5d and 5d2.
 
     # 7. An agy lane runs through the same arithmetic as every other Meter:
     #    Remaining is the lower Window, Pace comes from the weekly Window.
@@ -213,119 +168,11 @@ def main():
     assert_true(AGY_NOTE in (probed_agy[0].get("note") or ""),
                 f"a fresh agy probe must carry the assumption note: {probed_agy[0].get('note')}")
 
-    # 8. A cached observation written under the old rule — Windows present,
-    #    combined Remaining and Pace null — gives the figures with no probe.
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cache_path = os.path.join(tmpdir, "old-agy.json")
-        old = {
-            "probed_at": time.time(),
-            "lanes": [{
-                "lane": "agy-gemini",
-                "harness": "agy",
-                "meter": "gemini",
-                "remaining_5h": 0.80,
-                "remaining_weekly": 0.90,
-                "r": None,
-                "binding": None,
-                "reset_5h": 1788406804,
-                "reset_weekly": time.time() + 3.5 * 86400,
-                "reset_binding": None,
-                "cycle_left": None,
-                "pace": None,
-                "score": None,
-                "status": "unknown",
-                "note": "agy combined remaining and pace unknown until a vendor joint bound exists",
-            }, {
-                "lane": "codex",
-                "harness": "codex",
-                "remaining_5h": 0.50,
-                "remaining_weekly": 0.70,
-                "r": 0.50,
-                "pace": 1.1,
-                "status": "ok",
-            }],
-        }
-        with open(cache_path, "w") as f:
-            json.dump(old, f)
-        loaded = load_cached(cache_path=cache_path)
-        agy_row = next(L for L in loaded["lanes"] if L["meter"] == "agy-gemini")
-        codex_row = next(L for L in loaded["lanes"] if L["meter"] == "codex")
-        # a row written before ticket 25 names its Meter under `lane` and its
-        # probe group under `meter`; it reads in the current shape
-        assert_true("lane" not in agy_row and agy_row["group"] == "gemini" and codex_row["group"] is None
-                    and set(observations(old)) == {"agy-gemini", "codex"},
-                    f"an old row should read with `meter` and `group`: {agy_row}")
-        assert_true(agy_row["r"] == 0.80 and agy_row["binding"] == "5h",
-                    f"a cached agy Remaining should be the lower window, got {agy_row}")
-        assert_true(agy_row["pace"] is not None and agy_row["status"] == "ok",
-                    f"a cached agy Pace should be derived, got {agy_row}")
-        assert_true(agy_row["remaining_5h"] == 0.80 and agy_row["remaining_weekly"] == 0.90,
-                    "cached agy windows should remain")
-        assert_true("unknown until a vendor joint bound" not in (agy_row.get("note") or ""),
-                    f"the superseded note must not sit beside a figure: {agy_row.get('note')}")
-        assert_true(codex_row["r"] == 0.50 and codex_row["pace"] == 1.1,
-                    "a probed figure is never recomputed")
-        obs = observations(old)
-        assert_true(obs["agy-gemini"]["r"] == 0.80 and obs["agy-gemini"]["pace"] is not None,
-                    "observations() must give the cached agy Meter its figures")
-        assert_true(obs["codex"]["r"] == 0.50, "observations() must leave codex r")
-        with open(cache_path) as f:
-            on_disk = json.load(f)
-        assert_true(on_disk["lanes"][0]["r"] is None,
-                    "cache file must not be rewritten on load_cached")
-
-    # Repeated acquisitions in one Python process use the current clock.
-    from unittest.mock import patch
-    import subprocess
-    with tempfile.TemporaryDirectory() as td:
-        path = os.path.join(td, "clock-cache.json")
-        with patch.object(harnesses.get("codex"), "meters", return_value=[]), \
-             patch.object(harnesses.get("agy"), "meters", return_value=[]), \
-             patch.object(harnesses.get("claude"), "meters", return_value=[]), \
-             patch.object(harnesses.get("grok"), "meters", return_value=[]), \
-             patch.object(usage, "append"), \
-             patch.object(usage.time, "time", return_value=10000):
-            first = usage.probe(refresh=True, cache_path=path)
-            assert_true(first["probed_at"] == 10000, "probe must stamp current acquisition time")
-            with patch.object(usage.time, "time", return_value=14000):
-                assert_true(usage.load_cache(10, path) is None, "cache age must advance in one process")
-                second = usage.probe(refresh=True, cache_path=path)
-            assert_true(second["probed_at"] == 14000, "second probe must not reuse import time")
-
-        malformed = {"probed_at": time.time(), "lanes": [
-            {"lane": "agy-gemini", "r": "bad", "pace": 2.0, "remaining_weekly": 0.9}]}
-        with open(path, "w") as f:
-            json.dump(malformed, f)
-        assert_true(usage.observations(malformed) is None, "malformed agy input must fail validation")
-        assert_true(usage.load_cached(path) == {}, "cache normalization must not hide invalid agy data")
-        assert_true(usage.load_cache(10, path) is None, "refresh path must reject malformed cached data")
-
-        with patch.dict(os.environ, {"DELEGATE_CACHE": path}), \
-             patch.object(usage.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 90)) as runner:
-            assert_true(usage.acquire(timeout=90) == {}, "bounded acquisition returns unknown on timeout")
-            assert_true(runner.call_args.kwargs["timeout"] == 90, "acquisition must keep the wall timeout")
-        low = usage.meter_row("codex", None, 0.05, 0.06)
-        assert_true(low["status"] == "ok", "observation status must not encode a private Gate")
-        assert_true(usage.eligible(low, 0.0) and not usage.eligible(low, 0.1),
-                    "the effective Gate alone determines low-Meter eligibility")
-
-    for stamp in (None, float("nan"), "yesterday", True):
-        doc = {"lanes": [{"lane": "codex", "r": 0.5}], "probed_at": stamp}
-        assert_true(usage.observations(doc) is None, "envelope needs a finite timestamp")
-    assert_true(usage.observations({"codex": {"r": 0.5}}) is not None,
-                "legacy bare maps remain timestamp-free")
-    for field in ("remaining_5h", "remaining_weekly_model", "reset_5h", "reset_weekly", "reset_binding"):
-        for bad in ("bad", float("nan"), True, -1):
-            doc = {"probed_at": time.time(), "lanes": [
-                {"lane": "codex", "r": 0.5, field: bad}]}
-            assert_true(usage.observations(doc) is None,
-                        f"malformed {field} must invalidate the entire document")
-    with tempfile.TemporaryDirectory() as td:
-        path = os.path.join(td, "bad-display.json")
-        with open(path, "w") as f:
-            json.dump({"probed_at": time.time(), "lanes": [
-                {"lane": "codex", "r": 0.5, "reset_5h": "bad"}]}, f)
-        assert_true(usage.load_cached(path) == {}, "cached viewers reject invalid display data")
+    # 8. The legacy rows, derived figures, validity, FRESH's age and the probe
+    #    bound are test_usage cases 3d to 3k, 4, 4b, 9 and 11, at usage.read
+    #    and Snapshot.of. A probe's row still says nothing of a Gate:
+    low = usage.meter_row("codex", None, 0.05, 0.06)
+    assert_true(low["status"] == "ok", "observation status must not encode a private Gate")
 
     # A figure past 100% used reads as nothing left, not as a negative
     # fraction that would fail the whole document and turn every Gate off.
@@ -334,8 +181,8 @@ def main():
                 and over["remaining_weekly_model"] == 1.0,
                 f"remaining fractions must be held to 0..1: {over}")
     over_doc = {"probed_at": time.time(), "lanes": [over, usage.meter_row("codex", None, 0.05, 0.05)]}
-    parsed = usage.observations(over_doc)
-    assert_true(parsed is not None and parsed["codex"]["r"] == 0.05,
+    parsed = usage.Snapshot.of(over_doc)
+    assert_true(parsed.status == "ok" and parsed.readout("codex", None).remaining == 0.05,
                 "one overspent row must not unread every Meter")
     assert_true(usage.remaining(None) is None and usage.remaining(0.5) == 0.5,
                 "a fraction inside 0..1, or none, is left as it is")

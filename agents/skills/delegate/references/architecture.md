@@ -28,23 +28,33 @@ names the Lanes in effect for `show` and the rank header, and `edit_catalog(op="
 field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
 preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
 use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
-`usage.read(routing, usage.CACHED, path=...)` returns the Meter snapshot without a
-vendor probe or a write, with the usage-limit holds in `limits.json` beside the document
-it read (`usage.hold`, `usage.release`); `Snapshot.of(document)` reads an in-memory
-document, which carries no hold. `Snapshot.readout(meter, cat)` joins one Meter with a
+`usage.read(routing, freshness, path=...)` returns the Meter snapshot, with the
+usage-limit holds in `limits.json` beside the document it read (`usage.hold`,
+`usage.release`); `Snapshot.of(document)` reads an in-memory document, which carries no
+hold. CACHED never probes or writes; FRESH probes when the reading is older than
+`max_age_min` (10) or absent; FORCED probes now. Either probes only with
+`routing.meters` on, or with routing None (`delegate status --refresh`), in the usage.py
+child process (`--refresh --cache PATH`, so it writes the read's own path) under one
+180 s bound, and writes nothing to the Ledger; a probe that fails or runs late gives the
+last reading when it is fresh enough, else status `stale` (ticket 18). `rank.py` reads
+FRESH for a Class and CACHED for `tiers` or `--meters`; `delegate run` reads FRESH
+(CACHED with `--meters` or `--no-probe`), and its dispatch reads FRESH before the relay
+and FORCED after it, so a run probes once before its relay and a named dispatch over a
+fresh reading does not; `--no-probe` reads nothing; `report.py limits` reads FRESH, or
+FORCED with `--refresh`. `Snapshot.readout(meter, cat)` joins one Meter with a
 catalog: Remaining, Pace, the Weekly figure, `gated` (the Gate predicate: unknown
 Remaining never vetoes, Remaining equal to Gate passes, and nothing is gated with
 `routing.meters` off), `week_dollars` and `held_until`; `readout(meter, cat, spend=x)`
 is the same Meter with x more of its week spent (the Weekly figure falls by x, Pace and
-`gated` follow, and a held Meter stays at 0). `rank_range` reads every Meter
-fact through it, wrapping a plain document with `Snapshot.of` until ticket 18; the
-dashboard and `catalog_edit` hand it a snapshot (ticket 16). The statusline, the
+`gated` follow, and a held Meter stays at 0). `rank_range`, `rank` and `tier_leaders`
+take only a snapshot: `rank_range` reads each Lane's Meter once into a map, Meter to
+Readout, and a private core ranks over that map, so a what-if replaces one Readout and
+ranks again with no second read (ticket 18); the dashboard and `catalog_edit` hand it
+the snapshot they read (ticket 16). The statusline, the
 popup's Meter rows, `report.py limits` and the deck's Gate draw each Meter's Readout,
 so every display shows one Weekly figure and one Gate per Meter (ticket 17).
-`usage.load_cached()` / `rank.load_cached_usage()` and `usage.acquire()` remain the
-legacy readers until ticket 18. One validity rule serves both (`rank.meter_observations()` re-exports the
-legacy view): valid envelope and legacy map formats keep their behavior; any malformed
-observation makes the whole document unknown. Envelope observations require a finite
+One validity rule serves every reader: valid envelope and legacy map formats keep their
+behavior; any malformed observation makes the whole document unknown. Envelope observations require a finite
 timestamp; raw Window/reset fields are validated before display. Every Meter
 derives its combined figures through one arithmetic, `usage.combined()`: Remaining is
 the lower Window fraction and Pace comes from the weekly Window. agy runs through it

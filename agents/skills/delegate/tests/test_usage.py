@@ -2,10 +2,12 @@
 """test_usage.py — the Meters module at its interface: usage.read, the Meter
 snapshot and its Readouts, and the usage-limit hold (usage.hold, usage.release).
 
-No probe and no network: every case reads a usage document it wrote into a
-temporary directory."""
+No network: every case reads a usage document it wrote into a temporary
+directory, and a case that probes runs the probe child with no harness CLI on
+PATH."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -62,9 +64,6 @@ def case_a_hold_lives_beside_the_document_it_overlays():
             held = {name: usage.read(None, usage.CACHED, path=p).readout("codex", None)
                     for name, p in paths.items()}
             default = usage.read(None, usage.CACHED).readout("codex", None)
-            # The reader this module replaces (gone with ticket 18) looks for
-            # the hold beside $DELEGATE_CACHE, so it shows A's codex unheld.
-            old = {r["meter"]: r for r in usage.load_cached(paths["A"])["lanes"]}
             usage.release("codex", path=paths["A"])
             released = usage.read(None, usage.CACHED, path=paths["A"]).readout("codex", None)
         finally:
@@ -78,9 +77,8 @@ def case_a_hold_lives_beside_the_document_it_overlays():
                and held["B"].remaining == 0.5 and held["B"].held_until is None
                and held["C"].remaining == 0.5 and held["C"].held_until is None
                and default.remaining == 0.5
-               and old["codex"]["r"] == 0.5
                and released.remaining == 0.5 and released.held_until is None,
-               f"until={until - now} held={held} default={default} old={old} released={released}")
+               f"until={until - now} held={held} default={default} released={released}")
 
 
 def case_a_usage_limit_hold_ends_at_the_reset_a_new_reset_a_finished_run_or_a_day():
@@ -203,6 +201,20 @@ def case_validity_legacy_rows_and_the_bare_map():
             raised = True
         record("3h. an unknown freshness raises ValueError", raised)
 
+        bad_stamps = [s for s in (None, float("nan"), "yesterday", True)
+                      if usage.Snapshot.of({"lanes": [{"meter": "codex", "r": 0.5}], "probed_at": s}).status
+                      != "malformed"]
+        record("3j. an envelope needs a finite timestamp; a legacy bare map needs none",
+               bad_stamps == [] and usage.Snapshot.of({"codex": {"r": 0.5}}).status == "ok", bad_stamps)
+
+        passed = []
+        for key in ("remaining_5h", "remaining_weekly_model", "reset_5h", "reset_weekly", "reset_binding"):
+            for bad in ("bad", float("nan"), True, -1):
+                doc = {"probed_at": now, "lanes": [row("codex", 0.5, 0.5, pace=1.0, **{key: bad})]}
+                if usage.Snapshot.of(doc).status != "malformed":
+                    passed.append((key, bad))
+        record("3k. a bad Window or reset field makes the whole document malformed", passed == [], passed)
+
         with open(good, "rb") as f:
             before = f.read()
         usage.read(None, usage.CACHED, path=good)
@@ -222,13 +234,18 @@ def case_figures_derived_from_a_row_that_carries_only_windows():
         {"meter": "agy-gemini", "harness": "agy", "group": "gemini",
          "remaining_5h": 0.8, "remaining_weekly": 0.9, "reset_5h": None,
          "reset_weekly": taken_at + 3.5 * 86400, "r": None, "pace": None,
-         "status": "unknown", "note": SUPERSEDED_NOTE}]}
-    gemini = usage.Snapshot.of(doc).readout("agy-gemini", None)
+         "status": "unknown", "note": SUPERSEDED_NOTE},
+        {"meter": "codex", "harness": "codex", "remaining_5h": 0.5, "remaining_weekly": 0.7,
+         "r": 0.5, "pace": 1.1, "status": "ok"}]}
+    snap = usage.Snapshot.of(doc)
+    gemini, codex = snap.readout("agy-gemini", None), snap.readout("codex", None)
     record("4. a row with only Windows gets Remaining (the lower Window) and Pace at the time of its reading",
            gemini.remaining == 0.8 and gemini.weekly == 0.9 and gemini.five_h == 0.8
            and gemini.week_left == 0.5 and gemini.pace == 1.8
            and gemini.note == COMBINED_NOTE,
            gemini)
+    record("4b. a figure the probe wrote is never recomputed",
+           codex.remaining == 0.5 and codex.pace == 1.1, codex)
 
 
 def case_readout_invariants():
@@ -258,6 +275,10 @@ def case_readout_invariants():
     record("5d. with metering off or no catalog nothing is gated",
            not snap.readout("under", cat(meters_on=False)).gated
            and not snap.readout("under", None).gated)
+    marked = usage.Snapshot.of({"probed_at": time.time(), "lanes": [
+        row("codex", 0.5, 0.5, pace=1.0, status="unavailable")]})
+    record("5d2. the row's own status never vetoes: only Remaining against the catalog's Gate",
+           not marked.readout("codex", cat()).gated and marked.readout("codex", cat(gate=0.6)).gated)
     fable = snap.readout("claude-fable", None)
     flagged = snap.readout("claude-flagged", cat(**{"claude-flagged": {"model_meter": True}}))
     plain = snap.readout("plain", cat(plain={"price_month": 20}))
@@ -367,7 +388,157 @@ def case_spend_takes_quota_points_off_the_weekly_figure():
            held)
 
 
+class counted_probes:
+    """Count the probes `usage.read` starts, through the internal seam that
+    runs the probe child process, with no harness CLI on PATH: a probe that
+    does run writes a document of `absent` rows and reaches no vendor. The
+    Ledger and DELEGATE_CACHE point at files of the case's own, so a write to
+    either shows."""
+
+    def __init__(self, td):
+        self.td = td
+        self.paths = []
+
+    def __enter__(self):
+        self.saved = {k: os.environ.get(k) for k in ("PATH", "DELEGATE_LEDGER", "DELEGATE_CACHE")}
+        os.environ["PATH"] = os.path.join(self.td, "no-bin")
+        os.environ["DELEGATE_LEDGER"] = self.ledger = os.path.join(self.td, "ledger.jsonl")
+        os.environ["DELEGATE_CACHE"] = self.default = os.path.join(self.td, "default", "usage.json")
+        self.real = usage._probe
+
+        def counting(path):
+            self.paths.append(path)
+            return self.real(path)
+        usage._probe = counting
+        return self
+
+    def __exit__(self, *exc):
+        usage._probe = self.real
+        for k, v in self.saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+    @property
+    def count(self):
+        return len(self.paths)
+
+
+def case_freshness_decides_when_a_read_probes():
+    """CACHED never probes; FRESH probes only past its age or with no reading;
+    FORCED probes now; with metering off neither probes, and routing None (a
+    person's own `delegate status --refresh`) has no switch."""
+    on, off = {"meters": True, "gate": 0.1}, {"meters": False, "gate": 0.1}
+    with tempfile.TemporaryDirectory() as td:
+        now = time.time()
+        cache = os.path.join(td, "usage.json")
+        with counted_probes(td) as probes:
+            usage.read(on, usage.CACHED, path=cache)
+            record("9a. CACHED never probes, even with no reading",
+                   probes.count == 0 and not os.path.exists(cache), probes.paths)
+
+            write_doc(cache, [row("codex", 0.5, 0.5, pace=1.0)], taken_at=now - 5 * 60)
+            young = usage.read(on, usage.FRESH, path=cache)
+            record("9b. FRESH within its age (10 min by default) probes nothing and reads the reading",
+                   probes.count == 0 and young.status == "ok" and young.taken_at == now - 5 * 60
+                   and young.readout("codex", None).remaining == 0.5,
+                   (probes.paths, young))
+
+            write_doc(cache, [row("codex", 0.5, 0.5, pace=1.0)], taken_at=now - 30 * 60)
+            kept = usage.read(on, usage.FRESH, path=cache, max_age_min=60)
+            record("9c. max_age_min sets FRESH's age: a reading 30 min old is fresh within 60",
+                   probes.count == 0 and kept.taken_at == now - 30 * 60, (probes.paths, kept))
+
+            old = usage.read(on, usage.FRESH, path=cache)
+            record("9d. FRESH past its age probes once, and reads what the probe wrote",
+                   probes.paths == [cache] and old.status == "ok" and old.taken_at >= now
+                   and "codex" in old.names() and old.readout("codex", None).remaining is None,
+                   (probes.paths, old))
+
+            os.remove(cache)
+            usage.read(on, usage.FRESH, path=cache)
+            record("9e. FRESH with no reading probes once",
+                   probes.count == 2 and os.path.exists(cache), probes.paths)
+
+            usage.read(on, usage.FORCED, path=cache)
+            record("9f. FORCED probes now, however fresh the reading", probes.count == 3, probes.paths)
+
+            os.remove(cache)
+            off_fresh = usage.read(off, usage.FRESH, path=cache)
+            off_forced = usage.read(off, usage.FORCED, path=cache)
+            record("9g. with routing.meters off FRESH and FORCED probe nothing and read as CACHED",
+                   probes.count == 3 and off_fresh.status == "missing" and off_forced.status == "missing"
+                   and not os.path.exists(cache),
+                   (probes.paths, off_fresh, off_forced))
+
+            usage.read(None, usage.FORCED, path=cache)
+            record("9h. FORCED with routing None probes: no metering switch applies",
+                   probes.count == 4 and os.path.exists(cache), probes.paths)
+
+            elsewhere = os.path.join(td, "elsewhere", "usage.json")
+            forced = usage.read(None, usage.FORCED, path=elsewhere)
+            record("9i. a FORCED read with path=P writes P, not DELEGATE_CACHE",
+                   probes.paths[-1] == elsewhere and forced.path == elsewhere and forced.status == "ok"
+                   and os.path.exists(elsewhere) and not os.path.exists(probes.default),
+                   (probes.paths, forced))
+            record("10a. a probe writes nothing to the Ledger",
+                   probes.count == 5 and not os.path.exists(probes.ledger), probes.ledger)
+
+
+def case_usage_does_not_import_events():
+    """The Ledger records Runs only (decision C.2), so the Meters module has
+    no way to write one."""
+    child = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); import usage; print('events' in sys.modules)",
+         os.path.abspath(os.path.join(HERE, "..", "scripts"))],
+        capture_output=True, text=True)
+    record("10b. usage.py does not import events",
+           child.returncode == 0 and child.stdout.strip() == "False", child.stdout + child.stderr)
+
+
+def case_a_probe_past_its_bound_falls_back_only_to_a_fresh_enough_reading():
+    """The one 180 s bound (decision B.5) around the probe child: a late or
+    failed probe gives the last reading when it is fresh enough, else stale."""
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as td:
+        now = time.time()
+        cache = write_doc(os.path.join(td, "usage.json"),
+                          [row("codex", 0.5, 0.5, pace=1.0)], taken_at=now - 2 * 60)
+        late = subprocess.TimeoutExpired("usage.py", 180)
+        with patch.object(usage.subprocess, "run", side_effect=late) as runner:
+            forced = usage.read(None, usage.FORCED, path=cache)
+            bound = runner.call_args.kwargs.get("timeout")
+            command = runner.call_args.args[0] if runner.call_args.args else runner.call_args.kwargs.get("args")
+        record("11a. a probe past its bound gives the last reading when it is fresh enough",
+               forced.status == "ok" and forced.taken_at == now - 2 * 60
+               and forced.readout("codex", None).remaining == 0.5,
+               forced)
+        record("11b. the probe runs in the usage.py child with --cache PATH, under one 180 s bound",
+               bound == 180 and list(command[-2:]) == ["--cache", cache] and "--refresh" in command,
+               (bound, command))
+
+        write_doc(cache, [row("codex", 0.5, 0.5, pace=1.0)], taken_at=now - 30 * 60)
+        with patch.object(usage.subprocess, "run", side_effect=late):
+            stale = usage.read({"meters": True}, usage.FRESH, path=cache)
+        record("11c. a probe past its bound over a reading too old is stale, every Meter unknown",
+               stale.status == "stale" and stale.detail and stale.names() == ()
+               and stale.readout("codex", None).remaining is None and stale.path == cache,
+               stale)
+
+        class Failed:
+            returncode = 1
+            stdout = stderr = ""
+        with patch.object(usage.subprocess, "run", return_value=Failed()):
+            failed = usage.read(None, usage.FORCED, path=cache)
+        record("11d. a failed probe over a reading too old is stale too",
+               failed.status == "stale" and failed.names() == (), failed)
+
+
 def main():
+    case_freshness_decides_when_a_read_probes()
+    case_usage_does_not_import_events()
+    case_a_probe_past_its_bound_falls_back_only_to_a_fresh_enough_reading()
     case_a_hold_lives_beside_the_document_it_overlays()
     case_a_usage_limit_hold_ends_at_the_reset_a_new_reset_a_finished_run_or_a_day()
     case_validity_legacy_rows_and_the_bare_map()

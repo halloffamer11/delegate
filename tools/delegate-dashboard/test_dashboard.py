@@ -298,7 +298,7 @@ class DashboardModelTest(ProjectFixture):
         rows = rank.rank(
             "impl",
             effective,
-            json.loads(self.meters.read_text()),
+            usage.Snapshot.of(json.loads(self.meters.read_text())),
             {"codex", "claude", "grok"},
         )
         self.assertEqual(effective["routing"]["gate"], 0.045)
@@ -327,7 +327,7 @@ class DashboardModelTest(ProjectFixture):
         rows = rank.rank(
             "impl",
             effective,
-            json.loads(self.meters.read_text()),
+            usage.Snapshot.of(json.loads(self.meters.read_text())),
             {"codex", "claude", "grok"},
         )
         self.assertEqual(effective["routing"]["margin"], 0.1)
@@ -344,7 +344,7 @@ class DashboardModelTest(ProjectFixture):
         rows = rank.rank(
             "impl",
             effective,
-            json.loads(self.meters.read_text()),
+            usage.Snapshot.of(json.loads(self.meters.read_text())),
             {"codex", "claude", "grok"},
         )
         self.assertEqual(effective["routing"]["margin"], 0.1001)
@@ -532,7 +532,7 @@ class DashboardModelTest(ProjectFixture):
         rows = rank.rank(
             "impl",
             effective,
-            json.loads(self.meters.read_text()),
+            usage.Snapshot.of(json.loads(self.meters.read_text())),
             {"codex", "claude", "grok"},
         )
         self.assertEqual(rows[0]["lane"], "sol-high@codex")
@@ -826,8 +826,8 @@ class DashboardModelTest(ProjectFixture):
                 self.assertIsNone(dashboard.state["usage"]["probed_at"])
                 json.dumps(dashboard.state, allow_nan=False)
                 self.assertEqual(
-                    rank.rank("impl", effective, json.loads(raw), dashboard.present),
-                    rank.rank("impl", effective, {}, dashboard.present),
+                    rank.rank("impl", effective, usage.Snapshot.of(json.loads(raw)), dashboard.present),
+                    rank.rank("impl", effective, usage.Snapshot.of({}), dashboard.present),
                 )
 
     def test_cache_validity_matches_canonical_rank_for_wrapped_and_legacy_inputs(self):
@@ -841,7 +841,7 @@ class DashboardModelTest(ProjectFixture):
                 write_json(self.meters, document)
                 dashboard = self.make_model()
                 effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
-                previews = rank.tier_leaders(effective, document, dashboard.present)
+                previews = rank.tier_leaders(effective, usage.Snapshot.of(document), dashboard.present)
                 self.assertEqual(
                     [tier["leader"] for tier in dashboard.state["tiers"]],
                     [tier["leader"] for tier in previews],
@@ -853,9 +853,9 @@ class DashboardModelTest(ProjectFixture):
                     for row in shown["rows"]:
                         self.assertEqual(row["eligible"], expected[row["lane"]]["eligible"])
                         self.assertEqual(row["reason"], expected[row["lane"]]["reason"])
-                canonical = rank.rank("impl", effective, document, dashboard.present)
+                canonical = rank.rank("impl", effective, usage.Snapshot.of(document), dashboard.present)
                 expected_input = {} if status == "malformed" else healthy
-                self.assertEqual(canonical, rank.rank("impl", effective, expected_input, dashboard.present))
+                self.assertEqual(canonical, rank.rank("impl", effective, usage.Snapshot.of(expected_input), dashboard.present))
                 json.dumps(canonical, allow_nan=False)
 
     def test_meters_absent_is_on_with_empty_effect(self):
@@ -902,7 +902,7 @@ class DashboardModelTest(ProjectFixture):
                 effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
                 previews = rank.tier_leaders(
                     effective,
-                    json.loads(self.meters.read_text()),
+                    usage.Snapshot.of(json.loads(self.meters.read_text())),
                     dashboard.present,
                 )
                 self.assertEqual(

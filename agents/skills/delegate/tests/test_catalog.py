@@ -1062,10 +1062,10 @@ with tempfile.TemporaryDirectory() as td:
     # Reload the fixture after the project write: both public ranking projections
     # must consume the one effective catalog rather than applying an overlay again.
     present = set(harnesses.NAMES)
-    before_pick = next(r["lane"] for r in rank.rank("impl", before, {}, present) if r["pick"])
-    before_tier2 = rank.tier_leaders(before, {}, present)[1]["leader"]
-    after_pick = next(r["lane"] for r in rank.rank("impl", effective, {}, present) if r["pick"])
-    previews = rank.tier_leaders(effective, {}, present)
+    before_pick = next(r["lane"] for r in rank.rank("impl", before, usage.Snapshot.of({}), present) if r["pick"])
+    before_tier2 = rank.tier_leaders(before, usage.Snapshot.of({}), present)[1]["leader"]
+    after_pick = next(r["lane"] for r in rank.rank("impl", effective, usage.Snapshot.of({}), present) if r["pick"])
+    previews = rank.tier_leaders(effective, usage.Snapshot.of({}), present)
     record(
         "8.8 reloaded fixture changes Class ranking and the Tier leader through the public seam",
         before_pick == "terra-high@codex"
@@ -1282,7 +1282,7 @@ with tempfile.TemporaryDirectory() as missing_dir:
 
 # 10. Focused catalog edits (ticket 11 CLI). Fixtures only; never the live config.
 ALL_HARNESSES = set(harnesses.NAMES)
-EMPTY_METERS = {}
+EMPTY_METERS = usage.Snapshot.of({})
 
 
 def make_edit_fixture(td, *, project=None, project_lanes=None, dotted=False, symlink=False):
@@ -2813,7 +2813,7 @@ with tempfile.TemporaryDirectory() as td:
     sys.stderr = stale_err
     try:
         cat_stale = catalog.load_catalog(cwd=repo, config_dir=cfg)
-        rows = rank.rank("impl", cat_stale, {}, ALL_HARNESSES)
+        rows = rank.rank("impl", cat_stale, usage.Snapshot.of({}), ALL_HARNESSES)
     finally:
         sys.stderr = _stderr
     warned = stale_err.getvalue()
@@ -2875,7 +2875,7 @@ with tempfile.TemporaryDirectory() as td:
     sys.stderr = off_err
     try:
         cat_off = catalog.load_catalog(cwd=repo, config_dir=cfg)
-        off_rows = rank.rank("impl", cat_off, {}, ALL_HARNESSES)
+        off_rows = rank.rank("impl", cat_off, usage.Snapshot.of({}), ALL_HARNESSES)
     finally:
         sys.stderr = _stderr
     said = off_err.getvalue()
@@ -2990,11 +2990,11 @@ with tempfile.TemporaryDirectory() as td:
            and cat["routing"]["classes"] == routing_sample["classes"]
            and cat["sources"]["classes.review.floor"] == catalog.DEFAULT_CLASSES_SOURCE,
            repr(cat["routing"]["classes"]))
-    picks = {c: rank.rank(c, cat, {}, set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
+    picks = {c: rank.rank(c, cat, usage.Snapshot.of({}), set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, copy.deepcopy(routing_sample["classes"]))
     cat_full = catalog.load_catalog(cwd=cwd, config_dir=config)
-    picks_full = {c: rank.rank(c, cat_full, {}, set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
+    picks_full = {c: rank.rank(c, cat_full, usage.Snapshot.of({}), set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
 record("19.2 the shipped Classes rank the same whether the catalog writes them or not",
        picks == picks_full, f"{picks} vs {picks_full}")
 
@@ -3002,7 +3002,7 @@ with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"review": {"floor": 2, "ceiling": 3},
                                    "triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    rows = rank.rank("triage", cat, {}, set(harnesses.NAMES))
+    rows = rank.rank("triage", cat, usage.Snapshot.of({}), set(harnesses.NAMES))
     record("19.3 a global Class extends the defaults and rank accepts it",
            catalog.class_names(cat["routing"]) == list(catalog.CLASSES) + ["triage"]
            and cat["routing"]["classes"]["review"] == {"floor": 2, "ceiling": 3}
@@ -3127,7 +3127,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    picks, _leaders = catalog_edit._rank_preview(cat, {}, set(harnesses.NAMES))
+    picks, _leaders = catalog_edit._rank_preview(cat, usage.Snapshot.of({}), set(harnesses.NAMES))
     record("21.5 the rank preview picks for every Class the catalog defines",
            list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
            repr(picks))

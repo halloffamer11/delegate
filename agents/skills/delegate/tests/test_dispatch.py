@@ -1410,109 +1410,143 @@ def main():
         )
         record("33. agy prompt: read-only has new sandbox line and no 'file tools only', --write omits it", ok33)
 
-        # 34. routing.meters off skips automatic probes on named and ranked paths.
+        # 34-34d count Meter probes with a logging agy stub: the probe child
+        # (usage.py --refresh --cache PATH) asks `agy --print /usage` once per
+        # probe, so one line in the log is one probe. The fake relay's hold=
+        # directive keeps the relay waiting until the case has counted the
+        # probes that came before it.
         import usage
-        routing_path = os.path.join(t_env["config_dir"], "routing.json")
-        routing_doc = json.load(open(routing_path))
-        routing_doc["meters"] = False
-        with open(routing_path, "w", encoding="utf-8") as f:
-            json.dump(routing_doc, f, indent=2)
-            f.write("\n")
-        acquire_calls = []
-        orig_acquire = usage.acquire
-        def mark_acquire(*a, **k):
-            acquire_calls.append((a, k))
-            return {}
-        usage.acquire = mark_acquire
-        prev_cache = os.environ.get("DELEGATE_CACHE")
-        os.environ["DELEGATE_CACHE"] = t_env["cache_path"]
-        try:
-            from catalog import load_catalog, meters_enabled
-            cat_off = load_catalog(cwd=cwd, config_dir=t_env["config_dir"])
-            delegate.probe_meters(False, cat_off["routing"])
-            first = list(acquire_calls)
-            meters_doc = delegate.rank.load_usage(cat_off, refresh=True)
-            delegate.probe_meters(False, cat_off["routing"])
-            ok34 = (
-                meters_enabled(cat_off["routing"]) is False
-                and acquire_calls == []
-                and first == []
-                and not os.path.exists(t_env["cache_path"])
-            )
-        finally:
-            usage.acquire = orig_acquire
-            if prev_cache is None:
-                os.environ.pop("DELEGATE_CACHE", None)
-            else:
-                os.environ["DELEGATE_CACHE"] = prev_cache
-        record(
-            "34. meters off skips start/finish probes through dispatch and rank callers",
-            ok34,
-            repr(acquire_calls),
+        probe_log = os.path.join(tmpdir, "probes34.log")
+        agy_stub = os.path.join(t_env["fake_bin"], "agy")
+        with open(agy_stub, "w") as f:
+            f.write('#!/bin/sh\nfor a in "$@"; do [ "$a" = /usage ] && echo probe >> "%s"; done\nexit 0\n'
+                    % probe_log)
+        os.chmod(agy_stub, 0o755)
+
+        def probes_seen():
+            if not os.path.exists(probe_log):
+                return 0
+            with open(probe_log) as f:
+                return len(f.read().split())
+
+        def clear_world():
+            for path in (probe_log, t_env["cache_path"]):
+                if os.path.exists(path):
+                    os.remove(path)
+
+        def set_meters(on):
+            routing_path = os.path.join(t_env["config_dir"], "routing.json")
+            with open(routing_path) as f:
+                routing_doc = json.load(f)
+            routing_doc["meters"] = on
+            with open(routing_path, "w", encoding="utf-8") as f:
+                json.dump(routing_doc, f, indent=2)
+                f.write("\n")
+
+        def delegate_cmd(sub, args):
+            return [sys.executable, DELEGATE_PY, sub, "--config-dir", t_env["config_dir"],
+                    "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"]] + args
+
+        def probes_around_relay(sub, args, name):
+            """(result, probes before the relay, probes after it) for one delegate
+            command whose relay waits on a marker file: the probes counted while
+            the relay waits came before it."""
+            start_count = probes_seen()
+            marker = os.path.join(tmpdir, f"{name}.go")
+            brief = make_brief(f"{name}.md", f"fake-relay: status=completed final={done_final} hold={marker}\nBrief {name}.")
+            before_dirs = set(os.listdir(t_env["runs_dir"]))
+            proc = subprocess.Popen(delegate_cmd(sub, args + ["--brief", brief, "--cwd", cwd]),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=t_env["env"])
+            started, deadline = False, time.time() + 60
+            while not started and time.time() < deadline and proc.poll() is None:
+                new_dirs = set(os.listdir(t_env["runs_dir"])) - before_dirs
+                started = any(os.path.exists(os.path.join(t_env["runs_dir"], d, "argv.json")) for d in new_dirs)
+                time.sleep(0.05)
+            before = probes_seen() - start_count
+            with open(marker, "w"):
+                pass
+            out, err = proc.communicate(timeout=300)
+            after = probes_seen() - start_count - before
+            res = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+            return res, (before if started else None), after
+
+        # 34. routing.meters off: run, dispatch and rank start no probe and
+        # write no cache, with no --no-probe anywhere.
+        set_meters(False)
+        clear_world()
+        res34_run, before34_run, after34_run = probes_around_relay(
+            "run", ["mechanical", "--harnesses", "agy,codex,grok"], "b34run")
+        res34_disp, before34_disp, after34_disp = probes_around_relay(
+            "dispatch", ["--lane", "flash-high@agy", "--class", "mechanical"], "b34disp")
+        res34_rank = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "mechanical",
+                                     "--config-dir", t_env["config_dir"]],
+                                    capture_output=True, text=True, env=t_env["env"])
+        ok34 = (
+            res34_run.returncode == 0 and res34_disp.returncode == 0 and res34_rank.returncode == 0
+            and (before34_run, after34_run, before34_disp, after34_disp) == (0, 0, 0, 0)
+            and probes_seen() == 0 and not os.path.exists(t_env["cache_path"])
         )
+        record("34. with routing.meters off, run, dispatch and rank start no probe and write no cache", ok34,
+               f"run={res34_run.returncode} {before34_run}/{after34_run} dispatch={res34_disp.returncode} "
+               f"{before34_disp}/{after34_disp} rank={res34_rank.returncode} probes={probes_seen()} "
+               f"cache={os.path.exists(t_env['cache_path'])} err={res34_run.stderr[-300:]} {res34_disp.stderr[-300:]}")
 
-        routing_doc["meters"] = True
-        with open(routing_path, "w", encoding="utf-8") as f:
-            json.dump(routing_doc, f, indent=2)
-            f.write("\n")
-        acquire_on = []
-        def mark_on(*a, **k):
-            acquire_on.append("acquire")
-            return {}
-        usage.acquire = mark_on
-        try:
-            cat_on = load_catalog(cwd=cwd, config_dir=t_env["config_dir"])
-            delegate.probe_meters(False, cat_on["routing"])
-            ok34b = acquire_on == ["acquire"]
-            delegate.probe_meters(True, cat_on["routing"])
-            ok34b = ok34b and acquire_on == ["acquire"]
-        finally:
-            usage.acquire = orig_acquire
-        record("34b meters on still probes unless --no-probe", ok34b, repr(acquire_on))
+        # 34b. Meters on: --no-probe starts no probe, before the relay or after
+        # it, and `rank.py tiers` reads the cache as it is.
+        set_meters(True)
+        clear_world()
+        res34b, before34b, after34b = probes_around_relay(
+            "dispatch", ["--lane", "flash-high@agy", "--class", "mechanical", "--no-probe"], "b34b")
+        res34b_tiers = subprocess.run([sys.executable, os.path.join(DELEGATE_DIR, "rank.py"), "tiers",
+                                       "--config-dir", t_env["config_dir"]],
+                                      capture_output=True, text=True, env=t_env["env"])
+        ok34b = (res34b.returncode == 0 and res34b_tiers.returncode == 0
+                 and (before34b, after34b) == (0, 0) and probes_seen() == 0
+                 and not os.path.exists(t_env["cache_path"]))
+        record("34b. --no-probe starts no probe, and rank tiers never probes", ok34b,
+               f"rc={res34b.returncode} {before34b}/{after34b} tiers={res34b_tiers.returncode} "
+               f"probes={probes_seen()} err={res34b.stderr[-300:]}")
 
-        # 34c. one `run` acquires the Meters once before the relay: the rank's
-        # acquisition serves the dispatch. `dispatch` alone still probes first.
-        # Meters are on here (34b). Each usage.acquire call is logged with its
-        # refresh flag; the relay's stdout marks when the relay ran.
-        probe_log = os.path.join(tmpdir, "probes34c.log")
-        count_probes = (
-            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate, usage\n"
-            "def counted(*a, **k):\n"
-            f"    open({probe_log!r}, 'a').write(('refresh' if k.get('refresh') else 'cached') + '\\n')\n"
-            "    return {}\n"
-            "usage.acquire = counted\n"
-            "real_relay = delegate.run_relay\n"
-            "def marked_relay(**kw):\n"
-            f"    open({probe_log!r}, 'a').write('relay\\n')\n"
-            "    return real_relay(**kw)\n"
-            "delegate.run_relay = marked_relay\n"
-            "sys.exit(delegate.main())"
-        )
-
-        def probes_for(cmd, args):
-            if os.path.exists(probe_log):
-                os.remove(probe_log)
-            res = subprocess.run(
-                [sys.executable, "-c", count_probes, cmd, "--config-dir", t_env["config_dir"],
-                 "--ads-dir", t_env["ads_dir"], "--runs-dir", t_env["runs_dir"]] + args,
-                capture_output=True, text=True, env=t_env["env"])
-            seen = open(probe_log).read().split() if os.path.exists(probe_log) else []
-            return res, seen
-
-        b34c = make_brief("b34c.md", f"fake-relay: status=completed final={done_final}\nBrief 34c.")
-        res34c_run, seen_run = probes_for("run", ["mechanical", "--brief", b34c, "--cwd", cwd,
-                                                  "--harnesses", "agy,codex,grok"])
-        res34c_disp, seen_disp = probes_for("dispatch", ["--lane", "flash-high@agy", "--class", "mechanical",
-                                                         "--brief", b34c, "--cwd", cwd])
-        before_relay = lambda seen: seen[:seen.index("relay")] if "relay" in seen else None
+        # 34c. One `run` probes once before its relay (rank's FRESH read; the
+        # dispatch's FRESH read finds that reading fresh) and once after it
+        # (FORCED). A dispatch right after it probes only after its relay; a
+        # dispatch over a reading an hour old probes before and after.
+        clear_world()
+        res34c_run, before34c_run, after34c_run = probes_around_relay(
+            "run", ["mechanical", "--harnesses", "agy,codex,grok"], "b34c_run")
+        res34c_now, before34c_now, after34c_now = probes_around_relay(
+            "dispatch", ["--lane", "flash-high@agy", "--class", "mechanical"], "b34c_now")
+        with open(t_env["cache_path"]) as f:
+            aged = json.load(f)
+        aged["probed_at"] = time.time() - 3600
+        with open(t_env["cache_path"], "w") as f:
+            json.dump(aged, f)
+        res34c_old, before34c_old, after34c_old = probes_around_relay(
+            "dispatch", ["--lane", "flash-high@agy", "--class", "mechanical"], "b34c_old")
         ok34c = (
-            res34c_run.returncode == 0 and before_relay(seen_run) is not None and
-            len(before_relay(seen_run)) == 1 and
-            res34c_disp.returncode == 0 and before_relay(seen_disp) == ["refresh"]
+            res34c_run.returncode == 0 and res34c_now.returncode == 0 and res34c_old.returncode == 0
+            and (before34c_run, after34c_run) == (1, 1)
+            and (before34c_now, after34c_now) == (0, 1)
+            and (before34c_old, after34c_old) == (1, 1)
         )
-        record("34c. run acquires the Meters once before the relay; dispatch alone still probes", ok34c,
-               f"run={seen_run} rc={res34c_run.returncode} out={res34c_run.stdout[-300:]} err={res34c_run.stderr[-300:]} "
-               f"dispatch={seen_disp} rc={res34c_disp.returncode}")
+        record("34c. a run probes once before its relay; a dispatch over a fresh reading only after it; "
+               "over an hour-old reading before and after", ok34c,
+               f"run={res34c_run.returncode} {before34c_run}/{after34c_run} "
+               f"now={res34c_now.returncode} {before34c_now}/{after34c_now} "
+               f"old={res34c_old.returncode} {before34c_old}/{after34c_old} "
+               f"err={res34c_run.stderr[-300:]} {res34c_now.stderr[-300:]}")
+
+        # 34d. `run --no-probe` ranks on the cache as it is: with no cache it
+        # writes none and starts no probe (any-harness ticket 05's note).
+        clear_world()
+        res34d = subprocess.run(delegate_cmd("run", ["mechanical", "--brief", b1, "--cwd", cwd,
+                                                     "--harnesses", "agy,codex,grok", "--no-probe", "--dry-run"]),
+                                capture_output=True, text=True, env=t_env["env"])
+        ok34d = (res34d.returncode == 0 and "dry run" in res34d.stdout
+                 and probes_seen() == 0 and not os.path.exists(t_env["cache_path"]))
+        record("34d. run --no-probe --dry-run writes no cache and starts no probe", ok34d,
+               f"rc={res34d.returncode} probes={probes_seen()} cache={os.path.exists(t_env['cache_path'])} "
+               f"out={res34d.stdout[-300:]} err={res34d.stderr[-300:]}")
 
         # -------------------------------------------------------------
         # 35. run prints the overflow header and picks in the admitted Tier
