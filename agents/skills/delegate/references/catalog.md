@@ -96,8 +96,10 @@ both; do not ask again. If a source changed since the preview, preview again.
 Apply writes only the chosen document, through a link to an existing file.
 
 `delegate setup --screen carry|tier1|tier2|tier3|tier4|review|routing` opens
-one wizard screen on the current catalog. Its confirm lists only the changes
-made, and a save with none writes nothing. On a focused tier screen,
+one wizard screen on the current catalog, with no generation proposed. Its
+confirm lists only the changes made, its save writes only those, and a save
+with none writes nothing. If the catalog changed while the screen was open,
+the save names the changed file, writes nothing and exits 1. On a focused tier screen,
 unmarking moves a lane down one tier; turn a tier 1 lane off on the carry
 screen. Use the CLI commands above where there is no terminal.
 

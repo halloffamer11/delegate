@@ -28,7 +28,7 @@ Said of a model that its harness replaces — codex names the replacement — or
 _Avoid_: retired (which is a model the harness no longer lists at all), deprecated
 
 **Generation**:
-The models of a harness that are not superseded. Setup shows every current-generation model of every harness on the carry page, at every effort.
+The models of a harness that are not superseded. The full setup wizard shows every current-generation model of every harness on the carry page, at every effort; a focused setup screen proposes none.
 
 **Lane**:
 One model at one effort on one harness, named `<model-effort>@<harness>`. It is the unit that gets a tier and that ranking picks.

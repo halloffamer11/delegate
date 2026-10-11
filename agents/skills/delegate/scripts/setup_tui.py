@@ -359,7 +359,8 @@ class Wizard:
 
     def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note):
         """Start from what one scrub found: the catalog with the current
-        generation proposed, the benchmark data, the harnesses and their
+        generation proposed (a focused screen gets the catalog as read, with
+        none proposed), the benchmark data, the harnesses and their
         models. Every decision the pages after the harnesses page hold is
         derived here, so a rescan starts them over consistently."""
         self._original_lanes = copy.deepcopy(lanes_doc)

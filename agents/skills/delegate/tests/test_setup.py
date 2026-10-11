@@ -953,11 +953,11 @@ def confirm_every_page(wizard):
     return wizard.result()
 
 
-def wizard_in_process(home, argv, during=None, stdin=None):
+def wizard_in_process(home, argv, during=None, stdin=None, drive=None):
     """setup.main in this process under the temp HOME `home`, with its own
     model queue: on a terminal whose TUI runs `during()` while the wizard is
-    open and then confirms every page, or, with `stdin`, on that input.
-    Returns (exit code, stdout, stderr)."""
+    open and then confirms every page, or runs `drive(wizard)` when given,
+    or, with `stdin`, on that input. Returns (exit code, stdout, stderr)."""
     import setup
     import setup_tui
     real_run = setup_tui.run_curses
@@ -967,7 +967,7 @@ def wizard_in_process(home, argv, during=None, stdin=None):
     def run_curses(wizard):
         if during is not None:
             during()
-        return confirm_every_page(wizard)
+        return (drive or confirm_every_page)(wizard)
 
     out, err = Terminal(), io.StringIO()
     setup_tui.run_curses = run_curses
@@ -1146,6 +1146,140 @@ def case_a_save_gives_every_native_lane_its_agent_file():
         return ok, f"code={code} files={files} err={err[-300:]!r}"
 
 
+# --- deepening D3: a focused screen saves only the change made on it -------
+
+def toggle_one_lane(wizard):
+    """A focused Tier screen: space on the Lane under the cursor, then enter
+    and the confirm's y."""
+    wizard.handle("space")
+    return take_as_is(wizard)
+
+
+def take_as_is(wizard):
+    """A focused screen confirmed with nothing more done on it."""
+    wizard.handle("enter")
+    wizard.handle("y")
+    return wizard.result()
+
+
+def changed_fields(before, after):
+    """{lane: the fields whose value differs} for the Lanes both documents hold."""
+    return {name: sorted(key for key in set(lane) | set(after[name])
+                         if lane.get(key) != after[name].get(key))
+            for name, lane in before.items()
+            if name in after and lane != after[name]}
+
+
+def case_a_focused_tier_screen_saves_only_the_change_made_on_it():
+    """One toggle on `--screen tier3` writes that Lane's Tier and the Orders
+    it moved, and nothing else: the screen starts from the catalog as read and
+    proposes no generation, which on these fixtures adds 20 Lanes and removes
+    17 the screen never showed (deepening D.6, bug 4)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = refresh_catalog_in(os.path.join(td, "cfg"))
+        lanes_path, routing_path = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
+        frozen = catalog.load_json(lanes_path)["lanes"]
+        routing_before = open(routing_path, "rb").read()
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--fixture-dir", REFRESH_DIR, "--no-bench", "--screen", "tier3"],
+            drive=toggle_one_lane)
+        saved = catalog.load_json(lanes_path)["lanes"]
+        changes = changed_fields(frozen, saved)
+        moved = [name for name, fields in changes.items() if "tier" in fields]
+        tiers = {frozen[moved[0]]["tier"], saved[moved[0]]["tier"]} if len(moved) == 1 else set()
+        others = {name: fields for name, fields in changes.items() if name not in moved}
+        ok = (code == 0 and set(saved) == set(frozen)
+              and len(moved) == 1 and 3 in tiers and len(tiers) == 2
+              and all(fields == ["order"] for fields in others.values())
+              and all(saved[name]["tier"] in tiers for name in others)
+              and f"wrote {lanes_path}" in out and routing_path not in out
+              and open(routing_path, "rb").read() == routing_before)
+        added, removed = set(saved) - set(frozen), set(frozen) - set(saved)
+        return ok, (f"code={code} added={len(added)} removed={len(removed)} moved={moved} "
+                    f"changes={changes if len(changes) < 8 else len(changes)} err={err[-300:]!r}")
+
+
+def without_a_shipped_class(cfg):
+    """`cfg`'s routing.json without the shipped scout Class, which every
+    screen shows with its default Range."""
+    path = os.path.join(cfg, "routing.json")
+    doc = catalog.load_json(path)
+    del doc["classes"]["scout"]
+    catalog.write_json(path, doc)
+    return path
+
+
+def on_disk(path):
+    with open(path, "rb") as f:
+        return f.read(), os.stat(path).st_mtime_ns
+
+
+def case_a_focused_save_that_changed_no_routing_field_leaves_routing_alone():
+    """The routing a screen shows carries every shipped Class. A focused save
+    whose screen changed no routing field writes its Lanes and leaves
+    routing.json's bytes and mtime as they were, the Class it lacks
+    included (deepening D3)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        routing_path = without_a_shipped_class(cfg)
+        before = on_disk(routing_path)
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench", "--screen", "tier3"],
+            drive=toggle_one_lane)
+        ok = (code == 0 and f"wrote {os.path.join(cfg, 'lanes.json')}" in out
+              and routing_path not in out and on_disk(routing_path) == before
+              and "scout" not in catalog.load_json(routing_path)["classes"])
+        return ok, f"code={code} out={out[-300:]!r} err={err[-300:]!r}"
+
+
+def case_a_focused_save_with_no_change_writes_nothing():
+    """Each focused screen confirmed as it opened writes neither document and
+    backs up nothing, on a catalog that lacks a shipped Class (deepening D3)."""
+    failed = []
+    for screen in ("carry", "tier3", "review", "routing"):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = sample_catalog(td)
+            without_a_shipped_class(cfg)
+            files = [os.path.join(cfg, name) for name in ("lanes.json", "routing.json")]
+            before = [on_disk(p) for p in files]
+            code, out, err = wizard_in_process(
+                td, ["--config-dir", cfg, "--no-discover", "--no-bench", "--screen", screen],
+                drive=take_as_is)
+            if not (code == 0 and [on_disk(p) for p in files] == before
+                    and "nothing changed; nothing written" in out and "wrote" not in out
+                    and not os.path.isdir(os.path.join(cfg, "backups"))):
+                failed.append((screen, code, out[-200:], err[-200:]))
+    return not failed, repr(failed)
+
+
+def case_a_focused_save_refuses_a_catalog_changed_since_launch():
+    """`delegate catalog set` lands while a focused screen is open; the
+    screen's save names lanes.json, writes nothing and exits 1, so the set's
+    Tier stays (deepening D3)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        lanes_path, routing_path = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
+        routing_before = open(routing_path, "rb").read()
+        theirs = []
+
+        def catalog_set():
+            kwargs = dict(scope="global", cwd=td, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                          value=1, meters={}, present=set(harnesses.NAMES))
+            preview = catalog_edit.edit_catalog("set", **kwargs)
+            catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
+            theirs.append(open(lanes_path, "rb").read())
+
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench", "--screen", "tier3"],
+            during=catalog_set, drive=toggle_one_lane)
+        tier = catalog.load_json(lanes_path)["lanes"]["terra-high@codex"]["tier"]
+        ok = (code == 1 and lanes_path in err and "nothing written" in err
+              and tier == 1 and [open(lanes_path, "rb").read()] == theirs
+              and open(routing_path, "rb").read() == routing_before
+              and "wrote" not in out and not os.path.isdir(os.path.join(cfg, "backups")))
+        return ok, f"code={code} tier={tier} err={err!r} out={out[-300:]!r}"
+
+
 for name, case in (
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
@@ -1191,40 +1325,18 @@ for name, case in (
      case_a_model_noticed_while_the_wizard_is_open_stays_queued),
     ("a save gives every native Lane in the catalog its agent file",
      case_a_save_gives_every_native_lane_its_agent_file),
+    ("a focused tier screen saves only the change made on it",
+     case_a_focused_tier_screen_saves_only_the_change_made_on_it),
+    ("a focused save that changed no routing field leaves routing.json alone",
+     case_a_focused_save_that_changed_no_routing_field_leaves_routing_alone),
+    ("a focused save with no change writes nothing", case_a_focused_save_with_no_change_writes_nothing),
+    ("a focused save refuses a catalog changed since launch",
+     case_a_focused_save_refuses_a_catalog_changed_since_launch),
 ):
     try:
         ok, detail = case()
     except Exception as e:
         ok, detail = False, repr(e)
     record(name, ok, detail)
-
-try:
-    import setup
-    with tempfile.TemporaryDirectory() as td:
-        cfg = os.path.join(td, "cfg")
-        real = os.path.join(td, "real")
-        os.makedirs(cfg); os.makedirs(real)
-        for name, doc in (("lanes.json", lanes_sample), ("routing.json", routing_sample)):
-            catalog.write_json(os.path.join(real, name), doc)
-            os.symlink(os.path.join(real, name), os.path.join(cfg, name))
-        lp, rp = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
-        before = {p: open(p, "rb").read() for p in (lp, rp)}
-        rev = catalog_commit.read(cfg).revision
-        setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
-        record("focused no-op preserves bytes and stow links",
-               all(os.path.islink(p) and open(p, "rb").read() == before[p] for p in (lp, rp)))
-        proposed = copy.deepcopy(routing_sample); proposed["meters"] = False
-        setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, proposed, lp, rp)
-        record("focused routing write follows stow link and preserves Lane bytes",
-               os.path.islink(rp) and catalog.load_json(rp)["meters"] is False
-               and open(lp, "rb").read() == before[lp])
-        try:
-            setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
-            stale_rejected = False
-        except catalog.CatalogError:
-            stale_rejected = True
-        record("focused save rejects intervening source changes", stale_rejected)
-except Exception as e:
-    record("focused writes preserve stow and revisions", False, repr(e))
 
 sys.exit(1 if fails else 0)

@@ -316,10 +316,14 @@ Tier decisions made so far — so a lane carried on the carry page reaches the p
 (`Wizard.rewrite_bench_page`). The page's catalog key is its lane names, which no
 screen changes, so tiers already drawn in the browser survive the rewrite.
 Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
-It restores current choices and shows only changed fields before confirmation.
-Untouched records and documents retain their bytes; changed sources use a revision
-check and writes through links. The full `start` wizard and `--plain` commit both
-documents through the Catalog read taken at launch (`catalog_commit`): a document
+It starts from the catalog as read and proposes no generation (deepening D.6): it has
+no start page to state a refresh. It restores current choices and shows only changed
+fields before confirmation. Its save commits only the documents the screen changed
+through the Catalog read taken at launch, which holds no Model queue: untouched
+records and documents keep their bytes, a shipped Class the routing lacks is shown
+but never written unless a routing field changed, and a save with no change writes
+nothing. The full `start` wizard and `--plain` commit both documents through the
+Catalog read taken at launch (`catalog_commit`). On every screen a document
 changed since launch, by `catalog set` or by the scan's Model swap, stops the save,
 which names it, writes nothing and exits 1. Catalog owns the bulk tier-line parser/application/order helpers;
 `setup_tui` keeps aliases. The routing screen exposes metering with `[x]`/`[ ]`,

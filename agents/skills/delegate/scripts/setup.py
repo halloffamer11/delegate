@@ -17,7 +17,7 @@ import tier_lines as tier_line_rules
 import discover
 import effort
 import setup_tui
-from catalog import CatalogError, load_json, validate_lanes, validate_routing
+from catalog import CatalogError, load_json
 from harnesses import NAMES as HARNESSES
 
 # The wizard refreshes the Artificial Analysis rows itself, so that one command
@@ -489,24 +489,6 @@ def confirm_and_write(snap, lanes_doc, routing_doc):
     report_commit(catalog_commit.commit(snap, {"lanes": lanes_doc, "routing": routing_doc}))
 
 
-def write_focused(config_dir, revision, original_lanes, original_routing,
-                  lanes, routing, lanes_path, routing_path):
-    """Check the sources again and preserve links and unchanged document bytes."""
-    if catalog_commit.read(config_dir).revision != revision:
-        raise CatalogError("intervening edit: catalog sources changed; reopen the focused screen")
-    validate_lanes(lanes, lanes_path)
-    validate_routing(routing, routing_path)
-    written = False
-    for path, old, new in ((lanes_path, original_lanes, lanes),
-                           (routing_path, original_routing, routing)):
-        if old != new:
-            catalog.write_json(path, new)
-            print(f"wrote {path}")
-            written = True
-    if not written:
-        print("nothing changed; nothing written")
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Interactively create or revise a delegate catalog.")
     parser.add_argument("--config-dir", default=catalog.CONFIG_DIR, help="directory for lanes.json and routing.json")
@@ -543,12 +525,14 @@ def main(argv=None):
                 "use delegate catalog set, range, or order for non-interactive edits"
             )
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
+        # the one screen a focused run opens, or None for the full wizard
+        focus = None if args.screen == "start" else args.screen
         # The catalog as read at launch. Every save commits through it, so a
         # change made while the wizard is open is refused, never overwritten.
         # The full wizard reads the Model queue with it: the start facts name
         # that queue, and its commit forgets exactly what they named (D.4).
-        snap = catalog_commit.read(config_dir, queue=args.screen == "start")
-        focused_revision = snap.revision if args.screen != "start" else None
+        # A focused screen reads no queue, so its save forgets nothing.
+        snap = catalog_commit.read(config_dir, queue=focus is None)
         tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
         existing = snap.lanes is not None
         # Start from the editable catalog, acquire once, then filter only a
@@ -564,7 +548,12 @@ def main(argv=None):
         # rescan never proposes it again: a harness only the rescan finds gets
         # none of the sample's Lanes, only what the refresh proposes for it.
         base_lanes = copy.deepcopy(lanes_doc)
-        lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data, rows)
+        # A focused screen starts from the catalog as read and proposes no
+        # generation: it has no start page to state a refresh, and its save
+        # writes only the change made on it (deepening D.6).
+        refresh = None
+        if focus is None:
+            lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data, rows)
         # Discovery reports drift at the moment the human is already deciding
         # tiers, and it must never be able to stop them getting there: any
         # failure becomes the reason string the start facts print. Both
@@ -636,10 +625,10 @@ def main(argv=None):
                 bench_page_path=page_path,
                 effort_rows=effort_rows,
                 discovery=discovery_data,
-                focus=None if args.screen == "start" else args.screen,
+                focus=focus,
                 refresh=refresh,
                 rows_note=rows_note,
-                rescan=rescan if args.screen == "start" else None,
+                rescan=rescan if focus is None else None,
                 tier_lines=tier_lines,
                 queued=snap.queued,
                 applied=snap.applied,
@@ -652,12 +641,16 @@ def main(argv=None):
                 print("nothing written")
             else:
                 result_lanes, result_routing = result
-                if args.screen != "start":
-                    write_focused(config_dir, focused_revision, lanes_doc, routing_doc,
-                                  result_lanes, result_routing, lanes_path, routing_path)
-                else:
-                    report_commit(catalog_commit.commit(
-                        snap, {"lanes": result_lanes, "routing": result_routing}))
+                documents = {"lanes": result_lanes, "routing": result_routing}
+                if focus is not None:
+                    # A focused save commits only the documents its screen
+                    # changed. The routing a screen shows carries every
+                    # shipped Class, so committing it unchanged would write
+                    # a file the confirm page never listed (deepening D3).
+                    started = {"lanes": lanes_doc, "routing": routing_doc}
+                    documents = {name: doc for name, doc in documents.items()
+                                 if doc != started[name]}
+                report_commit(catalog_commit.commit(snap, documents))
     except SetupAbort:
         return 130
     except catalog_commit.CatalogChanged as e:
