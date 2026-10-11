@@ -227,7 +227,10 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   sweep; the scores table names the Lanes `collect` says claim each figure. Each Lane on a point
   carries its own verdict, a point is struck only when
   every Lane on it is proposed off, and "beaten by" comes only from an off verdict on the board's
-  own source. HTML carries kind/source/competitor; reason prose is display-only. It embeds its
+  own source; two off Lanes on one point that lose to different efforts each get their own
+  arithmetic in the finding and their own competitor in the rows table. A point no Lane runs takes
+  its colour from the evidence's `model_lanes`, the Lanes on the Harnesses that run its effort.
+  HTML carries kind/source/competitor; reason prose is display-only. It embeds its
   plot data as inline JSON; `assets/bench_page.js`, inlined beside it, draws one
   score-against-cost plot per panel with its own filters and the frontier of what is shown, and
   only lays out what Python decided. Each

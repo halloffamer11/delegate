@@ -27,7 +27,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (A. Lane evidence; decisions A.4 and
 
 **Blocked by:** 24 The benchmark page and the wizard reach the same verdict for every Lane
 
-**Status:** landed 2026-10-11. `LaneEvidence` gained `records()` and `identify(name)`, and `bench.collect`, `evidence_records`, `epoch_records`, `inspect_model` and `bench_page.render` read them and `lane_rows` instead of their own name matching; test_bench "an Epoch row reaches a Lane in the scores table and in model inspection alike", test_bench_page "an agy Model's efforts are one sweep, so its finding shows the arithmetic" and "render reads the evidence records once", and test_lane_evidence "a record's lanes are exactly the Lanes whose lane_rows hold its row" and the ported 7.5 to 7.9 verify it. Every box is met on this branch; none waits on the user.
+**Status:** landed 2026-10-11 (`f17302f`; review fixes in "delegate-deepening A: review fixes"). `LaneEvidence` gained `records()` and `identify(name)`, and `bench.collect`, `evidence_records`, `epoch_records`, `inspect_model` and `bench_page.render` read them and `lane_rows` instead of their own name matching; test_bench "an Epoch row reaches a Lane in the scores table and in model inspection alike", test_bench_page "an agy Model's efforts are one sweep, so its finding shows the arithmetic" and "render reads the evidence records once", and test_lane_evidence "a record's lanes are exactly the Lanes whose lane_rows hold its row" and the ported 7.5 to 7.9 verify it. Every box is met on this branch; none waits on the user.
 
 - [x] test_bench "an Epoch row reaches a Lane in the scores table and in model inspection alike" (claude-fable-5-1 at high; Epoch row "Claude Fable 5.1", model_version `claude-fable-5-1-20260901_high`, DeepSWE 0.61; a second case uses `published_as` "Fable 5.1") fails before and passes after.
 - [x] test_bench_page "an agy Model's efforts are one sweep, so its finding shows the arithmetic" fails before and passes after: both points' model is `gemini-3.8-flash`, and the finding says "high scores 0.1 less than medium and costs $1 more (+100%)".
@@ -39,6 +39,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (A. Lane evidence; decisions A.4 and
 - [x] `make test` passes on Python 3.9 and on `python3.13`.
 
 ## Landed, 2026-10-11
+
+**Commits.** `f17302f`, then the review fixes in "delegate-deepening A: review fixes".
 
 **What shipped.**
 - `LaneEvidence.records()` returns one record per row: `row`, `published` (the printed name
@@ -92,3 +94,8 @@ with the proxy pointed at a closed port.
 - Two tests beyond the boxes: test_bench "an Artificial Analysis component row reaches both
   harnesses' Opus in collect's lane section" and test_bench_page "render reads the evidence
   records once".
+
+**Review fixes.** `lane_evidence`'s identity reasons and its unstated-effort tuple are
+private (`_EMPTY_NAME`, `_NO_MODEL`, `_CONFLICT`, `_UNSTATED_EFFORTS`): nothing outside the
+module read them, and the spec's interface names none of them. `UNKNOWN_EFFORT` stays
+public, because `bench` keys a figure's cell on it.

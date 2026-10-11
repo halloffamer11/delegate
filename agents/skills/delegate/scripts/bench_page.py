@@ -162,11 +162,6 @@ def _lanes(lanes_doc):
     return {name: lane for name, lane in lanes.items() if isinstance(lane, dict)}
 
 
-def _lanes_of_model(lanes_doc, model):
-    return sorted(name for name, lane in _lanes(lanes_doc).items()
-                  if lane.get("model") == model)
-
-
 def _prescreen(lanes_doc, effort_rows):
     """(evidence, verdicts): the one `LaneEvidence` for this catalog and these
     rows, and the wizard's own carry verdicts on it, {name: carry.decision}, so
@@ -237,10 +232,10 @@ def _annotate(effort_rows, lanes_doc, prescreen):
         # the Model's display name: an agy Model is its family, so its
         # efforts group and draw as one sweep
         item["_lane_model"] = lane_model
-        # every harness's lanes of the Model, for the colour of a point no
-        # Lane of its own runs
-        item["_model_lanes"] = sorted({name for model in rec.get("lane_models") or ()
-                                       for name in _lanes_of_model(lanes_doc, model)})
+        # the Model's Lanes on every Harness that runs this effort (the
+        # evidence's `model_lanes`), for the colour of a point no Lane of its
+        # own runs
+        item["_model_lanes"] = list(rec["model_lanes"])
         item["_lanes"] = list(rec["lanes"])
         item["_weak"] = bool(row.get("uncertain")) or row.get("provenance") in WEAK_PROVENANCE
         item["_score"] = _num(row.get("score"))
@@ -267,9 +262,17 @@ def _annotate(effort_rows, lanes_doc, prescreen):
         item["_off_kind"] = decision.get("kind") if decision else None
         item["_off_source"] = decision.get("source") if decision else None
         item["_off_competitor"] = decision.get("competitor") if decision else None
-        beaten = [item["_verdicts"][name].get("competitor") for name in item["_off_lanes"]
-                  if item["_verdicts"][name].get("source") == row.get("source")]
-        item["_dominated_by"] = beaten[0] if beaten and id(row) in counted else None
+        # {competitor effort: the off Lanes it beats on this row's own source},
+        # in Lane order: two Lanes on one point can lose to different efforts
+        # (Claude Code runs xhigh, agy does not), and each keeps its own
+        beaten = {}
+        if id(row) in counted:
+            for name in item["_off_lanes"]:
+                verdict = item["_verdicts"][name]
+                if verdict.get("source") == row.get("source") and verdict.get("competitor"):
+                    beaten.setdefault(verdict["competitor"], []).append(name)
+        item["_beaten"] = beaten
+        item["_dominated_by"] = next(iter(beaten), None)
         annotated.append(item)
     return annotated
 
@@ -346,24 +349,33 @@ def _finding(groups, order, off_points, unit):
     else:
         sentences.append("No lane you carry is measured on this board at the effort it runs.")
     for r in off_points:
+        # each off Lane with its own reason: the arithmetic against the effort
+        # that beats it on this board, else its verdict's wording
         model = _model_key(r)
-        named = ", ".join(r["_off_lanes"])
-        other = next((o for o in groups[model] if o.get("effort") == r["_dominated_by"]), None)
-        if other is None:
-            reasons = sorted({carry_reason(r["_verdicts"][n]) for n in r["_off_lanes"]})
-            sentences.append(f"Proposed off: {named}, {'; '.join(reasons)}.")
-            continue
-        ds = r["_score"] - other["_score"]
-        dc = r["_cost"] - other["_cost"]
-        if abs(ds) < 0.05:
-            scores = f"scores the same as {other.get('effort')}"
-        else:
-            scores = f"scores {_fmt_score(abs(ds), unit)} less than {other.get('effort')}"
-        if abs(dc) < 0.005:
-            costs = "costs the same"
-        else:
-            costs = f"costs {_fmt_money(abs(dc))} more {_fmt_pct_change(other['_cost'], r['_cost'])}"
-        sentences.append(f"Proposed off: {named}. {r.get('effort')} {scores} and {costs}.")
+        worded = {}
+        for effort, names in r["_beaten"].items():
+            other = next((o for o in groups[model] if o.get("effort") == effort), None)
+            if other is None:
+                for name in names:
+                    worded.setdefault(carry_reason(r["_verdicts"][name]), []).append(name)
+                continue
+            ds = r["_score"] - other["_score"]
+            dc = r["_cost"] - other["_cost"]
+            if abs(ds) < 0.05:
+                scores = f"scores the same as {other.get('effort')}"
+            else:
+                scores = f"scores {_fmt_score(abs(ds), unit)} less than {other.get('effort')}"
+            if abs(dc) < 0.005:
+                costs = "costs the same"
+            else:
+                costs = f"costs {_fmt_money(abs(dc))} more {_fmt_pct_change(other['_cost'], r['_cost'])}"
+            sentences.append(f"Proposed off: {', '.join(names)}. {r.get('effort')} {scores} and {costs}.")
+        beaten = {name for names in r["_beaten"].values() for name in names}
+        for name in r["_off_lanes"]:
+            if name not in beaten:
+                worded.setdefault(carry_reason(r["_verdicts"][name]), []).append(name)
+        for reason, names in worded.items():
+            sentences.append(f"Proposed off: {', '.join(names)}, {reason}.")
     return " ".join(sentences)
 
 
@@ -863,8 +875,12 @@ def _rows_block(items):
             note.append("uncertain")
         if r.get("_identity") == "unresolved" and r.get("_identity_reason"):
             note.append(r["_identity_reason"])
-        if r["_dominated_by"]:
+        if len(r["_beaten"]) == 1:
             note.append(f"beaten by {r['_dominated_by']}")
+        elif r["_beaten"]:
+            # off Lanes on one point that lose to different efforts, each named
+            note.append("beaten by " + ", ".join(f"{effort} ({', '.join(names)})"
+                                                 for effort, names in r["_beaten"].items()))
         if r["_off_lanes"]:
             note.append("proposed off" if r["_kind"] == LANE_OFF
                         else f"proposed off: {', '.join(r['_off_lanes'])}")

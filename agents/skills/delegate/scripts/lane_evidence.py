@@ -40,14 +40,14 @@ def _normalize_name(value):
 # `unknown` is the key such a row's effort gets, so it is never dropped for
 # being unlabelled, and it matches no Lane, so it is never attributed for it.
 UNKNOWN_EFFORT = "unknown"
-UNSTATED_EFFORTS = (None, "", UNKNOWN_EFFORT)
-EMPTY_NAME, NO_MODEL, CONFLICT = "empty published name", "no catalog model", "conflicting identity"
+_UNSTATED_EFFORTS = (None, "", UNKNOWN_EFFORT)
+_EMPTY_NAME, _NO_MODEL, _CONFLICT = "empty published name", "no catalog model", "conflicting identity"
 
 
 def _stated_effort(row):
     """The effort a row (or a Lane) states, or None when it states none."""
     effort = row.get("effort")
-    return None if effort in UNSTATED_EFFORTS else str(effort)
+    return None if effort in _UNSTATED_EFFORTS else str(effort)
 
 
 def model_identity(lane: Optional[dict]) -> str:
@@ -175,7 +175,7 @@ class LaneEvidence:
             identified.append((row, ident))
             if ident["model_key"] is not None:
                 claimed.setdefault(ident["model_key"], []).append(row)
-            elif ident["identity_reason"] != EMPTY_NAME and ident["published"] not in self._unmatched:
+            elif ident["identity_reason"] != _EMPTY_NAME and ident["published"] not in self._unmatched:
                 self._unmatched.append(ident["published"])
         self._model_rows, self._lane_rows, shared = {}, {}, {}
         for name, lane in lanes.items():
@@ -266,11 +266,11 @@ class LaneEvidence:
                         "identity_reason": None, "candidates": [self._display[model]],
                         "model_key": model, "lane_model": self._display[model],
                         "lane_models": sorted(self._spellings[model])}
-            first = first or (name, key, NO_MODEL, [])
+            first = first or (name, key, _NO_MODEL, [])
             if found and conflict is None:
-                conflict = (name, key, CONFLICT, sorted(self._display[m] for m in found))
+                conflict = (name, key, _CONFLICT, sorted(self._display[m] for m in found))
         name, key, reason, candidates = conflict or first or (
-            next((n for n in printed if n is not None), None), "", EMPTY_NAME, [])
+            next((n for n in printed if n is not None), None), "", _EMPTY_NAME, [])
         return {"published": name, "key": key, "identity": "unresolved",
                 "identity_reason": reason, "candidates": candidates, "model_key": None,
                 "lane_model": None, "lane_models": []}

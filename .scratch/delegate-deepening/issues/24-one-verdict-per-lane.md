@@ -41,7 +41,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (A. Lane evidence; decisions A.1 to 
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-11. `lane_evidence.LaneEvidence` (the moved `published_names.py`) decides which rows are each Lane's, and carry, the Tier proposal, the wizard and the benchmark page read one; test_lane_evidence's eight cases, test_bench "agy's only Opus Lane is not proposed off by an effort agy does not run", test_tier_proposal's two new cases and test_bench_page's shared-point, pre-screen-failure and citation cases verify it. Every box is met on this branch. The deletion box's F2 part (F2's rewritten test_setup_tui reads, and building the evidence in F2's `Wizard._load`) can only be met at this lane's rebase onto catalog-write, which is the lane builder's at merge.
+**Status:** landed 2026-10-11 (`d0c2a73`; review fixes in "delegate-deepening A: review fixes"). `lane_evidence.LaneEvidence` (the moved `published_names.py`) decides which rows are each Lane's, and carry, the Tier proposal, the wizard and the benchmark page read one; test_lane_evidence's eight cases, test_bench "agy's only Opus Lane is not proposed off by an effort agy does not run", test_tier_proposal's two new cases and test_bench_page's shared-point, pre-screen-failure and citation cases verify it. Every box is met on this branch. The deletion box's F2 part (F2's rewritten test_setup_tui reads, and building the evidence in F2's `Wizard._load`) can only be met at this lane's rebase onto catalog-write, which is the lane builder's at merge.
 
 - [x] `tests/test_lane_evidence.py` tests `available`, `model_rows`, `lane_rows` and `unmatched` on the OPUS_TWO_HARNESSES, OPUS_ONE_AGY, AGY_CARRY_LANES, GUARD_LANES and PUBLISHED_AS_OPUS fixtures.
 - [x] test_bench_page "one Opus point both harnesses share strikes only the Lane carry proposes off" fails before the change and passes after it.
@@ -56,6 +56,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (A. Lane evidence; decisions A.1 to 
 - [x] `make test` passes on Python 3.9 (`$(uv python find 3.9)`) and on `python3.13`.
 
 ## Landed, 2026-10-11
+
+**Commits.** `d0c2a73`, then the review fixes in "delegate-deepening A: review fixes".
 
 **What shipped.**
 - `scripts/published_names.py` moved to `scripts/lane_evidence.py` with `git mv`.
@@ -118,3 +120,17 @@ Python 3.9 and 3.13 with the proxy pointed at a closed port.
   equal beaters follows the catalog's order rather than the rows'.
 - `harnesses/agy.py`'s comments now cite `lane_evidence.strip_effort_suffix` and
   `lane_evidence`; A3 deletes `strip_effort_suffix` and rewrites that comment again.
+
+**Review fixes.**
+- Two off Lanes on one point that lose to different efforts (Claude Code's high to xhigh,
+  agy's high to medium) shared one arithmetic in the board's finding and one "beaten by"
+  in the rows table, so a Lane read another Lane's reason (decision A.1). `_annotate` now
+  keeps each off Lane's competitor on the board's source (`_beaten`); the finding gives each
+  competitor its own sentence, and the rows table names each when they differ. `beatenBy`
+  is unchanged: the first such competitor. Red first: test_bench_page "a shared point whose
+  off Lanes lose to different efforts gives each its own arithmetic".
+- A point no Lane runs took its colour from every Lane whose model string the Model has,
+  worked out again from `lane_models`; it now reads the record's `model_lanes`, so Opus at
+  max is Claude Code's colour, not agy's too, and `bench_page._lanes_of_model` is gone. Red
+  first: test_bench_page "a point no Lane runs takes the colour of the Harnesses that run its
+  effort".

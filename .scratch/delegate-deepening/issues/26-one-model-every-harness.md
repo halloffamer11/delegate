@@ -26,7 +26,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (A. Lane evidence)
 
 **Blocked by:** 25 An Epoch row reaches the same Lane in every benchmark view
 
-**Status:** landed 2026-10-11. `lane_evidence.published_as_conflict` now decides whether one published name would denote two Models, so a name shared by one Model's Lanes on several Harnesses is accepted, and `model_identity` is the one grouping key for `bench.group_lanes`, `bench_order_key` and `bench_page._lane_list`; test_catalog 7.10 (with 7.3 and 7.7), test_lane_evidence's two A3 cases and test_setup_tui 43b verify it. Every box is met on this branch; none waits on the user.
+**Status:** landed 2026-10-11 (`d1ca9b0`). `lane_evidence.published_as_conflict` now decides whether one published name would denote two Models, so a name shared by one Model's Lanes on several Harnesses is accepted, and `model_identity` is the one grouping key for `bench.group_lanes`, `bench_order_key` and `bench_page._lane_list`; test_catalog 7.10 (with 7.3 and 7.7), test_lane_evidence's two A3 cases and test_setup_tui 43b verify it. Every box is met on this branch; none waits on the user.
 
 - [x] test_catalog "7.10 one published name on Lanes of one Model on two harnesses is accepted" (opus-high@claude on `claude-opus-5-5` and opus-high@agy on `claude-opus-5-5-high`, both `published_as` "Opus 5.5 Thinking") fails before and passes after.
 - [x] test_catalog 7.3 and 7.7 still refuse a name across two Models, with a message naming both model strings.
@@ -37,6 +37,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (A. Lane evidence)
 - [x] `make test` passes on Python 3.9 and on `python3.13`.
 
 ## Landed, 2026-10-11
+
+**Commits.** `d1ca9b0`. The candidate's review ("delegate-deepening A: review fixes") changed nothing of this ticket's.
 
 **What shipped.**
 - `lane_evidence.published_as_conflict(lanes)` takes a lanes document's `{name: lane}` mapping

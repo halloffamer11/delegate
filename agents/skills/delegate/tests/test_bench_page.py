@@ -450,6 +450,48 @@ except Exception as e:
     record("one Opus point both harnesses share strikes only the Lane carry proposes off", False, repr(e))
 
 try:
+    # Decision A.1: each proposed-off Lane is named with its own reason. With
+    # the xhigh rows first, Claude Code's high Lane loses to xhigh, which agy
+    # does not run, and agy's high Lane loses to medium: one point, two
+    # competitors, and neither Lane may be given the other's arithmetic.
+    rows = [{"source": "aa", "model": "Claude Opus 5.5", "effort": e, "benchmark": b,
+             "score": s, "cost_usd": c, "uncertain": False}
+            for e, s, c in (("xhigh", 0.90, 1.5), ("low", 0.40, 0.5),
+                            ("medium", 0.80, 1.0), ("high", 0.70, 2.0))
+            for b in ("b1", "b2")]
+    board = board_named(bench_page.plot_data(rows, OPUS_TWO_HARNESSES), "b1")
+    high = next(p for p in board["points"] if p["effort"] == "high")
+    page = bench_page.render(None, OPUS_TWO_HARNESSES, rows)
+    record("a shared point whose off Lanes lose to different efforts gives each its own arithmetic",
+           high["kind"] == "lane_off"
+           and {lane["name"]: lane["competitor"] for lane in high["lanes"]}
+           == {"opus55-high@agy": "medium", "opus55-high@claude": "xhigh"}
+           and "Proposed off: opus55-high@agy. high scores 0.1 less than medium and costs $1 more"
+           in board["finding"]
+           and "Proposed off: opus55-high@claude. high scores 0.2 less than xhigh and costs $0.5 more"
+           in board["finding"]
+           and "beaten by medium (opus55-high@agy), xhigh (opus55-high@claude)" in page,
+           board["finding"])
+except Exception as e:
+    record("a shared point whose off Lanes lose to different efforts gives each its own arithmetic",
+           False, repr(e))
+
+try:
+    # No Lane runs Opus at max, and agy cannot: the point is Claude Code's
+    # Model context only (the evidence's model_lanes), so it takes Claude
+    # Code's colour and not agy's.
+    rows = OPUS_ROWS + [{"source": "aa", "model": "Claude Opus 5.5", "effort": "max", "benchmark": "b1",
+                         "score": 0.85, "cost_usd": 3.0, "uncertain": False}]
+    board = board_named(bench_page.plot_data(rows, OPUS_TWO_HARNESSES), "b1")
+    top = next(p for p in board["points"] if p["effort"] == "max")
+    record("a point no Lane runs takes the colour of the Harnesses that run its effort",
+           top["kind"] == "own_other" and top["harness"] == ["claude"]
+           and top["meter"] == ["claude-general"],
+           repr({k: top[k] for k in ("kind", "harness", "meter")}))
+except Exception as e:
+    record("a point no Lane runs takes the colour of the Harnesses that run its effort", False, repr(e))
+
+try:
     # The wizard runs the same pre-screen first, so a failure here is no new
     # crash path; drawing no verdicts would be a page that disagrees with it.
     real = carry.decisions
