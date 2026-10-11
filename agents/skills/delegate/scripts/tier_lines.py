@@ -2,8 +2,9 @@
 """tier_lines.py — bulk Tier lines: the benchmark page's decisions, pasted into
 the wizard (ticket 27 of the redesign). The parser and the summary line, for
 the wizard (`setup_tui`) and `setup.py --plain --tiers-from`; applying the
-lines is the Draft's (`catalog_draft.CatalogDraft.apply`, deepening F). Split
-out of catalog.py (ticket 26).
+lines, and switching off the carried lanes they do not name, is the Draft's
+(`catalog_draft.CatalogDraft.apply`, deepening F). Split out of catalog.py
+(ticket 26).
 """
 
 TIER_LINE_VALUES = {"1": 1, "2": 2, "3": 3, "4": 4, "off": "off"}
@@ -43,17 +44,6 @@ def parse_tier_lines(text, lanes_doc):
             out["repeated"].append(name)
         out["decided"][name] = value
     return out
-
-
-def unnamed_carried(parsed, carried):
-    """The carried lanes a set of lines does not name. They go off: "if it's not
-    in the tier list, it's not used" (the user, 2026-09-12; ticket 28).
-
-    Lines that name no lane in the catalog decide nothing, so they switch nothing
-    off: a clipboard holding the wrong text must not empty the catalog."""
-    if not parsed["decided"]:
-        return []
-    return [name for name in carried if name not in parsed["decided"]]
 
 
 def tier_lines_summary(parsed, dropped=()):

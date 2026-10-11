@@ -647,22 +647,20 @@ def main(argv=None):
             if tier_lines is not None:
                 summary = wizard.apply_start_lines()
                 wizard.message = f"{initial_message}; {summary}" if initial_message else summary
-            result = setup_tui.run_curses(wizard)
-            if result is None:
+            documents = setup_tui.run_curses(wizard)
+            if documents is None:
                 print("nothing written")
             else:
-                result_lanes, result_routing = result
-                documents = {"lanes": result_lanes, "routing": result_routing}
                 if focus is not None:
-                    # A focused save commits only the documents its screen
-                    # changed. The routing a screen shows carries every
-                    # shipped Class, so committing it unchanged would write
-                    # a file the confirm page never listed (deepening D3).
-                    # On a first run the read found no catalog: a save that
-                    # writes one document writes the other as the screen
-                    # showed it, so the catalog is never left half written.
-                    started = {"lanes": lanes_doc, "routing": routing_doc}
-                    changed = [name for name, doc in documents.items() if doc != started[name]]
+                    # A focused save commits only the documents its draft's
+                    # changes touch, the ones its confirm page listed. The
+                    # routing a screen shows carries every shipped Class, so
+                    # committing it unchanged would write a file the confirm
+                    # page never listed (deepening D3, F). On a first run the
+                    # read found no catalog: a save that writes one document
+                    # writes the other as the screen showed it, so the
+                    # catalog is never left half written.
+                    changed = setup_tui.changed_documents(wizard.draft.changes())
                     absent = [name for name in documents if getattr(snap, name) is None]
                     documents = {name: doc for name, doc in documents.items()
                                  if name in changed or (changed and name in absent)}

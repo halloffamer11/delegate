@@ -783,7 +783,8 @@ try:
            "and says which are carried, proposed off, or drawn nowhere",
            [l["name"] for l in lanes] == setup_tui.lane_order(doc, collected)
            and [l["name"] for l in lanes if l["carried"]] == [n for n in setup_tui.lane_order(doc, collected)
-                                                                if wizard._enabled[n] or n == "astra-xhigh@codex"]
+                                                                if wizard.draft.lane(n).carried
+                                                                or n == "astra-xhigh@codex"]
            and astra == ["astra-ultra@codex", "astra-max@codex", "astra-xhigh@codex", "astra-high@codex",
                          "astra-medium@codex", "astra-low@codex"]
            and len(groups) == len(set(groups))

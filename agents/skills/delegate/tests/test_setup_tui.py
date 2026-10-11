@@ -32,6 +32,7 @@ import bench
 import carry
 import catalog
 import published_names
+from catalog_draft import CatalogDraft
 import harnesses
 import tier_lines
 import discover
@@ -71,6 +72,12 @@ def start(w):
     w.handle("enter")
     w.handle("enter")
     w.handle("enter")
+
+
+def saved(w):
+    """(lanes, routing): the documents the confirm page's `y` hands the commit."""
+    documents = w.result()
+    return documents["lanes"], documents["routing"]
 
 
 def move_to(w, lane):
@@ -203,8 +210,8 @@ try:
     finish(w)
     record("1a the TUI restores the current catalog tiers and enter preserves them",
            restored == [True, True, True, True]
-           and strip_order(w.result()[0]) == LANES
-           and w.result()[1] == ROUTING,
+           and strip_order(w.result()["lanes"]) == LANES
+           and w.result()["routing"] == ROUTING,
            repr((restored, w.result())))
 except Exception as e:
     record("1a the TUI restores the current catalog tiers and enter preserves them", False, repr(e))
@@ -236,14 +243,14 @@ try:
     finish(w)
     # the review page adds each carried lane's place inside its tier (ticket 28)
     record("2 marking the incoming tiers writes the catalog back unchanged but for order",
-           strip_order(w.result()[0]) == LANES and w.result()[1] == ROUTING
-           and orders_are_places(w.result()[0]), repr(w.result()))
+           strip_order(w.result()["lanes"]) == LANES and w.result()["routing"] == ROUTING
+           and orders_are_places(w.result()["lanes"]), repr(w.result()))
     w = wizard()
     start(w)
     finish(w)
     record("2b enter straight through preserves every current tier",
-           strip_order(w.result()[0]) == LANES and w.result()[1] == ROUTING
-           and orders_are_places(w.result()[0]), repr(w.result()))
+           strip_order(w.result()["lanes"]) == LANES and w.result()["routing"] == ROUTING
+           and orders_are_places(w.result()["lanes"]), repr(w.result()))
 except Exception as e:
     record("2 marking the incoming tiers writes the catalog back unchanged", False, repr(e))
 
@@ -258,7 +265,7 @@ try:
         below.append("sol-high@codex" not in [r["cells"][1] for r in w.view()["rows"]])
         w.handle("enter")
     finish(w)
-    lanes, _ = w.result()
+    lanes, _ = saved(w)
     record("3 a lane assigned at tier N shows on no page below N, and keeps N",
            below == [True, True, True]
            and lanes["lanes"]["sol-high@codex"]["tier"] == 4
@@ -312,7 +319,7 @@ try:
     w.handle("plus")
     w.handle("enter")
     w.handle("y")
-    lanes, routing = w.result()
+    lanes, routing = saved(w)
     expected = copy.deepcopy(ROUTING)
     expected["classes"]["mechanical"]["ceiling"] = 3
     expected["margin"] = 0.25
@@ -511,7 +518,7 @@ try:
     counts = tier_map.removeprefix("Lanes carried: ").split(" · ")
     panels = {}
     landings = []
-    for index in range(len(w._routing_settings())):
+    for index in range(sum(1 for r in w.view()["rows"] if not r.get("styles"))):
         view = w.view()
         row = next(r for r in view["rows"] if r["cursor"])
         # the cursor lands on a setting, indented under its group, never on
@@ -523,9 +530,9 @@ try:
            w.screen == "routing"
            and incoming_sol != 4
            # counts only: the session's move of sol-high to tier 4 is in them
-           and "sol-high@codex" in w._lanes_at(4)
-           and "sol-high@codex" not in w._lanes_at(incoming_sol)
-           and counts == [f"tier {t}: {len(w._lanes_at(t))}" for t in range(1, 5)]
+           and "sol-high@codex" in w.draft.tier_lanes(4)
+           and "sol-high@codex" not in w.draft.tier_lanes(incoming_sol)
+           and counts == [f"tier {t}: {len(w.draft.tier_lanes(t))}" for t in range(1, 5)]
            and all(landings) and len(landings) == 13
            # the explanation moved beside the table: one per setting, headed by it
            and set(panels) == {f"{c} {k}" for c in catalog.CLASSES for k in ("floor", "ceiling")} | {"margin", "gate", "meters"}
@@ -552,7 +559,7 @@ try:
            # the longest term, two spaces, the longest value, two spaces, the text
            and all(7 + 2 + 3 + 2 + len(d["text"]) <= 79 for d in confirm_defs.values()))
     w.handle("y")
-    lanes, routing = w.result()
+    lanes, routing = saved(w)
     record("15 key sequence write path is unchanged",
            lanes["lanes"]["sol-high@codex"]["tier"] == 4
            and routing == ROUTING)
@@ -599,7 +606,7 @@ def not_carried(w, *lanes):
     for lane in lanes:
         move_to(w, lane)
         w.handle("x")
-        assert not w._enabled[lane], lane
+        assert not w.draft.lane(lane).carried, lane
     w.handle("enter")
     assert w.screen == "tier" and w.tier == 4, (w.screen, w.tier)
 
@@ -612,25 +619,25 @@ try:
     w = wizard()
     start(w)
     cursor_name = next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
-    enabled_before = dict(w._enabled)
-    assigned_before = dict(w._assigned)
+    draft_before = copy.deepcopy(w.draft)
     others = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
               for r in w.view()["rows"] if r["cells"][1] != cursor_name}
     marked_before = row_for(w.view(), cursor_name)["marked"]
     w.handle("x")
     after_x = row_for(w.view(), cursor_name)
+    carried_after_x = {name: w.draft.lane(name).carried for name in LANES["lanes"]}
     others_after = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
                     for r in w.view()["rows"] if r["cells"][1] != cursor_name}
     w.handle("space")
     after_space = row_for(w.view(), cursor_name)
     record("16 space and x are one mark gesture, and neither switches a lane off",
            w.screen == "tier" and w.tier == 4
-           and w._assigned == assigned_before
            and after_x["marked"] is not marked_before
            and after_x["cells"][0] == ("[x]" if after_x["marked"] else "[ ]")
+           and carried_after_x == {name: draft_before.lane(name).carried for name in LANES["lanes"]}
            # space undoes what x did, so the two are the same control
            and after_space["marked"] is marked_before
-           and w._enabled == enabled_before
+           and w.draft == draft_before
            and after_x["tag"] == "" and after_space["tag"] == ""
            and others_after == others,
            repr((marked_before, after_x["cells"][0], after_space["cells"][0])))
@@ -646,7 +653,7 @@ try:
     w.handle("enter")
     w.handle("enter")
     cursor_name = next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
-    enabled_before = dict(w._enabled)
+    draft_before = copy.deepcopy(w.draft)
     others = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
               for r in w.view()["rows"] if r["cells"][1] != cursor_name}
     w.handle("space")
@@ -658,13 +665,13 @@ try:
     back = row_for(w.view(), cursor_name)
     record("16b on the carry screen both keys flip only the cursor row",
            w.screen == "prescreen"
-           and enabled_before[cursor_name] is True
+           and draft_before.lane(cursor_name).carried is True
            # space flipped it, and only it
            and carry_of(flipped) == "off" and flipped["dimmed"]
            and others_after == others
            # x undid what space did, so the two are the same control here too
            and carry_of(back) == "on"
-           and w._enabled == enabled_before,
+           and w.draft == draft_before,
            repr((flipped["cells"][0], back["cells"][0])))
 except Exception as e:
     record("16b on the carry screen both keys flip only the cursor row",
@@ -684,13 +691,14 @@ try:
             w.handle("x")
             w.handle("space")
             w.handle("down")
-        marked_ever = marked_ever or any("flash-high@agy" in marks for marks in w._marks.values())
+        marked_ever = (marked_ever or w.draft.lane("flash-high@agy").carried
+                       or any("flash-high@agy" in w.draft.tier_lanes(t) for t in range(1, 5)))
         w.handle("enter")
     review = [r["cells"][4] for r in w.view()["rows"]]
     record("17 a lane switched off on the carry page shows on no tier page, and space cannot mark it",
            listed == [False, False, False, False] and not marked_ever
            and w.screen == "review" and "flash-high@agy" not in review
-           and w._assigned["flash-high@agy"] == LANES["lanes"]["flash-high@agy"]["tier"],
+           and w.draft.lane("flash-high@agy").tier == LANES["lanes"]["flash-high@agy"]["tier"],
            repr((listed, review)))
 except Exception as e:
     record("17 a lane switched off on the carry page shows on no tier page, and space cannot mark it",
@@ -716,7 +724,7 @@ try:
            blocked and w.screen == "review")
     to_confirm(w)
     w.handle("y")
-    lanes, _ = w.result()
+    lanes, _ = saved(w)
     record("18b a lane not carried is written off, with the tier the catalog had",
            lanes["lanes"]["flash-high@agy"]["tier"] == 3
            and lanes["lanes"]["flash-high@agy"]["enabled"] is False
@@ -745,7 +753,8 @@ try:
     lane_rows = [r for r in v["rows"] if not r.get("section")]
     shape = (w.screen == "review" and v["columns"][:2] == ["#", "lane"]
              and [tier for tier, _ in layout] == [4, 3, 2, 1]
-             and layout[0][1] == ["sol-high@codex", "fable-xhigh@claude"]
+             # the Order as read, then lane name; sol joined tier 4 at its end
+             and layout[0][1] == ["fable-xhigh@claude", "sol-high@codex"]
              and layout[1][1] == ["terra-high@codex"]
              and layout[2][1] == ["grok46-high@grok"]
              and sorted(names) == sorted(carried)
@@ -764,7 +773,7 @@ try:
     w.handle("enter")
     w.handle("enter")
     w.handle("y")
-    lanes, _ = w.result()
+    lanes, _ = saved(w)
     record("39 after tier 1 a review page lists every carried lane under its tier, numbered; j/k move, "
            "1-4 move a lane to that tier, enter goes to routing and b from routing returns to it",
            shape
@@ -806,12 +815,8 @@ try:
            # `value` is elastic so a path is not cut to 24 places
            and confirm["elastic"] == "value" and paths == ["/tmp/lanes.json", "/tmp/routing.json"]
            and any("enabled: false" in d["text"] for d in (confirm.get("defs") or [])))
-    w.handle("y")
-    lanes, _ = w.result()
-    on_lanes = [name for name in LANES["lanes"] if name != "flash-high@agy"]
-    record("20 enabled false only on lanes switched off",
-           lanes["lanes"]["flash-high@agy"]["enabled"] is False
-           and all("enabled" not in lanes["lanes"][name] for name in on_lanes))
+    # what `y` writes for a Lane switched off is the Draft's whole save
+    # (test_catalog_draft, "a whole save writes every carried Lane's place")
 except Exception as e:
     record("19 confirm lists lanes written off", False, repr(e))
 
@@ -829,14 +834,11 @@ try:
         w.handle("down")
     w.handle("x")
     flipped_on = carry_of(row_for(w.view(), "sol-high@codex")) == "on"
-    w.handle("enter")
-    finish(w)
-    lanes, _ = w.result()
-    record("21 incoming enabled false switched on drops the key",
-           start_from_prescreen and held and flipped_on
-           and "enabled" not in lanes["lanes"]["sol-high@codex"])
+    # the key it drops when written is the Draft's whole save (test_catalog_draft)
+    record("21 incoming enabled false holds on the carry page until x switches it on",
+           start_from_prescreen and held and flipped_on and w.draft.lane("sol-high@codex").carried)
 except Exception as e:
-    record("21 incoming enabled false switched on drops the key", False, repr(e))
+    record("21 incoming enabled false holds on the carry page until x switches it on", False, repr(e))
 
 
 try:
@@ -1148,17 +1150,18 @@ try:
     # in the message slot, where `every lane needs a tier` goes
     v = w.view()
     # Listing them by name ran thirty names off the line on the live page and
-    # was noise; the count says what matters, and the names stay in
-    # `_unmatched` for a `published_as` still owed to us.
+    # was noise; the count says what matters, and the names stay with the
+    # rows' evidence for a `published_as` still owed to us.
     ignored = next((line for line in v["legend"]
                     if line.endswith("benchmarked models have no lane")), "")
+    _rows, unmatched = published_names.resolve_effort_rows(w.lanes_doc, w.effort_rows)
     record("28d models that are nobody's lane are counted once, not warned per lane",
-           ignored == f"{len(w._unmatched)} benchmarked models have no lane"
-           and len(w._unmatched) >= 5 and "GLM-5.3" in w._unmatched
-           and "gpt-6-astra" not in w._unmatched
+           ignored == f"{len(unmatched)} benchmarked models have no lane"
+           and len(unmatched) >= 5 and "GLM-5.3" in unmatched
+           and "gpt-6-astra" not in unmatched
            and v["message"] == ""
            and all("no lane" not in why_of(row) for row in v["rows"]),
-           repr((ignored, w._unmatched)))
+           repr((ignored, unmatched)))
 except Exception as e:
     record("28d models that are nobody's lane are listed once, not warned per lane",
            False, repr(e))
@@ -1196,20 +1199,6 @@ except Exception as e:
     record("28e a slug-publishing source still matches, and rows are not mutated",
            False, repr(e))
 
-
-
-try:
-    w = wizard()
-    start(w)
-    mark_as(w, incoming_tiers(LANES))
-    finish(w)
-    lanes, routing = w.result()
-    # the one addition is each carried lane's place inside its tier (ticket 28)
-    record("26 round-trip with nothing switched off is byte-identical",
-           strip_order(lanes) == LANES and routing == ROUTING and orders_are_places(lanes)
-           and all("enabled" not in lane for lane in lanes["lanes"].values()))
-except Exception as e:
-    record("26 round-trip with nothing switched off is byte-identical", False, repr(e))
 
 
 try:
@@ -1753,7 +1742,8 @@ try:
            repr((carry_rows, t4)))
     # the review page is by tier and in the user's order, so the model grouping
     # does not apply there (ticket 28): with no lines and no catalog order a
-    # tier starts in benchmark order
+    # tier starts in lane-name order, and a lane ticked onto another tier
+    # joins it at its end (deepening F.1, F.2)
     move_to(w, "fable-low@claude")
     w.handle("space")            # remove its current tier-4 default
     move_to(w, "sol-high@codex")
@@ -1765,12 +1755,14 @@ try:
     w.handle("enter")
     w.handle("enter")            # the rest take tier 1
     review = dict(review_layout(w.view()))
-    tier1 = review[1]
-    record("44b the review page lists tiers 4 to 1, each starting in benchmark order without model grouping",
+    record("44b the review page lists tiers 4 to 1, each starting in lane-name order without model "
+           "grouping, a lane ticked onto another tier at its end",
            w.screen == "review"
-           and "sol-high@codex" in review[4] and "fable-low@claude" in review[3]
-           and review[2] == sorted(review[2], key=lambda n: setup_tui.bench_order_key(w.bench, n, doc))
-           and tier1 == sorted(tier1, key=lambda n: setup_tui.bench_order_key(w.bench, n, doc)),
+           and review[4] == ["fable-high@claude", "fable-max@claude", "fable-medium@claude",
+                             "fable-xhigh@claude", "sol-high@codex"]
+           and review[3] == ["sol-low@codex", "fable-low@claude"]
+           and review[2] == ["grok46-high@grok", "terra-high@codex"]
+           and review[1] == ["flash-high@agy", "flash-low@agy", "luna-low@codex"],
            repr(review))
 except Exception as e:
     record("44 the carry page and the tier pages group by model, efforts most to least", False, repr(e))
@@ -1783,7 +1775,7 @@ try:
     w = wizard(lanes=doc)
     start(w)
     t4 = [r["cells"][1] for r in w.view()["rows"]]
-    listed = [n for n in setup_tui.lane_order(doc, w.bench) if w._enabled[n]]
+    listed = [n for n in setup_tui.lane_order(doc, w.bench) if w.draft.lane(n).carried]
     record("45 lane_order is the tier page's order over the whole catalog",
            listed == t4 and setup_tui.bench_order_key(None, "x") == (True, 0, "x")
            # with no benchmark, the order is by name, still grouped
@@ -1844,7 +1836,12 @@ try:
             "fable-max@claude 1\n")
     parsed = tier_lines.parse_tier_lines(text, doc)
     carried = ["sol-high@codex", "luna-low@codex", "terra-high@codex", "grok46-high@grok", "flash-low@agy"]
-    dropped = tier_lines.unnamed_carried(parsed, carried)
+    carrying = copy.deepcopy(doc)
+    for name, lane in carrying["lanes"].items():
+        if name not in carried:
+            lane["enabled"] = False
+    # the Draft applies the lines; the summary counts what they switched off
+    dropped = CatalogDraft(carrying, ROUTING, whole=False).apply(parsed["decided"], "off")
     summary = tier_lines.tier_lines_summary(parsed, dropped)
     nothing = tier_lines.parse_tier_lines("nobody@codex 2\nnot a line\n", doc)
     record("47 one parser reads tier lines: blank lines skipped, the last line for a lane wins, unknown "
@@ -1856,14 +1853,14 @@ try:
            and parsed["bad"] == [6, 7, 8, 9]
            and parsed["refused"] == ["sol-ultra@codex"]
            # a carried lane no line names goes off, and the summary counts it (ticket 28)
-           and dropped == ["luna-low@codex", "grok46-high@grok", "flash-low@agy"]
+           and dropped == ["grok46-high@grok", "luna-low@codex", "flash-low@agy"]
            and summary == ("Lines: 2 took a tier; 1 went off; 3 not named, so off; "
                            "named twice, last line kept: terra-high@codex; unknown, ignored: nobody@codex; "
                            "ultra, never carried, ignored: sol-ultra@codex; "
                            "not <lane> <1-4|off>, ignored: line 6, 7, 8, 9.")
            and tier_lines.parse_tier_lines("", doc)["decided"] == {}
            # lines that name no lane decide nothing, so nothing goes off
-           and tier_lines.unnamed_carried(nothing, carried) == []
+           and CatalogDraft(carrying, ROUTING, whole=False).apply(nothing["decided"], "off") == []
            and tier_lines.tier_lines_summary(nothing, []) == (
                "Lines: no line names a lane in this catalog, so nothing changed; "
                "unknown, ignored: nobody@codex; not <lane> <1-4|off>, ignored: line 2."),
@@ -1901,7 +1898,7 @@ try:
     cursor = next(r["cells"][1] for r in view["rows"] if r["cursor"])
     grid = overlay(layout_lines(view, 200, 50), 200, 50)
     finish(w)
-    lanes, _routing = w.result()
+    lanes, _routing = saved(w)
     record("48 v on the review page applies the clipboard's lines: a tier line carries and tiers, off sets "
            "not carried, a carried lane with no line goes off, and one line says so",
            before == 0 and len(calls) == 1
@@ -1932,7 +1929,7 @@ try:
     first = at_review(lambda: current_lines)
     first.handle("v")
     finish(first)
-    pasted, _routing = first.result()
+    pasted, _routing = saved(first)
 
     second = wizard(lanes=pasted)
     start(second)
@@ -1948,8 +1945,8 @@ try:
     finish(second)
     record("48b a catalog first created with v restores its tiers and order on the next run",
            restored == [True, True, True, True]
-           and second.result()[0] == pasted,
-           repr((restored, second.result()[0])))
+           and second.result()["lanes"] == pasted,
+           repr((restored, second.result()["lanes"])))
 except Exception as e:
     record("48b a catalog first created with v restores its tiers and order on the next run",
            False, repr(e))
@@ -1963,9 +1960,9 @@ try:
     for reader, said in ((missing, "v: pbpaste not found; nothing changed"),
                          (lambda: "  \n\n", "v: the clipboard holds no lines; nothing changed")):
         w = at_review(reader)
-        state = (dict(w._assigned), dict(w._enabled), list(w._review_order))
+        state = (copy.deepcopy(w.draft), review_layout(w.view()))
         w.handle("v")
-        outcomes.append(w.message == said and state == (dict(w._assigned), dict(w._enabled), list(w._review_order)))
+        outcomes.append(w.message == said and state == (w.draft, review_layout(w.view())))
     # the real reader with no pbpaste on PATH raises, never runs anything else
     saved_path = os.environ.get("PATH", "")
     with tempfile.TemporaryDirectory() as empty:
@@ -2036,7 +2033,7 @@ try:
            review_layout(w.view()) == [(4, []), (3, []),
                                        (2, ["terra-high@codex", "sol-high@codex", "grok46-high@grok"]),
                                        (1, ["luna-low@codex"])]
-           and not w._enabled["fable-xhigh@claude"] and not w._enabled["flash-high@agy"],
+           and not w.draft.lane("fable-xhigh@claude").carried and not w.draft.lane("flash-high@agy").carried,
            repr(review_layout(w.view())))
 except Exception as e:
     record("51 the lines' order inside a tier is the review page's starting order", False, repr(e))
@@ -2078,7 +2075,7 @@ try:
     w.handle("enter")
     w.handle("enter")
     w.handle("y")
-    lanes, _routing = w.result()
+    lanes, _routing = saved(w)
     written = {name: (lane["tier"], lane.get("order"), lane.get("enabled", True))
                for name, lane in lanes["lanes"].items()}
     catalog.validate_lanes(lanes)
@@ -2098,23 +2095,23 @@ except Exception as e:
 
 try:
     # with no lines, an order the catalog already gives a lane at its tier is the
-    # starting order; a lane without one follows in benchmark order
+    # starting order; a lane without one follows in lane-name order (deepening
+    # F.1). How a gap in the catalog's order closes when written is the
+    # Draft's (test_catalog_draft).
     doc = all_tier_one(LANES)
     doc["lanes"]["luna-low@codex"]["order"] = 1
     doc["lanes"]["grok46-high@grok"]["order"] = 2
-    doc["lanes"]["sol-high@codex"]["order"] = 7   # a gap in the catalog closes up when written
+    doc["lanes"]["sol-high@codex"]["order"] = 7
     w = wizard(lanes=doc)
     start(w)
     while w.screen == "tier":
         w.handle("enter")
     tier1 = dict(review_layout(w.view()))[1]
-    rest = tier1[3:]
     finish(w)
-    lanes, _routing = w.result()
-    record("53 with no lines a catalog's order starts the review page, the rest in benchmark order",
-           tier1[:3] == ["luna-low@codex", "grok46-high@grok", "sol-high@codex"]
-           and rest == sorted(rest, key=lambda n: setup_tui.bench_order_key(w.bench, n, doc))
-           and lanes["lanes"]["sol-high@codex"]["order"] == 3 and orders_are_places(lanes),
+    record("53 with no lines a catalog's order starts the review page, the rest in lane-name order",
+           tier1 == ["luna-low@codex", "grok46-high@grok", "sol-high@codex",
+                     "fable-xhigh@claude", "flash-high@agy", "terra-high@codex"]
+           and orders_are_places(w.result()["lanes"]),
            repr(tier1))
 except Exception as e:
     record("53 with no lines a catalog's order starts the review page", False, repr(e))
@@ -2167,16 +2164,16 @@ try:
     record(
         "55 focused carry starts from catalog decisions and does not apply unseen proposals",
         focused.screen == "prescreen"
-        and focused._enabled["sol-low@codex"] is True
-        and full._enabled["sol-low@codex"] is False
-        and focused._enabled["sol-high@codex"] is True,
-        repr((full._enabled.get("sol-low@codex"), focused._enabled.get("sol-low@codex"))),
+        and focused.draft.lane("sol-low@codex").carried is True
+        and full.draft.lane("sol-low@codex").carried is False
+        and focused.draft.lane("sol-high@codex").carried is True,
+        repr((full.draft.lane("sol-low@codex"), focused.draft.lane("sol-low@codex"))),
     )
     focused.handle("enter")
     record("55b focused carry enter reviews chosen edits on confirm",
            focused.screen == "confirm", focused.screen)
     focused.handle("y")
-    written, routing = focused.result()
+    written, routing = saved(focused)
     record(
         "55c focused enter without edits preserves carry and does not write meters",
         written["lanes"]["sol-low@codex"].get("enabled", True) is True
@@ -2193,18 +2190,16 @@ try:
     w = wizard(focus="tier3")
     record("56 focused tier3 opens that page on current assignments",
            w.screen == "tier" and w.tier == 3, (w.screen, w.tier))
-    before = dict(w._assigned)
     w.handle("enter")
     record("56b focused tier enter goes to confirm", w.screen == "confirm", w.screen)
     w.handle("y")
-    lanes, _routing = w.result()
+    lanes, _routing = saved(w)
     record(
         "56c focused untouched tier choices keep catalog tiers",
         all(lanes["lanes"][name]["tier"] == LANES["lanes"][name]["tier"]
             for name in LANES["lanes"]),
         repr({n: lanes["lanes"][n]["tier"] for n in LANES["lanes"]}),
     )
-    _ = before
 except Exception as e:
     record("56 focused tier3 opens that page on current assignments", False, repr(e))
 
@@ -2215,11 +2210,14 @@ try:
     for _ in range(len(catalog.CLASSES) * 2 + 2):
         w.handle("down")
     w.handle("space")
+    meters_row = next(r for r in w.view()["rows"] if r["cells"][0] == "  meters")
     record("57b space/x flips meters with the established marker",
-           not w._meters_on() and w.routing_doc.get("meters") is False, w.routing_doc.get("meters"))
+           meters_row["cells"][1] == "[ ] off" and not meters_row["marked"]
+           and w.draft.documents()["routing"].get("meters") is False,
+           w.draft.documents()["routing"].get("meters"))
     w.handle("enter")
     w.handle("y")
-    _lanes, routing = w.result()
+    _lanes, routing = saved(w)
     record("57c focused routing writes meters false and keeps Gate/Margin",
            routing.get("meters") is False
            and routing["gate"] == ROUTING["gate"]
@@ -2251,7 +2249,7 @@ for focus in ("carry", "tier1", "tier2", "tier3", "tier4", "review", "routing"):
                any("Nothing will be written" in str(row["cells"]) for row in w.view()["rows"]))
         w.handle("y")
         record(f"59 {focus} no-op preserves all Lane fields and routing",
-               w.result() == (source, ROUTING), w.result())
+               w.result() == {"lanes": source, "routing": ROUTING}, w.result())
     except Exception as e:
         record(f"59 {focus} focused no-op", False, repr(e))
 try:
@@ -2262,7 +2260,7 @@ try:
     preview = w.view()
     w.handle("y")
     record("60 routing-only focused save leaves every Lane field unchanged",
-           w.result()[0] == LANES and all(row["cells"][0] in ("meters", "file", "target")
+           w.result()["lanes"] == LANES and all(row["cells"][0] in ("meters", "file", "target")
                                         for row in preview["rows"]), preview)
     w = wizard(focus="tier3")
     name = next(n for n, lane in LANES["lanes"].items()
@@ -2271,7 +2269,7 @@ try:
     w.handle("space")
     w.handle("enter")
     w.handle("y")
-    result = w.result()[0]
+    result = w.result()["lanes"]
     record("61 focused Tier unmark demotes one Tier and appends at its end",
            result["lanes"][name]["tier"] == 2
            and catalog.carried_in_tier(result["lanes"], 2)[-1] == name, result)
@@ -2367,16 +2365,21 @@ try:
         w = Wizard(doc, copy.deepcopy(ROUTING), None, DISCOVERED,
                    "/tmp/lanes.json", "/tmp/routing.json", "",
                    bench_page_path=page_path, effort_rows=page_rows)
-        key_before = bench_page.catalog_key(w.current_lanes())
-        carried_before = [l["name"] for l in bench_page.plot_data(page_rows, w.current_lanes())["lanes"]
+        def page_lanes():
+            return w.draft.documents()["lanes"]
+
+        key_before = bench_page.catalog_key(page_lanes())
+        carried_before = [l["name"] for l in bench_page.plot_data(page_rows, page_lanes())["lanes"]
                           if l["carried"]]
-        # carry it here, as the carry page's space does
-        w._enter_prescreen()
-        w._toggle_enabled("grok46-high@grok")
+        # carry it on the carry page
+        w.handle("enter")
+        w.handle("enter")
+        move_to(w, "grok46-high@grok")
+        w.handle("space")
         message = w.rewrite_bench_page()
         after = open(page_path, encoding="utf-8").read()
-        key_after = bench_page.catalog_key(w.current_lanes())
-        carried_after = [l["name"] for l in bench_page.plot_data(page_rows, w.current_lanes())["lanes"]
+        key_after = bench_page.catalog_key(page_lanes())
+        carried_after = [l["name"] for l in bench_page.plot_data(page_rows, page_lanes())["lanes"]
                          if l["carried"]]
         record("64 o writes the page again from this session's carry decisions",
                message == ""
@@ -2388,11 +2391,18 @@ try:
                key_before == key_after == bench_page.catalog_key(LANES)
                and f'"catalogKey":"{key_after}"' in after and key_after in first,
                repr((key_before, key_after)))
+        carried_tier = page_lanes()["lanes"]["grok46-high@grok"]["tier"]
+        # and tick it on the tier 4 page
+        w.handle("enter")
+        move_to(w, "grok46-high@grok")
+        w.handle("space")
+        ticked = w.rewrite_bench_page()
+        grok = next(l for l in bench_page.plot_data(page_rows, page_lanes())["lanes"]
+                    if l["name"] == "grok46-high@grok")
         record("64c a tier taken on a tier page reaches the page the same way",
-               w.current_lanes()["lanes"]["grok46-high@grok"]["tier"]
-               == LANES["lanes"]["grok46-high@grok"]["tier"]
-               and w.current_lanes() is not w.lanes_doc,
-               repr(w.current_lanes()["lanes"]["grok46-high@grok"]))
+               carried_tier == LANES["lanes"]["grok46-high@grok"]["tier"]
+               and ticked == "" and grok["tier"] == 4 and page_lanes() is not w.lanes_doc,
+               repr((carried_tier, grok)))
         # a page that cannot be written is a message, never a stop
         w.bench_page_path = os.path.join(td, "no-such-directory", "bench.html")
         record("64d a page that cannot be written says so and changes nothing else",
@@ -2707,7 +2717,8 @@ try:
            "and counts the benchmarked models that are nobody's lane",
            [d["term"] for d in v["defs"]] == ["X wins on S", "not dominated", "no rows"]
            and v["defs"][0] == setup_tui.DOMINATED_DEF and v["defs"][0]["style"] == "why-data"
-           and v["legend"] == [f"{len(w._unmatched)} benchmarked models have no lane"]
+           and v["legend"] == [f"{len(published_names.resolve_effort_rows(w.lanes_doc, TBENCH)[1])} "
+                               "benchmarked models have no lane"]
            and def_lines[0][1] == [("X wins on S", "why-data")]
            and def_lines[1][1] == [("not dominated", "term")]
            and def_lines[0][0].startswith("X wins on S    effort X scores")
@@ -2764,7 +2775,7 @@ try:
     headings = [(r["cells"][0], r["cells"][1]) for r in v["rows"] if r.get("styles")]
     settings = [r["cells"][0] for r in v["rows"] if not r.get("styles")]
     landed = []
-    for _ in range(len(w._routing_settings()) + 1):
+    for _ in range(len(settings) + 1):
         landed.append(next(r["cells"][0] for r in w.view()["rows"] if r["cursor"]))
         w.handle("down")
     entries = layout_lines(w.view(80), 80, 24)
@@ -2807,7 +2818,7 @@ try:
     entries = layout_lines(w.view(80), 80, 24)
     styled = [(text, [(text[s:e], st) for s, e, st in spans])
               for _y, text, role, spans in sorted(entries) if role == "legend" and spans]
-    w.routing_doc["meters"] = False
+    w.draft.set_routing("meters", False)
     off = {d["term"]: d for d in w.view()["defs"]}
     focused = wizard(focus="routing")
     focused.handle("enter")
@@ -2844,10 +2855,10 @@ try:
     carry_wizard.handle("x")
     carry_wizard.handle("b")
     lanes_before = copy.deepcopy(carry_wizard.lanes_doc)
-    enabled_before = dict(carry_wizard._enabled)
+    draft_before = copy.deepcopy(carry_wizard.draft)
     carry_wizard.handle("r")
     refused_carry = (carry_wizard.message == setup_tui.RESCAN_REFUSED and carry_wizard.screen == "discovery"
-                     and calls == [] and carry_wizard._enabled == enabled_before
+                     and calls == [] and carry_wizard.draft == draft_before
                      and carry_wizard.lanes_doc == lanes_before and carry_wizard.scanned == "at launch")
     # a Tier choice: a lane unmarked on the tier 4 page
     tier, _r, _p = scanned_wizard(rescan=counted)
@@ -2882,15 +2893,32 @@ try:
     undone.handle("x"); undone.handle("x")
     undone.handle("b")
     undone.handle("r")
+    # a tick undone on a tier page is no change either: the Lane under the
+    # cursor ticked and unticked, and one unticked on tier 4 and ticked again
+    # there after a look at tier 3, each back at its starting place
+    untick, _r, _p = scanned_wizard(rescan=fine)
+    untick.handle("enter"); untick.handle("enter"); untick.handle("enter")
+    assert untick.screen == "tier" and untick.tier == 4, (untick.screen, untick.tier)
+    untick.handle("x"); untick.handle("x")
+    ticked = next(r["cells"][1] for r in untick.view()["rows"] if r["marked"])
+    move_to(untick, ticked)
+    untick.handle("x")
+    untick.handle("enter")
+    untick.handle("b")
+    move_to(untick, ticked)
+    untick.handle("x")
+    untick.handle("b"); untick.handle("b")
+    untick.handle("r")
     record("75 r once a carry or Tier choice exists does nothing but say to quit and start "
            "again; with no change it rescans",
            refused_carry and refused_tier
            and trip_screen == "routing" and trip_back == "discovery"
            and undone.scanned == "at 14:07" and trip.scanned == "at 14:07"
-           and len(ok_calls) == 2 and len(setup_tui.RESCAN_REFUSED) <= 79
+           and untick.scanned == "at 14:07" and untick.message.startswith("Rescanned at 14:07")
+           and len(ok_calls) == 3 and len(setup_tui.RESCAN_REFUSED) <= 79
            and "quit and start again" in setup_tui.RESCAN_REFUSED,
            repr((carry_wizard.message, tier.message, trip_screen, trip_back, trip.message,
-                 undone.message, ok_calls)))
+                 undone.message, untick.message, ok_calls)))
 except Exception as e:
     record("75 r once a carry or Tier choice exists does nothing", False, repr(e))
 
@@ -2930,18 +2958,25 @@ try:
                 "refresh": None, "rows_note": "", "effort_rows": TBENCH, "bench": None,
                 "message": ""}
 
+    def evidence(wizard):
+        """The proposals, their reasons and the unmatched models the wizard's
+        catalog and rows give."""
+        decisions = carry.decisions(wizard.lanes_doc, wizard.effort_rows)
+        return (decisions, {name: bench.carry_reason(d) for name, d in decisions.items()},
+                published_names.resolve_effort_rows(wizard.lanes_doc, wizard.effort_rows)[1])
+
     w, _r, _p = scanned_wizard(rescan=other_rows)
     w.handle("enter")
-    old = (copy.deepcopy(w._proposals), dict(w._reasons), copy.deepcopy(w._unmatched))
+    old = evidence(w)
     w.handle("r")
+    new = evidence(w)
     record("77 a rescan rebuilds the proposals, the reasons and the unmatched models from the "
            "rows it found",
-           w._proposals == fresh._proposals and w._reasons == fresh._reasons
-           and w._unmatched == fresh._unmatched
-           and old != (w._proposals, w._reasons, w._unmatched)
-           and any(p["kind"] == carry.KIND_DOMINATED for p in w._proposals.values())
-           and w._enabled == fresh._enabled,
-           repr((w._reasons, fresh._reasons)))
+           new == evidence(fresh) and old != new
+           and any(p["kind"] == carry.KIND_DOMINATED for p in new[0].values())
+           # and the carry decisions start from the new proposals
+           and w.draft == fresh.draft,
+           repr((new[1], evidence(fresh)[1])))
 except Exception as e:
     record("77 a rescan rebuilds the proposals, the reasons and the unmatched models", False, repr(e))
 
@@ -2954,13 +2989,20 @@ try:
                 "rows_note": "Benchmark rows: nowhere", "effort_rows": None, "bench": None,
                 "message": ""}
 
+    def state(wizard):
+        """What the pages after `r` start from, and the harnesses page as drawn
+        but for its message."""
+        view = wizard.view()
+        view.pop("message")
+        return (copy.deepcopy(wizard.draft), copy.deepcopy(wizard.lanes_doc),
+                copy.deepcopy(wizard.effort_rows), wizard.bench, sorted(wizard.discovered),
+                wizard.refresh, wizard.rows_note, wizard.scanned, wizard.screen, view)
+
     w, _r, _p = scanned_wizard(rescan=bad_doc)
     w.handle("enter")
-    saved = copy.deepcopy(w.__dict__)
+    before = state(w)
     w.handle("r")
-    after = dict(w.__dict__)
-    message = after.pop("message")
-    saved.pop("message")
+    message = w.message
     # the lines raise too: a lines file the new catalog cannot take
     def lines_raise():
         return {"lanes_doc": catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json")),
@@ -2970,18 +3012,15 @@ try:
     unreadable = object()  # deepcopy makes another, so it is compared by identity
     w2, _r, _p = scanned_wizard(rescan=lines_raise, tier_lines=unreadable)
     w2.handle("enter")
-    saved2 = copy.deepcopy(w2.__dict__)
+    before2 = state(w2)
     w2.handle("r")
-    after2 = dict(w2.__dict__)
-    message2 = after2.pop("message")
-    saved2.pop("message")
-    kept_lines = after2.pop("tier_lines") is unreadable
-    saved2.pop("tier_lines")
+    message2 = w2.message
     record("78 an exception in the rescan's rebuild is a message and leaves the wizard as it was",
-           after == saved and message.startswith("rescan failed: ")
+           state(w) == before and message.startswith("rescan failed: ")
            and w.scanned == "at launch" and w.rescan_ready()
-           and after2 == saved2 and kept_lines and message2.startswith("rescan failed: "),
-           repr((message, message2, sorted(k for k in after if after[k] != saved.get(k)))))
+           and state(w2) == before2 and w2.tier_lines is unreadable
+           and message2.startswith("rescan failed: "),
+           repr((message, message2)))
 except Exception as e:
     record("78 an exception in the rescan's rebuild is a message", False, repr(e))
 
@@ -3025,14 +3064,15 @@ try:
     w.screen = "routing"
     w.cursor = len(catalog.CLASSES) * 2 + 1   # triage's ceiling
     w.handle("plus")
-    headings = [r["cells"][0] for r in w._routing_rows() if not r["cells"][0].startswith("  ")]
+    headings = [r["cells"][0] for r in w.view()["rows"] if not r["cells"][0].startswith("  ")]
+    triage = w.draft.documents()["routing"]["classes"]["triage"]
     record("80 the wizard shows the shipped Classes by default and edits a Class the catalog adds",
            bare_w.classes == list(catalog.CLASSES)
-           and set(bare_w.routing_doc["classes"]) == set(catalog.CLASSES)
+           and set(bare_w.draft.documents()["routing"]["classes"]) == set(catalog.CLASSES)
            and w.classes == list(catalog.CLASSES) + ["triage"]
            and "triage" in headings
-           and w.routing_doc["classes"]["triage"] == {"floor": 1, "ceiling": 3},
-           f"{bare_w.classes} {headings} {w.routing_doc['classes'].get('triage')}")
+           and triage == {"floor": 1, "ceiling": 3},
+           f"{bare_w.classes} {headings} {triage}")
 except Exception as e:
     record("80 the wizard shows the shipped Classes by default", False, repr(e))
 

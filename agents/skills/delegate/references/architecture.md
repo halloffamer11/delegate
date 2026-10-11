@@ -99,7 +99,9 @@ replaces partial use of invalid documents.
   Lanes; `whole=False` writes only changed fields and numbers a Tier only when its sequence changed
   or lines or a proposal set it. It owns the meters-on rule too (no key where the catalog had none).
   It never mutates what it is given and validates nothing; the commit does. A draft compares by
-  value and is never hashed. `setup.py --plain` decides on one with `whole=False`.
+  value and is never hashed. `setup.py --plain` decides on one with `whole=False`, and
+  `setup_tui.Wizard` keeps one as `self.draft`: `whole=True` in the full wizard, `whole=False` on a
+  focused screen.
 - `scripts/catalog_cli.py`: `delegate catalog` (`show`, `check`, `check-guide`, `fmt`, and the
   edits above). `scripts/class_guides.py`: the Class guide checks behind `check-guide`.
   `scripts/tier_lines.py`: the parser and summary line for bulk Tier lines; the Draft applies them.
@@ -216,12 +218,17 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   them in sections tier 4 to 1, each numbered in its current order; j/k moves the cursor, J/K or
   shift-up/down moves the lane inside its tier, 1-4 moves it to the end of that tier, and the
   confirm write gives each carried lane `order`, its place from 1 (`catalog.py check` takes `order`
-  as a whole number from 1). The starting order is the applied lines' order, then an `order` the
-  catalog already has at that tier, then benchmark order. Tier pages restore the current catalog as
-  their editable defaults: lanes at the current tier are marked, lanes at a lower tier are visible
-  and unmarked, and lanes taken by a higher tier or not carried are hidden. Enter without edits
-  preserves the current tiers and order; a lane not carried keeps its catalog tier. Lines applied by
-  `v` or `--tiers-from` become the same editable defaults. The routing page explains the setting
+  as a whole number from 1). The starting order is the Draft's: the Order as read, then lane name;
+  lines and `p` put the lanes they name first in their tier, in their order; a lane that joins a
+  tier, by a tick or by 1-4, joins it at its end; and undo restores the starting place, so a lane
+  ticked back, or switched off and on, returns to its place. Tier pages restore the current catalog
+  as their editable defaults: lanes at the current tier are marked, lanes at a lower tier are
+  visible and unmarked, and lanes taken by a higher tier or not carried are hidden. A tick places
+  the lane at once; an untick returns it to its start tier when that tier is lower, and otherwise
+  leaves it for a lower page (on a focused screen, one tier down); entering tier 1 places every lane
+  still unplaced, in lane-name order. Enter decides nothing: without edits it keeps the current
+  tiers and order, and a lane not carried keeps the tier it started with. Lines applied by `v` or
+  `--tiers-from` become the same editable defaults. The routing page explains the setting
   under the cursor in a panel beside the table. The start page, and `--plain` from the same
   `setup_tui.start_facts`, states only facts: the two files, the benchmark page, the discovery
   notices. Setup discovery is one `discover.discover` result; `--no-discover` skips every probe;
@@ -243,9 +250,9 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   shows what the launch scrub found — per harness its status, models listed, and the Lanes the
   refresh adds and removes — with the rows note, and `r` runs the scrub again through `setup.scan`,
   `setup.propose_generation` and `setup.collect_bench` (the callback `main` passes as `rescan`,
-  forcing the rows fetch past the 24 h cache), after which `Wizard._load` derives every later page
-  again and the `--tiers-from` lines are applied again; it is offered on that page only, before any
-  decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
+  forcing the rows fetch past the 24 h cache), after which `Wizard._load` builds a new Draft and
+  the `--tiers-from` lines are applied again; it is offered on that page only, before any decision,
+  and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
   Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
@@ -333,16 +340,17 @@ takes no place in its Tier, and only a save refuses it —
 A new lane starts carried, `ultra` apart, so every effort of every current model
 reaches the screening page; `enabled` is the one field a successor does not inherit,
 because a predecessor switched off at an effort judged that model, not this one
-(ticket 35, changing ticket 33). `o` writes the page again before opening it, from
-`Wizard.current_lanes()` — the document the session started from, with the carry and
-Tier decisions made so far — so a lane carried on the carry page reaches the page
+(ticket 35, changing ticket 33). `o` writes the page again before opening it, from the
+Draft's `documents()["lanes"]` — the document the session started from, with the carry
+and Tier decisions made so far — so a lane carried on the carry page reaches the page
 (`Wizard.rewrite_bench_page`). The page's catalog key is its lane names, which no
 screen changes, so tiers already drawn in the browser survive the rewrite.
 Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
 It starts from the catalog as read and proposes no generation (deepening D.6): it has
 no start page to state a refresh. It restores current choices and shows only changed
-fields before confirmation. Its save commits only the documents the screen changed
-through the Catalog read taken at launch, which holds no Model queue: untouched
+fields before confirmation: `draft.changes()`. Its save commits only the documents
+those changes touch (`setup_tui.changed_documents`) through the Catalog read taken at
+launch, which holds no Model queue: untouched
 records and documents keep their bytes, a shipped Class the routing lacks is shown
 but never written unless a routing field changed, and a save with no change writes
 nothing. On a first run, with no catalog yet, a focused save that writes one document

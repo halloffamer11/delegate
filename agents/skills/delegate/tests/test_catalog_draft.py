@@ -85,11 +85,18 @@ def case_a_tier_as_read_is_numbered_by_order_then_name_and_gaps_close():
     order = draft.tier_lanes(2)
     places = {name: draft.lane(name).place for name in order}
     written = {name: lane["order"] for name, lane in draft.documents()["lanes"]["lanes"].items()}
+    # the wizard's review page as read (test_setup_tui 53): every Lane at Tier 1,
+    # orders 1, 2 and 7, and the three without one after them by name
+    one = sample(**{name: {"tier": 1} for name in LANES["lanes"]})
+    one["lanes"][LUNA]["order"], one["lanes"][GROK]["order"], one["lanes"][SOL]["order"] = 1, 2, 7
+    tier_one = placed(CatalogDraft(one, ROUTING, whole=True).documents()["lanes"])
     ok = (order == ["d@codex", "b@codex", "a@codex", "z@codex"]
           and places == {"d@codex": 1, "b@codex": 2, "a@codex": 3, "z@codex": 4}
           and written == places
-          and draft.lane("b@codex") == LaneDecision(carried=True, tier=2, place=2, start_tier=2))
-    return ok, f"order={order} places={places} written={written}"
+          and draft.lane("b@codex") == LaneDecision(carried=True, tier=2, place=2, start_tier=2)
+          and tier_one == {LUNA: (1, 1, None), GROK: (1, 2, None), SOL: (1, 3, None),
+                           FABLE: (1, 4, None), FLASH: (1, 5, None), TERRA: (1, 6, None)})
+    return ok, f"order={order} places={places} written={written} tier_one={tier_one}"
 
 
 NUMBERED = sample(**{FABLE: {"order": 1}, SOL: {"order": 1}, TERRA: {"order": 1},
@@ -293,9 +300,16 @@ def case_a_whole_save_writes_every_place_and_off_on_off_lanes_only():
     draft = CatalogDraft(given, ROUTING, whole=True)
     draft.carry(FLASH, False)
     written = placed(draft.documents()["lanes"])
-    ok = written == {FABLE: (4, 1, None), SOL: (3, 1, None), TERRA: (2, 1, None),
-                     GROK: (2, None, False), LUNA: (1, 1, None), FLASH: (1, None, False)}
-    return ok, f"written={written}"
+    # a Lane given enabled: false and switched on drops the key (test_setup_tui 21)
+    on = CatalogDraft(given, ROUTING, whole=True)
+    on.carry(GROK, True)
+    switched_on = placed(on.documents()["lanes"])
+    ok = (written == {FABLE: (4, 1, None), SOL: (3, 1, None), TERRA: (2, 1, None),
+                      GROK: (2, None, False), LUNA: (1, 1, None), FLASH: (1, None, False)}
+          and switched_on == {FABLE: (4, 1, None), SOL: (3, 1, None), TERRA: (2, 2, None),
+                              GROK: (2, 1, None), LUNA: (1, 1, None), FLASH: (1, 2, None)}
+          and "enabled" not in on.documents()["lanes"]["lanes"][GROK])
+    return ok, f"written={written} switched_on={switched_on}"
 
 
 def case_meters_off_is_written_and_on_removes_only_a_key_the_catalog_lacked():
