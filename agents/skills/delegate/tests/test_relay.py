@@ -86,6 +86,11 @@ def blocked(reason):
             "open_questions": [], "changed_files": []}
 
 
+def tokens(n_in=0, out=0, cache_read=0, cache_write=0):
+    """Token counts, keyed like a Lane's price record."""
+    return {"in": n_in, "out": out, "cache_read": cache_read, "cache_write": cache_write}
+
+
 # ---------------------------------------------------------------------------
 # Settling, through Scripted
 # ---------------------------------------------------------------------------
@@ -102,7 +107,7 @@ def case_a_done_block_is_kept_within_its_caps(run_dir):
              "open_questions": [f"q{i}" for i in range(7)], "changed_files": ["a.py", None, "b.py"]}
     final = "Done, notes first. {not json}\n" + json.dumps(block)
     finish = settle(relays.Report(status="completed", final_message=final, exit=0, secs=12,
-                                  session_id="s-1", usage={"input_tokens": 3}, touched_files=["a.py"],
+                                  session_id="s-1", tokens=tokens(n_in=3), touched_files=["a.py"],
                                   read_only_violation=False), run_dir)
     kept = [{"file": f"f{i}.py", "line": i, "claim": "c" * 200} for i in (0, 1, 2, 4, 6, 7, 8, 9, 10, 11)]
     record("s1. a done block is the return, within its caps",
@@ -111,7 +116,7 @@ def case_a_done_block_is_kept_within_its_caps(run_dir):
                                    "open_questions": ["q0", "q1", "q2", "q3", "q4"],
                                    "changed_files": ["a.py", "b.py"]}
            and finish == runs.Finish(finish.returned, relay_status="completed", relay_exit=0, secs=12,
-                                     session_id="s-1", usage={"input_tokens": 3}, touched_files=["a.py"],
+                                     session_id="s-1", tokens=tokens(n_in=3), touched_files=["a.py"],
                                      read_only_violation=False),
            f"{finish} problems={problems(finish)}")
 
@@ -369,12 +374,16 @@ def case_ads_replays_the_grok_gate_cancel_fixture(w):
         "gate-empty", fixture="grok-gate-cancel", final_message=""))
     with open(os.path.join(RUN_FIXTURES, "grok-gate-cancel", "result.json"), encoding="utf-8") as f:
         fixture = json.load(f)
+    with open(os.path.join(gate_dir, "result.json"), encoding="utf-8") as f:
+        left = json.load(f)
     record("a3. Ads: the grok gate-cancel replay is blocked naming the gate, and its two variants are not",
            all(not problems(f) for f in (gate, no_tool, empty))
            and gate.returned == blocked(GATE) and gate.reason == GATE
            and gate.relay_status == "completed" and gate.relay_exit == 0
            and gate.session_id == "01a087c8-34ac-7d70-8c56-d8c6d5a30f77"
-           and gate.usage == fixture["usage"] and gate.touched_files == []
+           # the Finish carries Token counts; the raw record stays in the run's result.json
+           and gate.tokens == tokens(n_in=16595, out=794, cache_read=5888, cache_write=0)
+           and left.get("usage") == fixture["usage"] and gate.touched_files == []
            and gate.read_only_violation is False
            and os.path.isfile(os.path.join(gate_dir, "events.jsonl"))
            and no_tool.returned["status"] == "partial"
@@ -401,7 +410,7 @@ def case_ads_reads_every_result_key(w):
            and tail.reason == "first line\nsecond line" and tail.relay_exit == 1
            and error_first.reason == "boom"
            and tripped.read_only_violation is True and tripped.touched_files == ["x.py"]
-           and tripped.usage == {"input_tokens": 5}
+           and tripped.tokens == tokens(n_in=5)
            and tripped.returned["open_questions"][-1] == "read-only tripwire fired; review the diff",
            f"spellings={spellings} tail={tail} error_first={error_first} tripped={tripped}")
 
@@ -555,6 +564,54 @@ def case_ads_default_directory():
            f"DEFAULT_DIR={getattr(relays, 'DEFAULT_DIR', None)!r} ads.sh={shell_default!r}")
 
 
+def case_ads_token_counts_for_each_spelling(w):
+    """Every usage spelling a relay writes normalizes into Token counts. A
+    cache count rides with an input count, since a record with neither input
+    nor output holds no counts."""
+    no_record = object()
+    rows = (
+        ("input_tokens", {"input_tokens": 11}, tokens(n_in=11)),
+        ("inputTokens", {"inputTokens": 12}, tokens(n_in=12)),
+        ("prompt_tokens", {"prompt_tokens": 13}, tokens(n_in=13)),
+        ("promptTokens", {"promptTokens": 14}, tokens(n_in=14)),
+        ("output_tokens", {"output_tokens": 21}, tokens(out=21)),
+        ("outputTokens", {"outputTokens": 22}, tokens(out=22)),
+        ("completion_tokens", {"completion_tokens": 23}, tokens(out=23)),
+        ("completionTokens", {"completionTokens": 24}, tokens(out=24)),
+        ("cache_read_input_tokens", {"input_tokens": 1, "cache_read_input_tokens": 31},
+         tokens(n_in=1, cache_read=31)),
+        ("cachedInputTokens", {"inputTokens": 1, "cachedInputTokens": 32}, tokens(n_in=1, cache_read=32)),
+        ("cached_tokens", {"prompt_tokens": 1, "cached_tokens": 33}, tokens(n_in=1, cache_read=33)),
+        ("cache_read_tokens", {"input_tokens": 1, "cache_read_tokens": 34}, tokens(n_in=1, cache_read=34)),
+        ("cache_creation_input_tokens", {"input_tokens": 1, "cache_creation_input_tokens": 41},
+         tokens(n_in=1, cache_write=41)),
+        ("cacheCreationInputTokens", {"inputTokens": 1, "cacheCreationInputTokens": 42},
+         tokens(n_in=1, cache_write=42)),
+        # a count that is not a number is not read; the next spelling is
+        ("not-a-number", {"input_tokens": "lots", "inputTokens": 7, "output_tokens": True},
+         tokens(n_in=7)),
+        # no counts: a null record, cache counts with neither input nor
+        # output, a record that is not an object, and no record at all
+        ("null", None, None),
+        ("cache-only", {"cached_tokens": 9, "cache_creation_input_tokens": 3}, None),
+        ("not-a-record", ["input_tokens", 5], None),
+        ("absent", no_record, None),
+    )
+    seen = []
+    for name, usage, want in rows:
+        result = {"status": "completed", "finalMessage": "prose", "exitCode": 0}
+        if usage is not no_record:
+            result["usage"] = usage
+        finish, _ = w.run(f"tokens-{name}", "grok46-high@grok",
+                          f"replay={w.stage(f'tokens-{name}', result=result)}")
+        seen.append((name, finish.tokens == want and not problems(finish), finish.tokens))
+    # the fake relay, like codex, reports usage null
+    fake, _ = w.run("tokens-fake-relay", "terra-high@codex", "status=completed")
+    seen.append(("fake relay", fake.tokens is None and not problems(fake), fake.tokens))
+    record("a9. Ads: Token counts for every usage spelling, and none from a relay that reported none",
+           all(ok for _, ok, _ in seen), repr([s for s in seen if not s[1]]))
+
+
 def main():
     with tempfile.TemporaryDirectory() as run_dir:
         case_a_done_block_is_kept_within_its_caps(run_dir)
@@ -582,6 +639,7 @@ def main():
         case_ads_argv_and_env_per_harness(w)
         case_ads_check(w)
         case_ads_default_directory()
+        case_ads_token_counts_for_each_spelling(w)
     finally:
         w.close()
     sys.exit(1 if failures else 0)

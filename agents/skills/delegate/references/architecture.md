@@ -115,15 +115,18 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `dispatch.json` has not ended, within its Lane's timeout. It skips a Ledger line it cannot read
   and never raises, and `report.py statusline` counts its glyphs from it. Run directories under
   `~/.cache/delegate/runs/`, never reused.
-- `scripts/relays.py`: the Relay seam (delegate-deepening 05 and 07). `Relay.check()` says in one line
+- `scripts/relays.py`: the Relay seam (delegate-deepening 05, 07 and 08). `Relay.check()` says in one line
   why relays cannot run here, or None; `delegate.resolve` asks it for a relayed Lane before a Run
   starts, and a refusal exits 2 with nothing started. `Relay.run(job, run_dir)` runs one
   relayed `Job` and returns a `runs.Finish`; the module defines no outcome type of its own. The `Ads`
   adapter alone knows the ADS directory (the argument, else `$ADS_DIR`, else `relays.DEFAULT_DIR`,
   which a test holds equal to `ads.sh`'s default), `ads.sh check` (run with `ADS_DIR` set to that
   directory), node, the relay path, the argv (`--brief --cd --out-dir --model` plus
-  `Harness.run_args`) and env overrides, `relay.stdout` and `relay.stderr`, every `result.json` key,
-  the form of node's crash output (the `<Name>Error: ...` line, never the `Node.js v...` trailer)
+  `Harness.run_args`) and env overrides, `relay.stdout` and `relay.stderr`, every `result.json` key
+  (each usage spelling it normalizes into Token counts `{in, out, cache_read, cache_write}`, keyed
+  like a Lane's price record, or None when the relay reported neither input nor output; the raw
+  record stays in `result.json`), the form of node's crash output (the `<Name>Error: ...` line,
+  never the `Node.js v...` trailer)
   and, through `Harness.blocked_reason`, `events.jsonl`. It returns a blocked `Finish` for every way
   a relay fails (node missing at spawn, no `result.json`, one that does not parse or is not an
   object) and catches only `OSError` and `ValueError`, so Ctrl-C and SIGTERM reach `runs.execute`.
@@ -184,8 +187,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   replaces with its successor into lanes.json, keeping Tier, Order and an off Lane off, after
   copying lanes.json to `lanes-backups/` beside the queue. The wizard names the swaps ("Dispatch
   swapped in"). `$DELEGATE_MODEL_APPLY=off` keeps the scan to queueing.
-- `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only
-  benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. Artificial Analysis
+- `scripts/report.py`: limits, runs, and the lead's run ledger. `log --run` and `cost` price a Run
+  from `dispatch.json`'s `tokens` and the Lane's price record (`compute_cost(tokens, lane, catalog)`,
+  delegate-deepening 08); null tokens, or a Run directory from before them, are unmeasured, never
+  $0. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no
+  routing code reads it. Artificial Analysis
   comes only from the rows `effort.py aa` accepted, passed as `--effort-rows` (no API, no key;
   ticket 19): the AA columns are the component benchmarks some lane has a figure for, with cost per
   task beside them and the composite never a column. `collect()` returns two views of the same

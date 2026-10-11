@@ -190,7 +190,7 @@ with tempfile.TemporaryDirectory() as tmp:
     grok_run = os.path.join(tmp, "run-grok")
     write_dispatch(grok_run, {
         "lane": "grok46-high@grok",
-        "usage": {"input_tokens": 120000, "output_tokens": 30000, "cached_tokens": 50000},
+        "tokens": {"in": 120000, "out": 30000, "cache_read": 50000, "cache_write": 0},
         "secs": 300, "status": "done", "thread_id": "t1",
     })
     rc, out, err = run(["log", "--work", "Grok job", "--run", grok_run, "--verdict", "clean"] + cfg, env)
@@ -213,24 +213,35 @@ with tempfile.TemporaryDirectory() as tmp:
 
     codex_null = os.path.join(tmp, "run-codex-null")
     write_dispatch(codex_null, {
-        "lane": "terra-high@codex", "usage": None, "secs": 12, "status": "done",
+        "lane": "terra-high@codex", "tokens": None, "secs": 12, "status": "done",
     })
     rc, out, err = run(["log", "--work", "Codex null", "--run", codex_null, "--verdict", "clean"] + cfg, env)
-    check("log --run null usage exits 0", rc == 0, err)
+    check("log --run null tokens exits 0", rc == 0, err)
     check("logged line ends with unmeasured", out.strip().endswith("unmeasured"), out)
     null_rec = [json.loads(l) for l in open(env["DELEGATE_RUNS"])][-1]
-    check("null usage stores measured false",
+    check("null tokens store measured false",
           (null_rec.get("cost") or {}).get("measured") is False, str(null_rec.get("cost")))
     rc, out, _ = run(["runs", "--last", "1"] + cfg, env)
     null_row = next((l for l in out.splitlines() if "Codex null" in l), "")
     check("runs shows unmeasured not $0.00",
           null_row and cells(null_row)[3] == "unmeasured" and "$0.00" not in null_row, out)
 
+    # A Run from before Token counts holds the relay's raw usage record; the
+    # report reads no relay spelling, so it is unmeasured.
+    raw_run = os.path.join(tmp, "run-raw-usage")
+    write_dispatch(raw_run, {
+        "lane": "grok46-high@grok",
+        "usage": {"input_tokens": 120000, "output_tokens": 30000, "cached_tokens": 50000},
+        "secs": 30, "status": "done",
+    })
+    rc, out, err = run(["cost", raw_run] + cfg, env)
+    check("cost of a Run with a raw usage record and no tokens is unmeasured",
+          rc == 0 and out.startswith("unmeasured: "), f"rc={rc} out={out} err={err}")
+
     claude_run = os.path.join(tmp, "run-claude")
     write_dispatch(claude_run, {
         "lane": "fable-xhigh@claude",
-        "usage": {"input_tokens": 1000, "output_tokens": 2000,
-                  "cache_creation_input_tokens": 8000},
+        "tokens": {"in": 1000, "out": 2000, "cache_read": 0, "cache_write": 8000},
         "secs": 9, "status": "done",
     })
     rc, _, err = run(["log", "--work", "Claude write", "--run", claude_run, "--verdict", "clean"] + cfg, env)
@@ -243,8 +254,7 @@ with tempfile.TemporaryDirectory() as tmp:
     terra_run = os.path.join(tmp, "run-terra")
     write_dispatch(terra_run, {
         "lane": "terra-high@codex",
-        "usage": {"input_tokens": 1000000, "output_tokens": 1000,
-                  "cache_creation_input_tokens": 4000},
+        "tokens": {"in": 1000000, "out": 1000, "cache_read": 0, "cache_write": 4000},
         "secs": 8, "status": "done",
     })
     rc, _, err = run(["log", "--work", "Terra null write", "--run", terra_run, "--verdict", "clean"] + cfg, env)
@@ -257,7 +267,7 @@ with tempfile.TemporaryDirectory() as tmp:
     mixed_run = os.path.join(tmp, "run-explicit-lane")
     write_dispatch(mixed_run, {
         "lane": "grok46-high@grok",
-        "usage": {"input_tokens": 120000, "output_tokens": 30000, "cached_tokens": 50000},
+        "tokens": {"in": 120000, "out": 30000, "cache_read": 50000, "cache_write": 0},
         "secs": 15, "status": "done",
     })
     rc, _, err = run(["log", "--work", "Explicit lane", "--run", mixed_run,
@@ -274,7 +284,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # the wall time, as SKILL.md step 4 says to pass it.
     native_run = os.path.join(tmp, "run-native")
     write_dispatch(native_run, {
-        "lane": "fable-xhigh@claude", "usage": None, "secs": None, "status": "native",
+        "lane": "fable-xhigh@claude", "tokens": None, "secs": None, "status": "native",
         "reason": "handed to lane-fable-xhigh", "thread_id": "t-native",
     })
     rc, out, err = run(["log", "--work", "Native job", "--run", native_run, "--verdict", "clean"] + cfg, env)
@@ -308,7 +318,7 @@ with tempfile.TemporaryDirectory() as tmp:
     unpriced_run = os.path.join(tmp, "run-unpriced")
     write_dispatch(unpriced_run, {
         "lane": "luna-low@codex",
-        "usage": {"input_tokens": 500000, "output_tokens": 1000},
+        "tokens": {"in": 500000, "out": 1000, "cache_read": 0, "cache_write": 0},
         "secs": 20, "status": "done",
     })
     rc, out, err = run(["log", "--work", "Unpriced job", "--run", unpriced_run, "--verdict", "clean",

@@ -92,7 +92,8 @@ def case_a_run_that_returns():
             seen["dispatch"] = run.read()["dispatch"]
             seen["ledger"] = w.lines()
             return runs.Finish(dict(RETURNED, extra="dropped"), relay_status="completed",
-                               relay_exit=0, secs=12, session_id="s-1", usage={"in": 1})
+                               relay_exit=0, secs=12, session_id="s-1",
+                               tokens={"in": 1, "out": 2, "cache_read": 0, "cache_write": 0})
 
         ended = runs.execute(request(), b"the prompt\n", work, w.root)
         run = runs.Run(ended.run)
@@ -119,14 +120,16 @@ def case_a_run_that_returns():
                # after: the five fields, the outcome in order, the session under both names
                and read["return"] == RETURNED
                and tuple(disp) == runs.DISPATCH_FIELDS
+               and OUTCOME == ("relay_status", "relay_exit", "secs", "status", "reason", "session_id",
+                               "session", "tokens", "touched_files", "read_only_violation", "finished_at")
                and {k: disp[k] for k in runs.DISPATCH_FIELDS if k not in stamped} == {
                    "lane": "sol-high@codex", "harness": "codex", "model": "gpt-6-sol",
                    "effort": "high", "timeout": "30m", "class": "impl", "leash": False,
                    "orchestrator": None, "cwd": "/w", "write": None, "brief": "/w/b.md",
                    "prompt": run.prompt_path, "relay_status": "completed", "relay_exit": 0,
                    "secs": 12, "status": "done", "reason": None, "session_id": "s-1",
-                   "session": "s-1", "usage": {"in": 1}, "touched_files": None,
-                   "read_only_violation": None}
+                   "session": "s-1", "tokens": {"in": 1, "out": 2, "cache_read": 0, "cache_write": 0},
+                   "touched_files": None, "read_only_violation": None}
                and thread and disp["started_at"] and disp["finished_at"]
                # the Ledger: one start and one finish on one thread
                and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]

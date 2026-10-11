@@ -185,6 +185,8 @@ def main():
                 ret1["evidence"][0]["line"] == 42 and
                 disp1.get("secs") is not None and
                 disp1.get("session_id") == "fake-thread" and
+                # the fake relay, like codex, reports no usage: unmeasured, not zero
+                "tokens" in disp1 and disp1["tokens"] is None and "usage" not in disp1 and
                 set(ret1.keys()) == {"status", "deliverable", "evidence", "open_questions", "changed_files"}
             )
         record("1. completed done block", ok1, f"rc={res1.returncode} stdout={res1.stdout} stderr={res1.stderr}")

@@ -13,7 +13,8 @@ Two adapters:
   Ads       the pinned delegate-skills relays, through node. It alone knows
             the ADS directory (the argument, else $ADS_DIR, else DEFAULT_DIR),
             `ads.sh check`, node, the relay path, the argv, the env overrides,
-            relay.stdout and relay.stderr, every result.json key, the form of
+            relay.stdout and relay.stderr, every result.json key (the usage
+            record's spellings it normalizes into Token counts), the form of
             node's crash output, and events.jsonl (through
             `Harness.blocked_reason`).
   Scripted  a fake for tests, scripted with what a relay says (a Report), so
@@ -67,6 +68,15 @@ _NODE_MISSING = "node is not on PATH; the relay needs Node.js"
 _NODE_ERROR = re.compile(r"^(?:[A-Za-z_$][\w$]*)?Error(?: \[[^\]]+\])?: ")
 _NODE_TRAILER = re.compile(r"^Node\.js v\d")
 
+# Each Token count, keyed like a Lane's price record, and the spellings a
+# relay's usage record gives it under, read in this order.
+_TOKEN_SPELLINGS = (
+    ("in", ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens")),
+    ("out", ("output_tokens", "outputTokens", "completion_tokens", "completionTokens")),
+    ("cache_read", ("cache_read_input_tokens", "cachedInputTokens", "cached_tokens", "cache_read_tokens")),
+    ("cache_write", ("cache_creation_input_tokens", "cacheCreationInputTokens")),
+)
+
 
 class Job(NamedTuple):
     """One relayed job: what a relay needs to run it."""
@@ -87,7 +97,7 @@ class Report(NamedTuple):
     exit: Optional[int] = None    # the relay process's exit code; None when no process ran
     secs: int = 0
     session_id: Optional[str] = None
-    usage: Optional[dict] = None  # the relay's raw usage record, as dispatch.json keeps it
+    tokens: Optional[dict] = None # Token counts {"in","out","cache_read","cache_write"}, or None
     touched_files: Optional[list] = None
     read_only_violation: Optional[bool] = None
     stopped: Optional[str] = None # why a completed job stopped short (Harness.blocked_reason), or None
@@ -190,8 +200,24 @@ def _read(adapter, run_dir, exit_code, secs):
     return Report(
         status=status, final_message=str(final) if final else "", error=error, exit=exit_code,
         secs=secs, session_id=doc.get("threadId") or doc.get("sessionId") or doc.get("conversationId"),
-        usage=doc.get("usage"), touched_files=doc.get("touchedFiles"),
+        tokens=_tokens(doc.get("usage")), touched_files=doc.get("touchedFiles"),
         read_only_violation=doc.get("readOnlyViolation"), stopped=stopped)
+
+
+def _tokens(usage):
+    """A relay's usage record as Token counts, or None when it reported
+    neither input nor output. A count that is not a number is not read."""
+    if not isinstance(usage, dict):
+        return None
+    counts = {key: next((usage[s] for s in spellings if _is_count(usage.get(s))), None)
+              for key, spellings in _TOKEN_SPELLINGS}
+    if counts["in"] is None and counts["out"] is None:
+        return None
+    return {key: 0 if n is None else n for key, n in counts.items()}
+
+
+def _is_count(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _crash_line(stderr_path):
@@ -291,7 +317,7 @@ def _settle(report, job):
         {"status": status, "deliverable": deliverable, "evidence": evidence,
          "open_questions": open_questions, "changed_files": changed_files},
         relay_status=relay_status, relay_exit=report.exit, secs=report.secs, reason=reason,
-        session_id=report.session_id, usage=report.usage, touched_files=report.touched_files,
+        session_id=report.session_id, tokens=report.tokens, touched_files=report.touched_files,
         read_only_violation=report.read_only_violation,
     )
 

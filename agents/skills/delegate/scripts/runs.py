@@ -5,10 +5,12 @@ A Run is one directory under the runs root, and the contract every
 orchestrator reads:
 
   <runs-dir>/<YYYYMMDDTHHMMSSZ>-<lane>-<8 hex from uuid4>/
-    dispatch.json   what was asked, and how it ended (DISPATCH_FIELDS)
+    dispatch.json   what was asked, and how it ended (DISPATCH_FIELDS); its
+                    `tokens` are the Run's Token counts, null when unmeasured
     prompt.md       the assembled prompt
     return.json     the normalized child return (RETURN_FIELDS)
-    ...             what the relay itself writes (result.json, events.jsonl)
+    ...             what the relay itself writes (result.json, which keeps
+                    the relay's raw usage record; events.jsonl)
 
 `execute(request, prompt, work)` runs a Run from its start to its Outcome. The
 caller supplies only the work, a function of the `Run` that returns a
@@ -58,7 +60,7 @@ DISPATCH_FIELDS = (
     "lane", "harness", "model", "effort", "timeout", "class", "leash", "orchestrator",
     "cwd", "write", "brief", "prompt", "thread_id", "started_at",
     "relay_status", "relay_exit", "secs", "status", "reason", "session_id", "session",
-    "usage", "touched_files", "read_only_violation", "finished_at",
+    "tokens", "touched_files", "read_only_violation", "finished_at",
 )
 # The child return contract (assets/schemas/return.json).
 RETURN_FIELDS = ("status", "deliverable", "evidence", "open_questions", "changed_files")
@@ -95,7 +97,7 @@ class Finish(NamedTuple):
     secs: Optional[int] = None         # None: the Run records how long the work took
     reason: Optional[str] = None
     session_id: Optional[str] = None
-    usage: Optional[dict] = None
+    tokens: Optional[dict] = None      # Token counts {"in","out","cache_read","cache_write"}; None: unmeasured
     touched_files: Optional[list] = None
     read_only_violation: Optional[bool] = None
 
@@ -225,7 +227,7 @@ def execute(request, prompt, work, runs_dir=None):
         "status": status, "reason": finish.reason,
         # the session under both of its names
         "session_id": finish.session_id, "session": finish.session_id,
-        "usage": finish.usage, "touched_files": finish.touched_files,
+        "tokens": finish.tokens, "touched_files": finish.touched_files,
         "read_only_violation": finish.read_only_violation,
     }
     if returned is not None and not _attempt(notes, "could not write return.json",
