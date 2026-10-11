@@ -33,6 +33,8 @@ history. The repo is public.
 - Any-harness refactor (Kiro, registry, review fixes): spec
   `.scratch/delegate-any-harness/spec.md`, tickets
   `.scratch/delegate-any-harness/issues/`.
+- Deepening (eight deep modules): spec `.scratch/delegate-deepening/spec.md`, tickets
+  `.scratch/delegate-deepening/issues/`.
 - Modular (complete): `.scratch/delegate-modular/CLAUDE.md`.
 - A ticket's `**Status:**` line names each open box that waits on the user.
 - Settled decisions: `docs/adr/`. Do not reopen one.
