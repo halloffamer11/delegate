@@ -24,6 +24,10 @@ appends a Run's Ledger lines; everything else reads a Run with `Run.read`.
 spawn lines), or with `as_json` the one object `delegate dispatch --json` and
 `delegate run --json` print. `parse_finish_line` and `parse_native_line` read
 the lines back, so no reader keeps a regex of its own.
+
+`running(now)` lists the Runs still running: a Ledger start with no finish,
+whose dispatch.json has not ended, within its Lane's timeout. The statusline
+counts them, and keeps no reader of the Ledger of its own.
 """
 from __future__ import annotations
 
@@ -54,6 +58,8 @@ DISPATCH_FIELDS = (
 # The child return contract (assets/schemas/return.json).
 RETURN_FIELDS = ("status", "deliverable", "evidence", "open_questions", "changed_files")
 _STATUSES = ("done", "partial", "blocked")
+# The kinds of a Run's two v1 Ledger lines.
+_START_KIND, _FINISH_KIND = "dispatch.start", "dispatch.finish"
 
 FINISH_LINE = re.compile(r"^delegate: (?P<lane>\S+) status=(?P<status>\S+) secs=(?P<secs>\S+) run=(?P<run>.+)$")
 NATIVE_LINE = re.compile(r"^delegate: native lane=(?P<lane>\S+) agent=(?P<agent>\S+) prompt=(?P<prompt>.+)$")
@@ -248,6 +254,75 @@ def execute(request, prompt, work, runs_dir=None):
         lines = _finish_lines(shown)
     return Ended(run.path, request.lane, status, 0 if status in ("done", "partial", "native") else 1,
                  notes, lines, shown)
+
+
+class Running(NamedTuple):
+    """A Run that has started and has no Outcome yet, within its Lane's timeout."""
+    lane: str
+    run: Optional[str]                 # the run directory, when its start names one
+    started: float                     # epoch seconds, as the Ledger start stamps them
+    deadline: float                    # started plus the Lane's timeout
+
+
+def running(now=None):
+    """The Runs running at `now` (default: the time now), in the order they
+    started. A Run is running while the Ledger has its start and no finish,
+    its dispatch.json has not ended, and `now` is within its start plus its
+    timeout. Reads the v1 lines any earlier delegate wrote, and skips a line it
+    cannot read. Never raises: a Ledger that cannot be read has none."""
+    now = time.time() if now is None else now
+    starts = {}
+    for entry in _ledger_entries():
+        thread = entry.get("thread_id")
+        if not isinstance(thread, str) or not thread:
+            continue
+        if entry.get("kind") == _START_KIND:
+            starts[thread] = entry
+        elif entry.get("kind") == _FINISH_KIND:
+            starts.pop(thread, None)
+    found = (_running(start, now) for start in starts.values())
+    return [r for r in found if r is not None]
+
+
+def _ledger_entries():
+    """Every Ledger line that is a JSON object; none when the Ledger cannot be read."""
+    entries = []
+    try:
+        with open(events.ledger_path(), "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except (ValueError, RecursionError):
+                    continue
+                if isinstance(entry, dict):
+                    entries.append(entry)
+    except OSError:
+        return []
+    return entries
+
+
+def _running(start, now):
+    """The Running a Ledger start stands for at `now`, or None: past its
+    timeout, ended in its dispatch.json, or a start it cannot read."""
+    lane, ts, timeout_s, out = (start.get(k) for k in ("lane", "ts", "timeout_s", "out"))
+    if (not isinstance(lane, str) or not isinstance(ts, str)
+            or isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))):
+        return None
+    try:
+        started = datetime.fromisoformat(ts).timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
+    deadline = started + timeout_s
+    if now > deadline:
+        return None
+    # The start names the Run's return.json; its directory is the Run's.
+    path = (os.path.dirname(out) if isinstance(out, str) else "") or None
+    if path is not None:
+        # a lost Ledger finish leaves no phantom: dispatch.json says the Run ended
+        doc = _read_json(Run(path).dispatch_path)
+        if isinstance(doc, dict) and doc.get("finished_at"):
+            return None
+    return Running(lane, path, started, deadline)
 
 
 def _start(request, prompt, runs_dir):

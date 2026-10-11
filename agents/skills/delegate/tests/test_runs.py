@@ -5,6 +5,7 @@ Every case drives `runs.execute` in-process against a temp runs root, a temp
 $DELEGATE_LEDGER and a temp $DELEGATE_CACHE. The work is a plain function.
 """
 import contextlib
+from datetime import datetime
 import json
 import os
 import signal
@@ -349,6 +350,111 @@ def case_a_hand_off_ends_the_run_at_once_as_native():
                f"ended={vars(ended)} dispatch={disp} ledger={lines} limits={usage.read_limits()}")
 
 
+def case_running_lists_a_run_while_its_work_runs():
+    with world() as w:
+        seen = {}
+
+        def work(run):
+            seen["running"] = runs.running()
+            return runs.Finish(RETURNED, relay_exit=0, secs=1)
+
+        before = time.time()
+        ended = runs.execute(request(), b"p", work, w.root)
+        after = runs.running()
+        inside = seen.get("running") or []
+        found = inside[0] if inside else None
+        record("9. running lists a Run while its work runs, and not after",
+               len(inside) == 1 and found.lane == "sol-high@codex" and found.run == ended.run
+               # the Ledger stamps whole seconds
+               and before - 1 <= found.started <= time.time()
+               and found.deadline == found.started + 1800
+               and after == [],
+               f"inside={inside} after={after}")
+
+
+def case_a_start_past_its_timeout_or_ended_is_not_running():
+    with world() as w:
+        seen = {}
+
+        def work(run):
+            listed = runs.running()
+            if listed:
+                seen["at_deadline"] = runs.running(now=listed[0].deadline)
+                seen["past"] = runs.running(now=listed[0].deadline + 1)
+            return runs.Finish(RETURNED, relay_exit=0, secs=1)
+
+        ended = runs.execute(request(), b"p", work, w.root)
+        # The Ledger finish is lost: only the start is left, and dispatch.json has ended.
+        with open(w.ledger, encoding="utf-8") as f:
+            start = f.readline()
+        with open(w.ledger, "w", encoding="utf-8") as f:
+            f.write(start)
+        lost_finish = runs.running()
+        # The same start beside a dispatch.json that has not ended is running.
+        run = runs.Run(ended.run)
+        with open(run.dispatch_path, encoding="utf-8") as f:
+            doc = json.load(f)
+        doc["finished_at"] = None
+        with open(run.dispatch_path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        unended = runs.running()
+        record("10. a start past its timeout is not running, nor one whose dispatch.json has ended",
+               len(seen.get("at_deadline") or []) == 1 and seen.get("past") == []
+               and lost_finish == []
+               and [r.run for r in unended] == [ended.run],
+               f"seen={seen} lost_finish={lost_finish} unended={unended}")
+
+
+def case_running_reads_a_ledger_an_earlier_delegate_wrote():
+    def stamp(epoch):
+        return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="seconds")
+
+    def start(thread, lane, ts, timeout_s, out):
+        return (f'{{"v": 1, "kind": "dispatch.start", "ts": {json.dumps(ts)}, '
+                f'"thread_id": {json.dumps(thread)}, "lane": {json.dumps(lane)}, "class": "impl", '
+                f'"effort": "high", "timeout_s": {json.dumps(timeout_s)}, "cwd": "/w", '
+                f'"brief": "/w/b.md", "out": {json.dumps(out)}, "write": null}}')
+
+    with world() as w:
+        now = float(int(time.time()))
+        open_run = os.path.join(w.root, "20261011T080000Z-flash-high@agy-0a0a0a0a")
+        os.makedirs(open_run)
+        with open(os.path.join(open_run, "dispatch.json"), "w", encoding="utf-8") as f:
+            json.dump({"lane": "flash-high@agy", "status": None, "finished_at": None}, f)
+        elsewhere = os.path.join(w.root, "gone", "return.json")
+        # Today's v1 lines, as delegate and its probes write them: a meter event,
+        # an open start, a start past its timeout and a start with its finish.
+        lines = [
+            f'{{"v": 1, "kind": "meter", "ts": "{stamp(now - 900)}", "source": "probe", '
+            f'"cache_age_s": 0, "probed_at": {now - 900}, "lanes": []}}',
+            start("t-open", "flash-high@agy", stamp(now - 100), 1500,
+                  os.path.join(open_run, "return.json")),
+            start("t-stale", "terra-high@codex", stamp(now - 1000), 300, elsewhere),
+            start("t-pair", "grok46-high@grok", stamp(now - 200), 2400, elsewhere),
+            f'{{"v": 1, "kind": "dispatch.finish", "ts": "{stamp(now - 150)}", "thread_id": "t-pair", '
+            f'"lane": "grok46-high@grok", "class": "impl", "secs": 50, "rc": 0, "status": "done", '
+            f'"child_session": null, "out": {json.dumps(elsewhere)}}}',
+            # lines that are not objects
+            "[1]", '"dispatch.start"', "42", "null", "{not json", "",
+            # starts it cannot read
+            start("t-ts", "luna-low@codex", "yesterday", 600, elsewhere),
+            start("t-timeout", "luna-low@codex", stamp(now - 100), "10m", elsewhere),
+            start([1], "luna-low@codex", stamp(now - 100), 600, elsewhere),
+            start("t-lane", None, stamp(now - 100), 600, elsewhere),
+        ]
+        with open(w.ledger, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        read = runs.running(now)
+        os.remove(w.ledger)
+        missing = runs.running(now)
+        os.mkdir(w.ledger)
+        unreadable = runs.running(now)
+        record("11. running reads a Ledger an earlier delegate wrote, and skips lines that are not objects",
+               read == [runs.Running("flash-high@agy", open_run, now - 100, now - 100 + 1500)]
+               and missing == [] and unreadable == [],
+               f"read={read} missing={missing} unreadable={unreadable}")
+
+
 def case_parse_finish_line():
     with world() as w:
         ended = runs.execute(request(lane="flash-high@agy", harness="agy"), b"p",
@@ -388,6 +494,9 @@ def main():
     case_a_usage_limit_refusal_holds_the_lanes_meter()
     case_a_runs_root_that_cannot_be_made_starts_nothing()
     case_a_hand_off_ends_the_run_at_once_as_native()
+    case_running_lists_a_run_while_its_work_runs()
+    case_a_start_past_its_timeout_or_ended_is_not_running()
+    case_running_reads_a_ledger_an_earlier_delegate_wrote()
     case_parse_finish_line()
     case_parse_native_line()
 

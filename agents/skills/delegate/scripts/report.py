@@ -44,6 +44,11 @@ try:
 except ImportError:
     from . import orchestrators
 
+try:
+    import runs
+except ImportError:
+    from . import runs
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
 CACHE = usage.get_cache_path()
@@ -629,40 +634,7 @@ def cmd_statusline(a):
                 won_by_meter.setdefault(m_name, set()).add(tier)
             picks[cls] = picked
 
-    ledger_path = os.environ.get("DELEGATE_LEDGER") or os.path.expanduser("~/.cache/delegate/ledger.jsonl")
-    running_by_lane = Counter()
-    if os.path.exists(ledger_path):
-        try:
-            starts = {}
-            with open(ledger_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        e = json.loads(line)
-                    except Exception:
-                        continue
-                    k = e.get("kind")
-                    tid = e.get("thread_id")
-                    if k == "dispatch.start" and tid:
-                        starts[tid] = e
-                    elif k == "dispatch.finish" and tid:
-                        starts.pop(tid, None)
-            for e in starts.values():
-                ts_str = e.get("ts")
-                timeout_s = e.get("timeout_s") or 0
-                if ts_str:
-                    try:
-                        t = datetime.fromisoformat(ts_str).timestamp()
-                    except Exception:
-                        continue
-                    if now <= t + timeout_s:
-                        lane_name = e.get("lane")
-                        if lane_name:
-                            running_by_lane[lane_name] += 1
-        except Exception:
-            return
+    running_by_lane = Counter(r.lane for r in runs.running(now))
 
     by_meter = usage.observations(usage_doc) or {}
     all_meters = catalog.get("meters", {})

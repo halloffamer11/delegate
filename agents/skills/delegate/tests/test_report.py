@@ -14,6 +14,8 @@ os.chdir(_ISOLATED_CWD.name)
 SKILL = os.path.dirname(HERE)
 REPORT = os.path.abspath(os.path.join(SKILL, "scripts", "report.py"))
 SAMPLES = os.path.abspath(os.path.join(SKILL, "assets", "samples"))
+sys.path.insert(0, os.path.join(SKILL, "scripts"))
+import runs  # noqa: E402
 fails = []
 
 
@@ -357,29 +359,38 @@ with tempfile.TemporaryDirectory() as tmp:
              "reset_5h": sl_now + 2 * 3600 + 60, "reset_weekly": sl_now + 4 * 86400 + 60, "status": "ok"},
         ]}, f)
 
+    # The Ledger the Run below writes, so the live one is never read.
     sl_ledger = os.path.join(tmp, "sl_ledger.jsonl")
-    with open(sl_ledger, "w") as f:
-        # 1. open start inside timeout (flash-high@agy -> tier 1)
-        t_in = datetime.fromtimestamp(sl_now - 100).astimezone().isoformat(timespec="seconds")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_in, "thread_id": "tid-running",
-                            "lane": "flash-high@agy", "timeout_s": 600}) + "\n")
-        # 2. open start past timeout (terra-high@codex, timeout 300s, started 1000s ago)
-        t_stale = datetime.fromtimestamp(sl_now - 1000).astimezone().isoformat(timespec="seconds")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_stale, "thread_id": "tid-stale",
-                            "lane": "terra-high@codex", "timeout_s": 300}) + "\n")
-        # 3. start/finish pair (grok46-high@grok)
-        t_fin = datetime.fromtimestamp(sl_now - 200).astimezone().isoformat(timespec="seconds")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_fin, "thread_id": "tid-finished",
-                            "lane": "grok46-high@grok", "timeout_s": 600}) + "\n")
-        f.write(json.dumps({"v": 1, "kind": "dispatch.finish", "ts": t_fin, "thread_id": "tid-finished",
-                            "lane": "grok46-high@grok", "secs": 50, "rc": 0, "status": "done"}) + "\n")
-
     # A switch path of its own, so the live ~/.cache/delegate/statusline.off
     # never hides the rows under test.
     sl_switch = os.path.join(tmp, "sl_rows_on", "statusline.off")
     sl_env = {"DELEGATE_CACHE": sl_cache, "DELEGATE_LEDGER": sl_ledger,
               "DELEGATE_STATUSLINE_SWITCH": sl_switch}
-    rc, out, err = run(["statusline", "--no-color"] + cfg, sl_env)
+
+    # The statusline run from inside a Run's work sees that Run (ticket 03):
+    # flash-high@agy is a Tier 1 lane on the agy Meter.
+    inside = {}
+
+    def statusline_work(handle):
+        inside["rows"] = run(["statusline", "--no-color"] + cfg, sl_env)
+        inside["norun"] = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
+        return runs.Finish({"status": "done", "deliverable": "ok", "evidence": [],
+                            "open_questions": [], "changed_files": []}, relay_exit=0, secs=1)
+
+    saved_ledger = os.environ.get("DELEGATE_LEDGER")
+    os.environ["DELEGATE_LEDGER"] = sl_ledger
+    try:
+        sl_ended = runs.execute(
+            runs.Request(lane="flash-high@agy", harness="agy", model="gemini-3.8-flash-high",
+                         effort="high", timeout="25m", class_name="scout", cwd=tmp, write=None,
+                         brief=os.path.join(tmp, "brief.md")),
+            b"p", statusline_work, os.path.join(tmp, "sl-runs"))
+    finally:
+        if saved_ledger is None:
+            os.environ.pop("DELEGATE_LEDGER", None)
+        else:
+            os.environ["DELEGATE_LEDGER"] = saved_ledger
+    rc, out, err = inside.get("rows", (None, "", "the work never ran"))
     check("statusline exits 0", rc == 0, err)
     sl_lines = [l for l in out.splitlines() if l.strip()]
     check("statusline prints 5 rows", len(sl_lines) == 5, f"got {len(sl_lines)} lines: {out}")
@@ -394,12 +405,35 @@ with tempfile.TemporaryDirectory() as tmp:
           all(l.startswith("·  ") for l in sl_lines[2:]), out)
     check("statusline fable shows remaining_weekly_model", "59%·4d" in sl_lines[2], sl_lines[2])
     check("statusline codex carries ✗ when gated", "8%·3d✗" in sl_lines[4], sl_lines[4])
-    check("statusline running agent shows tier glyph on agy", sl_lines[0].endswith("①"), sl_lines[0])
-    check("statusline stale start not in running", not any("③" in l.split("wk")[-1] for l in sl_lines), out)
-    check("statusline finished start not in running", not any("②" in sl_lines[1].split("wk")[-1] for l in [sl_lines[1]]), sl_lines[1])
+    check("statusline from inside a Run's work shows its tier glyph on the agy row",
+          sl_lines[0].endswith("①") and not any(l.endswith(("②", "③", "④")) for l in sl_lines),
+          out)
 
-    rc, out_norun, _ = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
+    rc, out_norun, _ = inside.get("norun", (None, "", ""))
     check("statusline --no-running drops running glyph", "①" not in out_norun.splitlines()[0].split("wk")[-1], out_norun)
+    rc, out_after, err_after = run(["statusline", "--no-color"] + cfg, sl_env)
+    check("statusline shows no glyph once the Run has ended",
+          sl_ended.status == "done" and rc == 0 and out_after == out_norun,
+          f"ended={sl_ended.status} err={err_after} after={out_after} norun={out_norun}")
+
+    # One Ledger line that is valid JSON but not an object, and one open start
+    # in today's v1 shape (ticket 03).
+    odd_ledger = os.path.join(tmp, "odd_ledger.jsonl")
+    with open(odd_ledger, "w") as f:
+        f.write("[1]\n")
+        f.write(json.dumps({
+            "v": 1, "kind": "dispatch.start",
+            "ts": datetime.fromtimestamp(sl_now - 100).astimezone().isoformat(timespec="seconds"),
+            "thread_id": "tid-open", "lane": "flash-high@agy", "class": "scout", "effort": "high",
+            "timeout_s": 1500, "cwd": tmp, "brief": os.path.join(tmp, "brief.md"),
+            "out": os.path.join(tmp, "odd-run", "return.json"), "write": None}) + "\n")
+    rc, out_odd, err_odd = run(["statusline", "--no-color"] + cfg, dict(sl_env, DELEGATE_LEDGER=odd_ledger))
+    odd = [l for l in out_odd.splitlines() if l.strip()]
+    norun_rows = [l for l in out_norun.splitlines() if l.strip()]
+    check("a Ledger line that is not an object never blanks the statusline",
+          rc == 0 and len(odd) == 5 and odd[0].endswith("①")
+          and odd[0][:-1].rstrip() == norun_rows[0] and odd[1:] == norun_rows[1:],
+          f"rc={rc} err={err_odd} out={out_odd}")
 
     # A model Meter is marked in the catalog, not known by its name (ticket 08):
     # renamed, with its probe row renamed too, it draws the same row; and its
@@ -502,7 +536,7 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_st, _ = run(["statusline", "status"] + cfg, sw_env)
     check("statusline status reports off", out_st.strip() == "off", out_st)
     rc, out_tg, _ = run(["statusline", "toggle"] + cfg, sw_env)
-    check("statusline toggle turns the rows back on", out_tg.strip() == "delegate rows on"
+    check("statusline toggle turns the rows back on", rc == 0 and out_tg.strip() == "delegate rows on"
           and not os.path.exists(sw_env["DELEGATE_STATUSLINE_SWITCH"]), out_tg)
     rc, out_sw, _ = run(["statusline", "--no-color"] + cfg, sw_env)
     check("statusline prints rows again after toggle", len([l for l in out_sw.splitlines() if l.strip()]) == 5, out_sw)
@@ -642,7 +676,6 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # The popup replays rank's choice: across Order a rival needs the leader's Pace
 # plus the Margin, and the handover point follows from it (ticket 40).
-sys.path.insert(0, os.path.join(SKILL, "scripts"))
 import report  # noqa: E402
 
 
