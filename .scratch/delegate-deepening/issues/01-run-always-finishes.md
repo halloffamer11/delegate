@@ -53,7 +53,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decisions C.3 and
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-11. `runs.execute` now runs every relayed Run from its start to its Outcome, and `delegate.dispatch` hands it `delegate.relay_work`; test_runs 1-7 and test_dispatch 12e, 12i, 28a-28c and 37 verify it. No box is open.
+**Status:** landed 2026-10-11 (d3fca2c). `runs.execute` now runs every relayed Run from its start to its Outcome, and `delegate.dispatch` hands it `delegate.relay_work`; test_runs 1-7 and test_dispatch 12e, 12i, 28a-28c and 37 verify it. No box is open.
 
 - [x] `tests/test_runs.py` drives `execute` in-process against a temp run root, a temp `$DELEGATE_LEDGER` and a temp `$DELEGATE_CACHE`; no case uses `python -c` or monkeypatches `delegate`.
 - [x] Failing first, then green: "a Ledger that cannot be written never stops a Run ending" (`$DELEGATE_LEDGER` under a regular file; and a work that swaps the Ledger for a directory mid-run): `Ended` is done, `return.json` and `dispatch.json` are finished, a note names the Ledger. On the code before this ticket the same fixture through `delegate dispatch` leaves `dispatch.json` status null and exits with a traceback.
@@ -68,6 +68,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decisions C.3 and
 - [x] `make test` is green on `$(uv python find 3.9)` and `python3.13`.
 
 ## Landed, 2026-10-11
+
+**Commits.** `d3fca2c` (delegate-deepening 01: A started Run always finishes).
 
 **What shipped.**
 - `runs.py` is the Run module. It defines `Request`, `Finish`, `blocked()`, `Ended` and

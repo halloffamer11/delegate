@@ -26,7 +26,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decisions C.1 and
 
 **Blocked by:** 01 A started Run always finishes
 
-**Status:** landed 2026-10-11. `delegate.dispatch` now runs a native Lane through `runs.execute` with a `HandOff` work, so its Run ends at once with status `native` in `dispatch.json` and the Ledger; test_runs 8 and p7, test_dispatch 29 and the two native `log --run` checks in test_report verify it. No box is open.
+**Status:** landed 2026-10-11 (b8bac6d). `delegate.dispatch` now runs a native Lane through `runs.execute` with a `HandOff` work, so its Run ends at once with status `native` in `dispatch.json` and the Ledger; test_runs 8 and p7, test_dispatch 29 and the two native `log --run` checks in test_report verify it. No box is open.
 
 - [x] Failing first, then green: test_dispatch 29 asserts the native Run's `dispatch.json` has status `native` and a `finished_at` (null on the code before this ticket).
 - [x] test_runs "a hand-off ends the Run at once as native": no `return.json`, Ledger start and finish with status `native`, a held Meter stays held, `text()` is the native line then the spawn line, `text(as_json=True)` is the native object, `exit_code` 0.
@@ -36,6 +36,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decisions C.1 and
 - [x] `make test` is green on 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `b8bac6d` (delegate-deepening 02: A native Run ends as handed to its agent).
 
 **What shipped.**
 - `runs.HandOff(agent, spawn)` is the second result a work may return. For a `HandOff`,

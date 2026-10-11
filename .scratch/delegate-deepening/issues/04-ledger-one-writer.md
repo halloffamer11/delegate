@@ -26,7 +26,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decision C.2)
 
 **Blocked by:** 02 A native Run ends as handed to its agent; 03 The statusline counts running Runs through the Run module
 
-**Status:** landed 2026-10-11. `runs.py` writes the Ledger's v1 start and finish lines through private encoders, `events.py` and `tests/test_events.py` are deleted, and `usage.py` appends no meter event; test_runs 12 (the lines a Run writes equal the v1 fixture lines byte for byte) and 13 (the guard) verify it. No box is open.
+**Status:** landed 2026-10-11 (0563f5e). `runs.py` writes the Ledger's v1 start and finish lines through private encoders, `events.py` and `tests/test_events.py` are deleted, and `usage.py` appends no meter event; test_runs 12 (the lines a Run writes equal the v1 fixture lines byte for byte) and 13 (the guard) verify it. No box is open.
 
 - [x] `scripts/events.py` and `tests/test_events.py` are deleted; `grep -rn 'import events\|from events' agents/` finds nothing.
 - [x] test_runs: the Ledger lines a Run writes carry exactly the v1 keys in today's order, the same lines the C3 fixture reads.
@@ -36,6 +36,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decision C.2)
 - [x] `make test` is green on 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `0563f5e` (delegate-deepening 04: Only the Run module writes the Ledger), then the review fixes in "delegate-deepening C: review fixes".
 
 **What shipped.**
 - `runs.py` owns the Ledger. The private `_start_line` and `_finish_line` build the v1 lines
@@ -97,3 +99,6 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decision C.2)
 - Waiting on the user, outside this ticket: the ADR 0001 line for decision C.2 ("the Ledger
   records Runs only; the latest Meter reading lives in the usage cache") goes into the one ADR
   change after all lanes merge (Build plan, ADR edits).
+
+**Review fixes.** `references/architecture.md` no longer says the cached usage read writes
+no "meter event": no probe writes one now.

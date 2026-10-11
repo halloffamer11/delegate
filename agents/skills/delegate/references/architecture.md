@@ -29,7 +29,7 @@ field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
 preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
 use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
 `usage.load_cached()` / `rank.load_cached_usage()` read observations without a vendor
-probe or meter event. `usage.acquire()` is the refresh path. `usage.observations()`
+probe. `usage.acquire()` is the refresh path. `usage.observations()`
 owns cache validity (`rank.meter_observations()` re-exports it): valid envelope and
 legacy map formats keep their behavior; any malformed observation makes the whole
 document unknown. Envelope observations require a finite timestamp; raw Window/reset fields are

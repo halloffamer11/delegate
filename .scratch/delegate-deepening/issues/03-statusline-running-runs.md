@@ -20,7 +20,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decision C.4)
 
 **Blocked by:** 01 A started Run always finishes
 
-**Status:** landed 2026-10-11. `report.py statusline` now counts its glyphs from `runs.running(now)`, which pairs the Ledger's starts and finishes, bounds each start by its timeout and cross-checks the Run's `dispatch.json`; test_runs 9-11, test_report's in-Run glyph checks and "a Ledger line that is not an object never blanks the statusline" verify it. No box is open.
+**Status:** landed 2026-10-11 (f508fa9). `report.py statusline` now counts its glyphs from `runs.running(now)`, which pairs the Ledger's starts and finishes, bounds each start by its timeout and cross-checks the Run's `dispatch.json`; test_runs 9-11, test_report's in-Run glyph checks and "a Ledger line that is not an object never blanks the statusline" verify it. No box is open.
 
 - [x] test_runs: `running()` lists a Run when asked from inside its work, and is empty after `execute` returns.
 - [x] test_runs: a start past its timeout (`now` injected) is not running; a start whose `dispatch.json` is finished is not running even with no Ledger finish.
@@ -32,6 +32,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decision C.4)
 - [x] `make test` is green on 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `f508fa9` (delegate-deepening 03: The statusline counts running Runs through the Run module), then the review fixes in "delegate-deepening C: review fixes".
 
 **What shipped.**
 - `runs.Running(lane, run, started, deadline)` and `runs.running(now=None)`. `running` does
@@ -95,3 +97,13 @@ Spec: `.scratch/delegate-deepening/spec.md` (C. Run lifecycle; decision C.4)
   - A start with a `timeout_s` that is not a number, or bytes in the Ledger that are not
     UTF-8, used to blank the statusline. Now that start, or that line, is skipped.
   - A pathologically nested line is skipped too.
+
+**Review fixes.**
+- The C review found two inputs that made `running` raise, though it promises never to:
+  - a start whose `timeout_s` is an integer too large for a float raised `OverflowError`.
+    The catalog check `^[0-9]+[smh]$` accepts such a timeout, so dispatch could write one.
+  - a Run whose `dispatch.json` nests too deep to parse raised `RecursionError`.
+- A start whose `timeout_s` is NaN or Infinity was listed as running forever.
+- Now `running` skips a start whose deadline is not a finite number. A `dispatch.json` that
+  cannot be parsed leaves its start running, as one that cannot be read does.
+- test_runs 11's fixture now holds all four. It was red on each raise before its fix.

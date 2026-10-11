@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import math
 import os
 import re
 import signal
@@ -137,7 +138,7 @@ def _read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -310,10 +311,11 @@ def _running(start, now):
         return None
     try:
         started = datetime.fromisoformat(ts).timestamp()
+        deadline = started + timeout_s
     except (ValueError, OverflowError, OSError):
         return None
-    deadline = started + timeout_s
-    if now > deadline:
+    # a timeout that is not finite (NaN, Infinity) is not one a start can carry
+    if not math.isfinite(deadline) or now > deadline:
         return None
     # The start names the Run's return.json; its directory is the Run's.
     path = (os.path.dirname(out) if isinstance(out, str) else "") or None

@@ -437,6 +437,11 @@ def case_running_reads_a_ledger_an_earlier_delegate_wrote():
         os.makedirs(open_run)
         with open(os.path.join(open_run, "dispatch.json"), "w", encoding="utf-8") as f:
             json.dump({"lane": "flash-high@agy", "status": None, "finished_at": None}, f)
+        # a Run whose dispatch.json no reader can parse: only an ended one drops a start
+        deep_run = os.path.join(w.root, "20261011T080100Z-luna-low@codex-0b0b0b0b")
+        os.makedirs(deep_run)
+        with open(os.path.join(deep_run, "dispatch.json"), "w", encoding="utf-8") as f:
+            f.write("[" * 100000)
         elsewhere = os.path.join(w.root, "gone", "return.json")
         # v1 lines as earlier delegates wrote them: a meter event (probes wrote
         # them until delegate-deepening 04), an open start, a start past its
@@ -446,6 +451,8 @@ def case_running_reads_a_ledger_an_earlier_delegate_wrote():
             f'"cache_age_s": 0, "probed_at": {now - 900}, "lanes": []}}',
             start("t-open", "flash-high@agy", stamp(now - 100), 1500,
                   os.path.join(open_run, "return.json")),
+            start("t-deep", "luna-low@codex", stamp(now - 50), 600,
+                  os.path.join(deep_run, "return.json")),
             start("t-stale", "terra-high@codex", stamp(now - 1000), 300, elsewhere),
             start("t-pair", "grok46-high@grok", stamp(now - 200), 2400, elsewhere),
             v1_finish("t-pair", "grok46-high@grok", stamp(now - 150), 50, 0, "done", None, elsewhere),
@@ -456,16 +463,28 @@ def case_running_reads_a_ledger_an_earlier_delegate_wrote():
             start("t-timeout", "luna-low@codex", stamp(now - 100), "10m", elsewhere),
             start([1], "luna-low@codex", stamp(now - 100), 600, elsewhere),
             start("t-lane", None, stamp(now - 100), 600, elsewhere),
+            # a timeout no float holds, and ones that are not finite
+            start("t-huge", "luna-low@codex", stamp(now - 100), int("9" * 400), elsewhere),
+            start("t-nan", "luna-low@codex", stamp(now - 100), float("nan"), elsewhere),
+            start("t-inf", "luna-low@codex", stamp(now - 100), float("inf"), elsewhere),
         ]
         with open(w.ledger, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
-        read = runs.running(now)
+
+        def listed():
+            try:
+                return runs.running(now)
+            except Exception as e:  # running never raises
+                return repr(e)
+
+        read = listed()
         os.remove(w.ledger)
-        missing = runs.running(now)
+        missing = listed()
         os.mkdir(w.ledger)
-        unreadable = runs.running(now)
+        unreadable = listed()
         record("11. running reads a Ledger an earlier delegate wrote, and skips lines that are not objects",
-               read == [runs.Running("flash-high@agy", open_run, now - 100, now - 100 + 1500)]
+               read == [runs.Running("flash-high@agy", open_run, now - 100, now - 100 + 1500),
+                        runs.Running("luna-low@codex", deep_run, now - 50, now - 50 + 600)]
                and missing == [] and unreadable == [],
                f"read={read} missing={missing} unreadable={unreadable}")
 
