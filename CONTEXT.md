@@ -175,7 +175,8 @@ A meter for one model's own weekly Window that shares its harness's other
 Windows, such as Claude's Fable meter: the 5-hour Window and, where the harness
 has one, its week for all models, which the model's jobs also spend. Its Weekly
 figure is the lower of its own week and that shared week. The catalog marks it
-with `"model_meter": true`; displays read that, never the meter's name.
+with `"model_meter": true`, and a probe row that carries the model's own week
+marks it too; displays read those, never the meter's name.
 _Avoid_: per-model weekly (when you mean the Weekly figure)
 
 **Remaining**:

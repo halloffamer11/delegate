@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime
 
-from .base import EFFORTS, Harness
+from .base import EFFORTS, Harness, run_cli
 
 # Claude models that take no effort level at all. The Claude Code docs
 # (https://code.claude.com/docs/en/model-config, checked 2026-09-12) list the models that take effort and say "Models not
@@ -167,30 +167,29 @@ class Claude(Harness):
         return not any(word in words for word in MODELS_WITHOUT_EFFORT)
 
     def read_meters(self):
-        import usage
         # Run from the home directory: inside the dotfiles project the same command
         # did not return within 45 s (2026-09-18), and from ~ it takes about 3 s.
-        r = usage.run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="",
-                      cwd=os.path.expanduser("~"))
-        if not r or r.returncode != 0: return [usage.meter_row(self.name, None, note="probe failed")]
+        r = run_cli(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="",
+                    cwd=os.path.expanduser("~"))
+        if not r or r.returncode != 0: return [self.windows(None, note="probe failed")]
         try: text = json.loads(r.stdout)["result"]
-        except Exception as e: return [usage.meter_row(self.name, None, note=f"unexpected output: {e}")]
+        except Exception as e: return [self.windows(None, note=f"unexpected output: {e}")]
         def pct(label):
             m = re.search(re.escape(label) + r":\s*(\d+)% used(?: · resets ([^\n]+))?", text)
             return (None, None) if not m else (1 - int(m.group(1)) / 100.0, m.group(2))
         f5, r5 = pct("Current session"); fw, rw = pct("Current week (all models)")
-        lanes = [usage.meter_row(self.name, "general", f5, fw, reset(r5), reset(rw),
+        out = [self.windows("general", f5, fw, reset(r5), reset(rw),
                             note=f"resets: 5h '{r5}', weekly '{rw}'")]
-        # per-model weekly meters, e.g. "Current week (Fable): 86% used"
+        # per-model weekly meters, e.g. "Current week (Fable): 86% used". A
+        # Model meter shares the session and the week for all models, and
+        # usage.py takes the lower week as its Weekly figure.
         for m in re.finditer(r"Current week \(([^)]+)\):\s*(\d+)% used(?: · resets ([^\n]+))?", text):
             name = model_meter_name(m.group(1))
             if name == "all models": continue
-            fm = 1 - int(m.group(2)) / 100.0
-            wk = min(fw, fm) if fw is not None else fm
-            lanes.append(usage.meter_row(self.name, name, f5, wk, reset(r5), reset(m.group(3) or rw),
+            out.append(self.windows(name, f5, fw, reset(r5), reset(m.group(3) or rw),
                                     note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'",
-                                    remaining_weekly_model=fm))
-        return lanes
+                                    weekly_model=1 - int(m.group(2)) / 100.0))
+        return out
 
 
 def model_meter_name(label):

@@ -10,7 +10,8 @@ The selection rule:
   1. Filter eligible lanes in the supplied Tier range:
        enabled is True (defaults to True if absent),
        floor <= tier <= ceiling,
-       meter gate passed: meter r is None (unknown) or r >= routing.gate,
+       meter gate passed: the Meter snapshot's Readout is not `gated`
+         (Remaining unknown, or Remaining >= routing.gate, or routing.meters off),
        harness CLI is present (found in PATH or specified via --harnesses).
      Vetoed lanes fail one or more conditions (reported in precedence order:
      disabled, floor, ceiling, gate, cli).
@@ -37,7 +38,7 @@ The selection rule:
      lower in the user's order runs when its meter is well ahead of the pick's.
      That is the load balance (ticket 28).
   With routing.quota_unit "plan_dollars" (ticket 39) steps 2 and 4 compare
-  Pace times the Meter's plan dollars per week (`score`), and a steal needs
+  Pace times the Meter's plan dollars per week (`_score`), and a steal needs
   value(L) >= value(pick) * (1 + routing.margin).
   5. Overflow (ticket 29, Class ranking only). If nothing is eligible and only
      subscription usage stands in the way — at least one carried lane in the
@@ -52,23 +53,50 @@ The selection rule:
      cli-absent with no gate veto among them, `routing.meters` off (no gate
      vetoes exist) or `routing.overflow` false all keep the stop.
 
-Reason vocabulary (exactly one per lane):
-  - pick: chosen lane when it is eligible[0] (or when all meters unknown)
-  - stolen by pace: <pace> >= <pick0 pace> + <margin>: steal rule moved pick
-  - eligible: any other eligible lane
-  - unknown meter, sorted last: eligible lane with unknown pace (overrides eligible)
-  - vetoed:disabled, <lane>
-  - vetoed:floor, <lane> (tier t) < <class> floor (tier f)
-  - vetoed:ceiling, <lane> (tier t) > <class> ceiling (tier c)
-  - vetoed:gate, <lane>: <meter> meter N% left < gate G%
-  - vetoed:cli, <lane>: <harness> not on PATH
+Cause vocabulary (``CAUSES``; exactly one per row, in its `cause` field):
+  - pick: the Pick, eligible[0], which nothing took the job from (also when
+    every Meter is unknown, or Meters are off)
+  - steal: the Pick, a Lane after eligible[0] that took the job by the Margin,
+    in either quota unit
+  - eligible: any other eligible Lane
+  - unknown: an eligible Lane with no value to rank by (Meters on, and its
+    Pace or plan price unknown); it sorts last. With Meters off nothing ranks
+    by value, so a Lane with no reading is `eligible`.
+  - disabled, floor, ceiling, gate, cli: the veto that stopped the Lane, in
+    that precedence
+  A row's `eligible` is true exactly for pick, steal, eligible and unknown,
+  and its `pick` exactly for pick and steal. Callers read `cause`; the
+  `reason` text below is display only, built from the cause and the numbers,
+  and no caller parses it.
+
+Reason text, one per cause:
+  - pick: pick
+  - steal: stolen by pace: <pace> >= <pick0 pace> + <margin>
+           stolen by plan dollars: <value> >= <pick0 value> x (1 + <margin>)
+  - eligible: eligible
+  - unknown: unknown meter, sorted last
+  - disabled: vetoed:disabled, <lane>
+  - floor: vetoed:floor, <lane> (tier t) < <class> floor (tier f)
+  - ceiling: vetoed:ceiling, <lane> (tier t) > <class> ceiling (tier c)
+  - gate: vetoed:gate, <lane>: <meter> meter N% left < gate G%
+  - cli: vetoed:cli, <lane>: <harness> not on PATH
+
+Tier preview (``tier_leaders``, and ``rank.py tiers --json``): each exact
+Tier's rows and leader, the Steal threshold in routing's quota unit, each
+other Meter's Pace to lead, which rank finds by rerunning its ranking core with
+that Meter's Readout at a trial Pace (ticket 21), and the Handover, which it
+finds by rerunning the core with the leader's Meter spent in half-point steps
+(ticket 23). Only rank replays its own Pick: the popup and the deck draw the
+preview.
 
 CLI forms:
   rank.py <class> [--tier N] [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
   rank.py tiers [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
 """
 import argparse
+import dataclasses
 import json
+import math
 import os
 import sys
 
@@ -81,9 +109,12 @@ import harnesses
 from catalog import CatalogError, CLASSES, load_catalog
 import usage
 
-
-# Compatibility export for dashboard callers. Validity lives in usage.
-meter_observations = usage.observations
+# Every row's `cause` (see the module docstring): the two causes a Pick has,
+# the two other eligible ones, then the vetoes in precedence order.
+CAUSES = ("pick", "steal", "eligible", "unknown",
+          "disabled", "floor", "ceiling", "gate", "cli")
+_ELIGIBLE_CAUSES = frozenset(CAUSES[:4])
+_PICK_CAUSES = frozenset(CAUSES[:2])
 
 
 def restrict_to_harness(cat, harness):
@@ -95,11 +126,10 @@ def restrict_to_harness(cat, harness):
     return out
 
 
-def score(item):
+def _score(item):
     """What ranking compares: the Pace, or with `quota_unit` plan_dollars
     (ticket 39) the Pace times the row's `weight`, its plan dollars per week.
-    None when either is unknown. A caller that changes `pace` on a row (the
-    usage popup's trials) gets the value rescaled with it."""
+    None when either is unknown."""
     pace = item.get("pace")
     if pace is None or "weight" not in item:
         return pace
@@ -107,24 +137,24 @@ def score(item):
     return None if weight is None else pace * weight
 
 
-def eligible_order(item, metering):
+def _eligible_order(item, metering):
     """The order eligible Lanes are tried in: Tier, then Order, then (with
-    Meters on) the higher value (`score`), a Lane with an unknown one last."""
+    Meters on) the higher value (`_score`), a Lane with an unknown one last."""
     t = item["tier"] if item["tier"] is not None else 99
     unordered = 1 if item["order"] is None else 0
     o = item["order"] if item["order"] is not None else 0
     if not metering:
         return (t, unordered, o, item["lane"])
-    v = score(item)
+    v = _score(item)
     unknown = 1 if v is None else 0
     return (unknown, t, unordered, o, -(v if v is not None else 0.0), item["lane"])
 
 
-def steals(row, pick_row, margin):
+def _steals(row, pick_row, margin):
     """True when `row` takes the job from `pick_row` by the Margin: Pace ahead
     by the Margin, or with plan dollars a value ahead by the Margin's fraction
     of the Pick's (a fixed amount of dollars would mean nothing across plans)."""
-    v, p = score(row), score(pick_row)
+    v, p = _score(row), _score(pick_row)
     if v is None or p is None:
         return False
     if "weight" in pick_row:
@@ -132,17 +162,16 @@ def steals(row, pick_row, margin):
     return v >= p + margin
 
 
-def choose(eligible_rows, margin, metering):
+def _choose(eligible_rows, margin, metering):
     """(the Pick, the value it stole from or None) among rows already in
-    `eligible_order`: the first row, unless a later one's value reaches the
-    current Pick's by the Margin. The usage popup replays this rule to say
-    when a Tier hands over (ticket 40), so it lives in one place."""
+    `_eligible_order`: the first row, unless a later one's value reaches the
+    current Pick's by the Margin."""
     pick_row = eligible_rows[0]
     beaten = None
     if metering:
         for r in eligible_rows[1:]:
-            if steals(r, pick_row, margin):
-                beaten = score(pick_row)
+            if _steals(r, pick_row, margin):
+                beaten = _score(pick_row)
                 pick_row = r
     return pick_row, beaten
 
@@ -155,12 +184,39 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     allowing another caller to describe the same range in its own terms.
 
     cat: dict from catalog.load_catalog
-    meters: usage document dict (or {})
+    meters: a usage.Snapshot (usage.read, or usage.Snapshot.of for a document
+        in memory); anything else raises TypeError
     present: set of harness names
+
+    Every Meter fact a row carries comes from the Snapshot's Readout for this
+    catalog: Remaining, Pace, the Weekly figure, whether the Gate vetoes it
+    (`gated`, which honours routing.meters) and the plan price per week. The
+    Readouts are read once into a map, Meter to Readout, and the ranking core
+    ranks over that map, so a what-if can replace one Readout and rank again
+    without a second read.
     """
     if floor is not None and ceiling is not None and floor > ceiling:
         raise ValueError(f"invalid tier range [{floor}, {ceiling}]")
+    return _rank_readouts(cat, _readouts(cat, meters), present, floor, ceiling, reason_label)
 
+
+def _readouts(cat, meters):
+    """Meter to Readout for every Lane's Meter, each read once from the
+    Snapshot `meters`; anything but a Snapshot raises TypeError."""
+    if not isinstance(meters, usage.Snapshot):
+        raise TypeError(f"rank takes a usage.Snapshot, not {type(meters).__name__}; "
+                        "wrap a usage document with usage.Snapshot.of")
+    readouts = {}
+    for lane_def in (cat.get("lanes") or {}).values():
+        meter = lane_def.get("meter")
+        if meter not in readouts:
+            readouts[meter] = meters.readout(meter, cat)
+    return readouts
+
+
+def _rank_readouts(cat, readouts, present, floor, ceiling, reason_label):
+    """The ranking core: the selection rule over `readouts`, Meter to Readout,
+    holding an entry for every Lane's Meter."""
     routing = cat.get("routing", {})
     # merged routing always carries both (`catalog.load_catalog`); no second
     # default lives here
@@ -170,8 +226,6 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     dollars = catalog.quota_unit(routing) == "plan_dollars"
     reason_label = reason_label or "tier"
 
-    meter_map = meter_observations(meters) or {}
-
     present_set = set(present) if present else set()
     lanes = cat.get("lanes", {})
 
@@ -180,23 +234,16 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
 
     for lane_name, lane_def in lanes.items():
         meter_name = lane_def.get("meter")
-        rec = meter_map.get(meter_name) if meter_name else None
-        if rec and isinstance(rec, dict):
-            r = rec.get("r")
-            pace = rec.get("pace")
-            remaining_weekly = rec.get("remaining_weekly")
-            if r is None:
-                meter_status = "unknown"
-            elif metering and not usage.eligible(rec, gate):
-                meter_status = "unavailable"
-            else:
-                meter_status = "ok"
-        else:
-            r = None
-            pace = None
-            remaining_weekly = None
+        reading = readouts[meter_name]
+        r = reading.remaining
+        pace = reading.pace
+        remaining_weekly = reading.weekly
+        if r is None:
             meter_status = "unknown"
-            rec = None
+        elif reading.gated:
+            meter_status = "unavailable"
+        else:
+            meter_status = "ok"
 
         lane_tier = lane_def.get("tier")
         harness = lane_def.get("harness")
@@ -219,7 +266,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         elif lane_tier is not None and ceiling is not None and lane_tier > ceiling:
             veto_kind = "ceiling"
             veto_reason = f"vetoed:ceiling, {lane_name} (tier {lane_tier}) > {reason_label} ceiling (tier {ceiling})"
-        elif metering and not usage.eligible(rec, gate):
+        elif reading.gated:
             veto_kind = "gate"
             r_pct = f"{int(round(r * 100)):d}%"
             gate_pct = f"{int(round(gate * 100)):d}%"
@@ -241,9 +288,10 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
             "remaining_weekly": remaining_weekly,
             "meter_status": meter_status,
             "eligible": veto_reason is None,
-            # the machine-readable half of `reason`: None, or one of
-            # disabled, floor, ceiling, gate, cli
-            "veto": veto_kind,
+            # one of CAUSES: the veto, or for an eligible row the cause set
+            # below once the Pick is known. It replaced the `veto` field
+            # (ticket 22).
+            "cause": veto_kind,
             "pick": False,
             # only a Pick admitted past its Ceiling carries a record here
             "overflow": None,
@@ -251,34 +299,37 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
         }
         if dollars:
             # plan dollars per week; Pace times this is what ranks (ticket 39)
-            row["weight"] = catalog.week_dollars((cat.get("meters") or {}).get(meter_name))
+            row["weight"] = reading.week_dollars
 
         if veto_reason is None:
             eligible_rows.append(row)
         else:
             vetoed_rows.append(row)
 
-    eligible_rows.sort(key=lambda item: eligible_order(item, metering))
+    eligible_rows.sort(key=lambda item: _eligible_order(item, metering))
 
     if eligible_rows:
-        pick_row, beaten_pace = choose(eligible_rows, margin, metering)
+        pick_row, beaten_pace = _choose(eligible_rows, margin, metering)
 
         for r in eligible_rows:
             if r is pick_row:
-                r["pick"] = True
-                if beaten_pace is not None and dollars:
-                    r["reason"] = (f"stolen by plan dollars: {score(r):.2f} >= "
-                                   f"{beaten_pace:.2f} x (1 + {margin})")
-                elif beaten_pace is not None:
-                    r["reason"] = f"stolen by pace: {r['pace']} >= {beaten_pace} + {margin}"
-                else:
-                    r["reason"] = "pick"
+                r["cause"] = "pick" if beaten_pace is None else "steal"
+            elif metering and _score(r) is None:
+                r["cause"] = "unknown"
             else:
-                r["pick"] = False
-                if metering and score(r) is None:
-                    r["reason"] = "unknown meter, sorted last"
-                else:
-                    r["reason"] = "eligible"
+                r["cause"] = "eligible"
+            r["eligible"] = r["cause"] in _ELIGIBLE_CAUSES
+            r["pick"] = r["cause"] in _PICK_CAUSES
+            # the display text for the cause; nothing parses it
+            if r["cause"] == "steal" and dollars:
+                r["reason"] = (f"stolen by plan dollars: {_score(r):.2f} >= "
+                               f"{beaten_pace:.2f} x (1 + {margin})")
+            elif r["cause"] == "steal":
+                r["reason"] = f"stolen by pace: {r['pace']} >= {beaten_pace} + {margin}"
+            elif r["cause"] == "unknown":
+                r["reason"] = "unknown meter, sorted last"
+            else:
+                r["reason"] = r["cause"]
 
         ordered_eligible = [pick_row] + [r for r in eligible_rows if r is not pick_row]
     else:
@@ -309,21 +360,21 @@ def gate_only_stop(rows, floor, ceiling):
     """
     in_range = [
         row for row in rows
-        if row.get("veto") != "disabled"
+        if row["cause"] != "disabled"
         and row["tier"] is not None
         and (floor is None or row["tier"] >= floor)
         and (ceiling is None or row["tier"] <= ceiling)
     ]
-    if not any(row.get("veto") == "gate" for row in in_range):
+    if not any(row["cause"] == "gate" for row in in_range):
         return False
-    return all(row.get("veto") in ("gate", "cli") for row in in_range)
+    return all(row["cause"] in ("gate", "cli") for row in in_range)
 
 
 def rank(cls, cat, meters, present, tier=None):
     """Rank catalog lanes for a given class.
 
     cat: dict from catalog.load_catalog
-    meters: usage document dict (or {})
+    meters: a usage.Snapshot (see rank_range)
     present: set of harness names
     tier: optional floor override (must be between class floor and ceiling)
 
@@ -397,26 +448,172 @@ def rank(cls, cat, meters, present, tier=None):
 
 
 def tier_leaders(cat, meters, present):
-    """Return the leader and ranked rows for each exact Tier from 1 to 4.
+    """The four exact-Tier previews, Tier 1 to 4. Each is a dict:
+      tier             int
+      leader           lane name, or None
+      rows             the Tier's rows, Pick first, each with "cause"
+      steal_threshold  {"unit": "pace" | "plan_dollars", "value": float | None}
+      pace_to_lead     {meter: float | None}
+      handover         {"points": float, "to": lane name | None} | None
 
-    Each preview delegates selection to ``rank_range`` with equal floor and
-    ceiling bounds, then projects away rows from other Tiers. A leader is the
-    exact-Tier preview, not the Pick for any Class range.
+    Each Tier is ranked by the selection rule with equal floor and ceiling,
+    and rows from other Tiers are dropped. A leader is the exact-Tier
+    preview, not the Pick for any Class range.
+
+    `steal_threshold.unit` is routing's quota unit, and its value is what a
+    Lane that sorts after the leader must reach to take the Tier: the
+    leader's Pace plus the Margin, or with plan dollars the leader's value
+    times (1 + Margin). None with no leader, an unknown leader value, or
+    Meters off.
+
+    `pace_to_lead` has a key for every Meter with an eligible Lane of known
+    Pace in the Tier, except the leader's Meter: the lowest Pace on the 0.01
+    grid at which a Lane on it leads the Tier, every other Meter as it reads
+    now, or None when no Pace a Meter can read (up to usage.MAX_PACE) does.
+    Empty with Meters off.
+
+    `handover` is the smallest spend of the leader's Meter, on a grid of half
+    a quota point of its week, at which another Lane leads the Tier or the
+    Meter falls under the Gate; `to` is that Lane, or None when no other Lane
+    is eligible. `points` is quota points as a fraction of the week, never a
+    time (ADR 0001). None with no leader, Meters off, or a leader's Meter with
+    no Weekly figure, Pace or share of the week left, and None when the
+    leader still leads with its whole week spent (a Gate of 0).
+
+    The Snapshot is read once: every what-if replaces one Readout in that
+    map and reranks it, a spent one through `meters.readout(spend=)`. The
+    preview does no I/O and is JSON-safe.
     """
+    readouts = _readouts(cat, meters)
+    routing = cat.get("routing", {})
     previews = []
     for tier in range(1, 5):
-        rows = rank_range(
-            cat,
-            meters,
-            present,
-            floor=tier,
-            ceiling=tier,
-            reason_label=f"Tier {tier}",
-        )
-        rows = [row for row in rows if row["tier"] == tier]
-        leader = next((row["lane"] for row in rows if row["pick"]), None)
-        previews.append({"tier": tier, "leader": leader, "rows": rows})
+        rows = _tier_rows(cat, readouts, present, tier)
+        leader = next((row for row in rows if row["pick"]), None)
+        # Every Lane has a Tier (catalog validation), so the Tier's rows are
+        # its Lanes, and a what-if ranks those alone.
+        names = {row["lane"] for row in rows}
+        tier_cat = dict(cat, lanes={name: lane for name, lane in (cat.get("lanes") or {}).items()
+                                    if name in names})
+        previews.append({
+            "tier": tier,
+            "leader": leader["lane"] if leader else None,
+            "rows": rows,
+            "steal_threshold": _steal_threshold(routing, leader),
+            "pace_to_lead": _paces_to_lead(tier_cat, readouts, present, tier, rows, leader),
+            "handover": _handover(tier_cat, meters, readouts, present, tier, leader),
+        })
     return previews
+
+
+def _tier_rows(cat, readouts, present, tier):
+    """The ranking of one exact Tier over `readouts`, its own rows only."""
+    rows = _rank_readouts(cat, readouts, present, tier, tier, f"Tier {tier}")
+    return [row for row in rows if row["tier"] == tier]
+
+
+def _pick_with(cat, readouts, present, tier, meter, readout):
+    """The what-if both searches ask: the Pick row of `tier` with `meter`
+    reading `readout` and every other Meter as `readouts` has it, or None."""
+    trial = dict(readouts)
+    trial[meter] = readout
+    return next((row for row in _tier_rows(cat, trial, present, tier) if row["pick"]), None)
+
+
+def _steal_threshold(routing, leader):
+    """The value a Lane after `leader` must reach to take its Tier, in
+    routing's quota unit."""
+    unit = catalog.quota_unit(routing)
+    value = _score(leader) if leader is not None and catalog.meters_enabled(routing) else None
+    if value is not None:
+        margin = routing["margin"]
+        value = value * (1 + margin) if unit == "plan_dollars" else value + margin
+    return {"unit": unit, "value": value}
+
+
+def _paces_to_lead(tier_cat, readouts, present, tier, rows, leader):
+    """Meter to its Pace to lead the Tier (see tier_leaders); `tier_cat`
+    holds the Tier's Lanes only."""
+    if leader is None or not catalog.meters_enabled(tier_cat.get("routing", {})):
+        return {}
+    out = {}
+    for row in rows:
+        meter = row["meter"]
+        if (row["eligible"] and row["pace"] is not None
+                and meter != leader["meter"] and meter not in out):
+            out[meter] = _pace_to_lead(tier_cat, readouts, present, tier, rows, meter)
+    return out
+
+
+def _pace_to_lead(cat, readouts, present, tier, rows, meter):
+    """The lowest Pace on the 0.01 grid, up to usage.MAX_PACE, at which a Lane
+    on `meter` leads `tier`, or None.
+
+    Who leads changes only where a Lane on `meter` crosses a rival's value in
+    the sort or in a steal: at the rival's value, or that value plus or minus
+    the Margin (with plan dollars, times or over 1 + Margin), each over the
+    Meter's weight. Between crossings the outcome holds, so the Pick is replayed
+    at 0 and at the first and second grid step at or above each crossing, in
+    ascending order, and the first that leads is the answer. A step is in
+    hundredths, so a Pace on the grid is exact.
+    """
+    routing = cat["routing"]
+    margin = routing["margin"]
+    dollars = catalog.quota_unit(routing) == "plan_dollars"
+    weight = readouts[meter].week_dollars if dollars else 1.0
+    crossings = [0.0]
+    if weight:
+        for row in rows:
+            value = _score(row)
+            if not row["eligible"] or row["meter"] == meter or value is None:
+                continue
+            if dollars:
+                crossings += [value, value * (1 + margin), value / (1 + margin)]
+            else:
+                crossings += [value, value + margin, value - margin]
+        crossings = [c / weight for c in crossings]
+    top = math.floor(round(usage.MAX_PACE * 100, 9))
+    steps = set()
+    for crossing in crossings:
+        step = max(0, math.ceil(round(crossing * 100, 9)))
+        steps.update(s for s in (step, step + 1) if s <= top)
+    for step in sorted(steps):
+        pick = _pick_with(cat, readouts, present, tier, meter,
+                          dataclasses.replace(readouts[meter], pace=step / 100))
+        if pick is not None and pick["meter"] == meter:
+            return step / 100
+    return None
+
+
+# The Handover's grid: half a quota point of the leader's week per step, so
+# at most 200 steps spend a whole week.
+_HANDOVER_STEPS = 200
+
+
+def _handover(tier_cat, meters, readouts, present, tier, leader):
+    """The Handover of `tier` (see tier_leaders); `tier_cat` holds the Tier's
+    Lanes only.
+
+    Only the leader's Meter spends, read through `meters.readout(spend=)`:
+    its Weekly figure falls, its Pace and its Gate follow, and the core
+    reranks the Tier at each step until another Lane leads or none does,
+    which is the Meter falling under the Gate with nothing else eligible.
+    """
+    if leader is None or not catalog.meters_enabled(tier_cat.get("routing", {})):
+        return None
+    meter = leader["meter"]
+    reading = readouts[meter]
+    if reading.weekly is None or reading.pace is None or not reading.week_left:
+        return None
+    for step in range(1, _HANDOVER_STEPS + 1):
+        spend = step / _HANDOVER_STEPS
+        pick = _pick_with(tier_cat, readouts, present, tier, meter,
+                          meters.readout(meter, tier_cat, spend=spend))
+        if pick is None or pick["lane"] != leader["lane"]:
+            return {"points": min(spend, reading.weekly), "to": pick["lane"] if pick else None}
+        if spend >= reading.weekly:
+            break
+    return None
 
 
 def format_rows(rows):
@@ -486,38 +683,6 @@ def print_rank_output(cls, cat, rows, tier=None):
     return True
 
 
-def run_usage():
-    """Refresh path: probe vendors when the cache is missing or stale."""
-    try:
-        return usage.acquire(timeout=90)
-    except Exception:
-        return {}
-
-
-def load_cached_usage(cache_path=None):
-    """Read the usage cache without invoking any vendor probe."""
-    return usage.load_cached(cache_path=cache_path)
-
-
-def load_usage(cat, meters_path=None, *, refresh=False):
-    """Observations for ranking. routing.meters off never probes vendors.
-
-    ``meters_path`` is an explicit document and is loaded even when metering
-    is off. ``refresh=True`` is the class-rank path (acquire); False is cache.
-    """
-    if meters_path:
-        try:
-            with open(meters_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    if not catalog.meters_enabled(cat.get("routing", {})):
-        return load_cached_usage()
-    if refresh:
-        return run_usage()
-    return load_cached_usage()
-
-
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -562,7 +727,11 @@ def main(argv=None):
             sys.exit(2)
         cat = restrict_to_harness(cat, args.harness)
 
-    meters_doc = load_usage(cat, args.meters, refresh=not tiers_mode)
+    # A Class reads the Meters FRESH, which probes only when the reading is
+    # older than ten minutes and only with routing.meters on; the tiers
+    # preview and an explicit --meters FILE read the document as it is.
+    meters = usage.read(cat["routing"], usage.CACHED if (tiers_mode or args.meters) else usage.FRESH,
+                        path=args.meters)
 
     if args.harnesses is not None:
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
@@ -570,7 +739,7 @@ def main(argv=None):
         present = harnesses.installed()
 
     if tiers_mode:
-        previews = tier_leaders(cat, meters_doc, present)
+        previews = tier_leaders(cat, meters, present)
         routing = cat["routing"]
         margin = routing["margin"]
         gate = routing["gate"]
@@ -599,7 +768,7 @@ def main(argv=None):
         sys.exit(0)
 
     try:
-        rows = rank(args.target, cat, meters_doc, present, tier=args.tier)
+        rows = rank(args.target, cat, meters, present, tier=args.tier)
     except ValueError as e:
         sys.stderr.write(f"rank: {e}\n")
         sys.exit(2)

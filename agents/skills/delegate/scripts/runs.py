@@ -490,7 +490,9 @@ def _settle_meter(request, status, text):
     """The Run's one touch of its Lane's Meter (ticket 43). A blocked Run whose
     harness says, in `text`, that its usage limit is reached holds the Meter at
     nothing left; a done or partial Run releases it; any other Run leaves it.
-    Returns the hold's note, or why the settle failed; never raises."""
+    The hold goes beside the usage cache every reader reads (`usage.hold`,
+    `usage.release`). Returns the hold's note, or why the settle failed; never
+    raises."""
     meter = request.meter
     if not meter:
         return None
@@ -498,11 +500,11 @@ def _settle_meter(request, status, text):
         if status == "blocked":
             line = harnesses.get(request.harness).usage_limit(text)
             if line:
-                until = usage.mark_limited(meter, line)
+                until = usage.hold(meter, line)
                 stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
                 return f"{meter} meter held at 0% left until {stamp}: {line}"
         elif status in ("done", "partial"):
-            usage.clear_limited(meter)
+            usage.release(meter)
     except Exception as e:
         return f"could not settle the {meter} meter: {e}"
     return None

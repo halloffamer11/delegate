@@ -65,6 +65,19 @@ class World:
         except OSError:
             return []
 
+    def read_meters(self, *meters):
+        """Write a fresh usage cache with a reading for each Meter, so a hold
+        has a row to overlay (a hold applies only to a Meter with a reading)."""
+        rows = [{"meter": m, "harness": m.split("-")[0], "remaining_weekly": 0.5, "r": 0.5,
+                 "pace": 1.0} for m in meters]
+        with open(self.cache, "w", encoding="utf-8") as f:
+            json.dump({"probed_at": time.time(), "lanes": rows}, f)
+
+    def held(self):
+        """The Meters held in the Meter snapshot every reader reads, sorted."""
+        snap = usage.read(None, usage.CACHED)
+        return sorted(m for m in snap.names() if snap.readout(m, None).held_until is not None)
+
 
 @contextlib.contextmanager
 def world():
@@ -331,10 +344,9 @@ def case_a_ledger_that_cannot_be_written_never_stops_a_run_ending():
 def case_a_usage_limit_refusal_holds_the_lanes_meter():
     grok = request(lane="grok46-high@grok", harness="grok", model="grok-4.6", meter="grok")
 
-    def held():
-        return sorted(usage.read_limits())
-
     with world() as w:
+        w.read_meters("grok", "codex")
+        held = w.held
         refused = runs.execute(grok, b"p", lambda run: runs.blocked(GROK_LIMIT), w.root)
         after_refusal = held()
         timed_out = runs.execute(grok, b"p", lambda run: runs.blocked("timeout after 40m"), w.root)
@@ -381,7 +393,8 @@ def case_a_hand_off_ends_the_run_at_once_as_native():
     claude = request(lane="opus-high@claude", harness="claude", model="claude-opus-5",
                      meter="claude-general")
     with world() as w:
-        usage.mark_limited("claude-general", "held before the hand-off")
+        w.read_meters("claude-general")
+        usage.hold("claude-general", "held before the hand-off")
         seen = {}
 
         def work(run):
@@ -410,12 +423,12 @@ def case_a_hand_off_ends_the_run_at_once_as_native():
                and start.get("thread_id") == disp["thread_id"] == finish.get("thread_id")
                and finish.get("status") == "native" and finish.get("secs") is None
                # the Meter hold is never touched
-               and sorted(usage.read_limits()) == ["claude-general"]
+               and w.held() == ["claude-general"]
                # what dispatch prints: the native line, then the spawn line
                and ended.text() == (f"delegate: native lane=opus-high@claude agent=lane-opus-high "
                                     f"prompt={prompt}\ndelegate: spawn: {spawn}")
                and ended.text(as_json=True) == json.dumps(native, indent=2),
-               f"ended={vars(ended)} dispatch={disp} ledger={lines} limits={usage.read_limits()}")
+               f"ended={vars(ended)} dispatch={disp} ledger={lines} held={w.held()}")
 
 
 def case_running_lists_a_run_while_its_work_runs():

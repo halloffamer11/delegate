@@ -31,9 +31,9 @@ except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, installed_harnesses, meters_enabled
 
 try:
-    from rank import rank, tier_leaders, eligible_order, choose
+    from rank import rank, tier_leaders
 except ImportError:
-    from .rank import rank, tier_leaders, eligible_order, choose
+    from .rank import rank, tier_leaders
 
 try:
     import usage
@@ -52,12 +52,9 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
-CACHE = usage.get_cache_path()
 # Flag file: while it exists, `statusline` prints no rows.
 SWITCH = os.environ.get("DELEGATE_STATUSLINE_SWITCH") or os.path.expanduser("~/.cache/delegate/statusline.off")
 VERDICTS = ("clean", "findings", "partial", "failed")
-DAYS_PER_MONTH = 30.4375
-WEEK_DAYS = 7
 
 
 # ---------------------------------------------------------------- shared
@@ -127,26 +124,26 @@ def models_by_meter(catalog):
     return out
 
 
-def model_cell(lane_row, by_meter):
+def model_cell(reading, by_meter):
     """What runs on this meter. Claude meters are this session, not a lane."""
-    slugs = by_meter.get(lane_row["lane"])
+    slugs = by_meter.get(reading.meter)
     if slugs:
         return ", ".join(sorted(set(slugs)))
-    m = lane_row.get("group") or "general"
+    m = reading.group or "general"
     return "this session (all models)" if m == "general" else f"this session ({m})"
 
 
-def ignored(lane_row, by_meter):
+def ignored(reading, by_meter):
     """A meter no lane can spend, on a harness no orchestrator runs in-process, is
     ignored on purpose — agy's Claude/GPT group after Opus was dropped. A harness
     an orchestrator profile runs natively keeps its Meters: the session itself
     spends them. Derived, not listed: add a lane on that meter to the catalog and
     it returns to the table."""
-    return (not by_meter.get(lane_row["lane"])
-            and lane_row["harness"] not in orchestrators.native_harnesses())
+    return (not by_meter.get(reading.meter)
+            and reading.harness not in orchestrators.native_harnesses())
 
 
-def unprobed_meters(catalog, obs_map):
+def unprobed_meters(catalog, readings):
     """Catalog Meters a lane spends that got no probe row, though their
     harness's probe read a figure for another Meter.
 
@@ -155,19 +152,11 @@ def unprobed_meters(catalog, obs_map):
     Gate off without a word. A harness whose probe read nothing (absent, failed,
     or with no usage source, as Kiro's) says so in its own row instead.
     """
-    read = {L.get("harness") for L in obs_map.values()
-            if isinstance(L, dict) and L.get("r") is not None}
+    read = {r.harness for r in readings if r.remaining is not None}
+    named = {r.meter for r in readings}
     spent = {lane.get("meter") for lane in catalog["lanes"].values()}
     return sorted(name for name, meter in catalog["meters"].items()
-                  if name in spent and name not in obs_map and meter.get("harness") in read)
-
-
-def usage_doc(refresh=False, max_age_min=None, routing=None):
-    if refresh:
-        return usage.acquire(refresh=True, max_age_min=max_age_min, timeout=180)
-    if routing is not None and not meters_enabled(routing):
-        return usage.load_cached()
-    return usage.acquire(refresh=refresh, max_age_min=max_age_min, timeout=180)
+                  if name in spent and name not in named and meter.get("harness") in read)
 
 
 def month_cell(price_month):
@@ -176,53 +165,46 @@ def month_cell(price_month):
     return f"${price_month}"
 
 
-def plan_row(lane_row, meters):
-    """One Plan consumption row. Unknown meters dash the last two columns."""
-    name = lane_row["lane"]
+def plan_row(reading, meters):
+    """One Plan consumption row: the share of the week used times the Meter's
+    plan price per week. Unknown meters dash the last two columns."""
+    name = reading.meter
     meter = meters.get(name)
-    used = None if lane_row.get("remaining_weekly") is None else 1 - lane_row["remaining_weekly"]
+    used = None if reading.weekly is None else 1 - reading.weekly
     if not meter:
         return [name, "—", "—", "—", "—"]
-    if used is None:
+    if used is None or reading.week_dollars is None:
         return [name, meter["plan"], month_cell(meter["price_month"]), "—", "—"]
-    dollars = meter["price_month"] * (WEEK_DAYS / DAYS_PER_MONTH) * used
-    return [name, meter["plan"], month_cell(meter["price_month"]), pct(used), money(dollars)]
+    return [name, meter["plan"], month_cell(meter["price_month"]), pct(used),
+            money(reading.week_dollars * used)]
 
 
 def cmd_limits(a):
     catalog = load_catalog_or_die(a.config_dir)
     routing = catalog.get("routing", {})
     metering = meters_enabled(routing)
-    doc = usage_doc(a.refresh, a.max_age_min, routing=routing)
+    # FRESH probes when the reading is older than --max-age-min (10) and
+    # metering is on; --refresh is a person's own request, so it probes now
+    # whatever the switch says (routing None).
+    meters = usage.read(None if a.refresh else routing, usage.FORCED if a.refresh else usage.FRESH,
+                        max_age_min=a.max_age_min)
     gate = routing["gate"]
-    obs_map = usage.observations(doc) or {}
     by_meter = models_by_meter(catalog)
-    lanes = sorted((dict(L, lane=name, harness=L.get("harness"))
-                    for name, L in obs_map.items()),
-                   key=lambda L: (L.get("remaining_weekly") is None,
-                                  -(L.get("remaining_weekly") or 0)))
-    skipped = [L["lane"] for L in lanes if ignored(L, by_meter)]
-    shown = [L for L in lanes
-             if (a.all or not ignored(L, by_meter))
-             and (not a.eligible or not metering or usage.eligible(obs_map.get(L["lane"]), gate))]
-    rows = [[L["lane"], model_cell(L, by_meter), pct(L.get("remaining_weekly")),
-             pct(L.get("remaining_5h")), when(L.get("reset_weekly")), when(L.get("reset_5h"))]
-            for L in shown]
-    stamp = doc.get("probed_at")
-    age = int((time.time() - stamp) / 60) if isinstance(stamp, (int, float)) else None
+    readings = sorted((meters.readout(name, catalog) for name in meters.names()),
+                      key=lambda r: (r.weekly is None, -(r.weekly or 0)))
+    skipped = [r.meter for r in readings if ignored(r, by_meter)]
+    # `gated` is the Gate rank applies, so it is off with metering off
+    shown = [r for r in readings
+             if (a.all or not ignored(r, by_meter)) and not (a.eligible and r.gated)]
+    rows = [[r.meter, model_cell(r, by_meter), pct(r.weekly), pct(r.five_h),
+             when(r.reset_weekly), when(r.reset_5h)]
+            for r in shown]
+    stamp = meters.taken_at
+    age = int((time.time() - stamp) / 60) if stamp is not None else None
     print("**Current limits:**\n")
     print(md_table(["Lane", "Model", "Weekly", "5h", "Weekly reset", "5h reset"], rows))
-    plan_rows = []
-    seen = set()
-    for L in lanes:
-        name = L["lane"]
-        if name in seen:
-            continue
-        seen.add(name)
-        if name in catalog["meters"]:
-            plan_rows.append(plan_row(L, catalog["meters"]))
-        elif a.all or not ignored(L, by_meter):
-            plan_rows.append(plan_row(L, catalog["meters"]))
+    plan_rows = [plan_row(r, catalog["meters"]) for r in readings
+                 if r.meter in catalog["meters"] or a.all or not ignored(r, by_meter)]
     if plan_rows:
         print("\n**Plan consumption this cycle:**\n")
         print(md_table(
@@ -230,15 +212,17 @@ def cmd_limits(a):
             plan_rows,
         ))
         print("\nPlan $ used this cycle is the weekly slice of the monthly fee times the share used.")
-    unknown = [L["lane"] for L in shown if L.get("remaining_weekly") is not None
-               and not L.get("reset_weekly")]
+    unknown = [r.meter for r in shown if r.weekly is not None and not r.reset_weekly]
     if unknown:
         print(f"\nWeekly reset unread for: {', '.join(unknown)}.")
     if skipped and not a.all:
         print(f"\nIgnored, no lane spends them: {', '.join(skipped)}.")
-    unprobed = unprobed_meters(catalog, obs_map)
+    unprobed = unprobed_meters(catalog, readings)
     if unprobed:
         print(f"\nNo probe row for: {', '.join(unprobed)}; the Gate never vetoes their lanes.")
+    held = [f"{r.meter} until {when(r.held_until)}" for r in readings if r.held_until is not None]
+    if held:
+        print(f"\nUsage-limit hold: {', '.join(held)}.")
     gate_pct = f"{int(round(gate * 100))}%"
     age_label = f"{age} min ago" if age is not None else "at an unknown time"
     if metering:
@@ -586,28 +570,22 @@ def cmd_statusline(a):
     c = get_colors(no_color)
     catalog = load_catalog_or_die(a.config_dir)
 
-    cache_path = usage.get_cache_path()
-    if not os.path.exists(cache_path):
-        return
-    usage_doc = usage.load_cached(cache_path)
-    obs_map = usage.observations(usage_doc)
-    if obs_map is None:
-        return
-    if not isinstance(usage_doc, dict) or not isinstance(usage_doc.get("lanes"), list):
+    # A missing, unreadable or malformed cache prints no rows at all.
+    meters = usage.read(None, usage.CACHED)
+    if meters.status != "ok":
         return
 
     now = time.time()
     present = installed_harnesses()
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
-    gate_threshold = routing["gate"]
     metering = meters_enabled(routing)
 
     won_by_meter = {}
     picks = {}
     for cls in classes:
         try:
-            rows = rank(cls, catalog, usage_doc, present)
+            rows = rank(cls, catalog, meters, present)
         except Exception:
             continue
         if rows and rows[0].get("pick"):
@@ -620,7 +598,6 @@ def cmd_statusline(a):
 
     running_by_lane = Counter(r.lane for r in runs.running(now))
 
-    by_meter = usage.observations(usage_doc) or {}
     all_meters = catalog.get("meters", {})
     catalog_order = list(all_meters.keys())
 
@@ -639,32 +616,23 @@ def cmd_statusline(a):
     for m_key in sorted_meters:
         m_def = all_meters.get(m_key, {})
         lbl = get_meter_label(m_key, m_def, all_meters)
-        u_row = by_meter.get(m_key, {})
-        rem5 = u_row.get("remaining_5h")
-        reset5 = u_row.get("reset_5h")
-        remw = u_row.get("remaining_weekly")
-        resetw = u_row.get("reset_weekly")
-        model_remw = u_row.get("remaining_weekly_model")
-        # A model Meter has a weekly Window of its own and shares its harness's
-        # 5h Window, so its row leaves 5h blank. The catalog says so; a probe row
-        # with a per-model weekly figure says so too.
-        shares5 = bool(m_def.get("model_meter")) or model_remw is not None
-        if model_remw is not None:
-            remw = model_remw
-
-        is_gated = metering and not usage.eligible(obs_map.get(m_key, u_row), gate_threshold)
+        # One Readout per Meter: its Weekly figure (for a Model meter the lower
+        # of its own week and its harness's), its 5h Window and the Gate.
+        reading = meters.readout(m_key, catalog)
 
         won_tiers = won_by_meter.get(m_key, set())
         badge_str = format_badge(won_tiers, c)
         label_str = format_label(lbl, won_tiers, c)
 
-        if shares5:
+        if reading.shares_five_h:
+            # a Model meter's 5h Window is its harness's, on that row
             five_str = " " * 15
         else:
-            five_str = f"{c['DIM']}5h{c['R']} {gauge(rem5, reset5, now, gated=False, c=c)}"
+            five_str = f"{c['DIM']}5h{c['R']} {gauge(reading.five_h, reading.reset_5h, now, gated=False, c=c)}"
 
-        gate_char = f"{c['RED']}{c['BOLD']}✗{c['R']}" if is_gated else ""
-        wk_str = f"{c['DIM']}wk{c['R']} {gauge(remw, resetw, now, gated=is_gated, c=c)}{gate_char}"
+        gate_char = f"{c['RED']}{c['BOLD']}✗{c['R']}" if reading.gated else ""
+        wk_str = (f"{c['DIM']}wk{c['R']} "
+                  f"{gauge(reading.weekly, reading.reset_weekly, now, gated=reading.gated, c=c)}{gate_char}")
 
         line = f"{pad(badge_str, 3)}{pad(label_str, 7)}{pad(five_str, 17)}{pad(wk_str, 17)}"
 
@@ -686,22 +654,22 @@ def cmd_statusline(a):
         # draw, and with no CLI on PATH no Tier has a lane, so those keep the
         # rows above and the plain lane block.
         width = a.width or shutil.get_terminal_size((118, 24)).columns
-        out_lines = popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now)
+        out_lines = popup_lines(catalog, meters, present, picks, won_by_meter, c, width, now)
     elif a.popup:
-        out_lines += lane_lines(catalog, usage_doc, present, picks, c)
+        out_lines += lane_lines(catalog, meters, present, picks, c)
 
     for l in out_lines:
         print(l)
 
 
-def lane_lines(catalog, usage_doc, present, picks, c):
+def lane_lines(catalog, meters, present, picks, c):
     """The popup's lane block: each Tier leader, then the Classes that pick it.
 
     A Class Pick that is not its Tier's leader gets its own line under that
     Tier, so every Class appears once.
     """
     try:
-        previews = tier_leaders(catalog, usage_doc, present)
+        previews = tier_leaders(catalog, meters, present)
     except Exception:
         return []
     by_lane = {}
@@ -737,18 +705,17 @@ def lane_lines(catalog, usage_doc, present, picks, c):
 
 # ------------------------------------------------------------- popup
 # The Herdr popup (ticket 40, layout D): each Meter's weekly Pace as its
-# calculation, then each Tier's Lanes on the same Pace axis with the steal line
-# (leader Pace + Margin) and how far the leader's Meter can fall before the Tier
-# hands over. Everything reads the cached Meters at the moment of display: no
-# usage history and no burn rate (ADR 0001), so a distance is in quota points at
-# today's readings, never a time.
-POPUP_LEGEND = ("Pace = weekly Remaining ÷ share of the week left: 1 on track, above 1 spend it"
+# calculation, then each Tier's Lanes on the same Pace axis with the Pace each
+# other Meter needs to lead it and the Handover, both as rank's Tier preview
+# gives them (tickets 22 and 23). Everything reads the cached Meters at the
+# moment of display: no usage history and no burn rate (ADR 0001), so a
+# Handover is in quota points at today's readings, never a time.
+POPUP_LEGEND = ("Pace = weekly figure ÷ share of the week left: 1 on track, above 1 spend it"
                 " · ┊ = the Pace that Meter needs to lead the Tier")
 POPUP_NUM_HEAD = "Pace = left ÷ time  5h      resets"
 POPUP_NUM_W = 36
 POPUP_LANE_W = 16
 POPUP_METER_W = 7
-HANDOVER_STEP = 0.005
 
 
 def clip(s, w):
@@ -767,8 +734,10 @@ def clip(s, w):
     return "".join(out)
 
 
-def popup_meters(catalog, by_meter, won_by_meter, now):
-    """One entry per Meter a Lane spends, in the statusline's order."""
+def popup_meters(catalog, meters, won_by_meter):
+    """One entry per Meter a Lane spends, in the statusline's order, each
+    from its Readout: the Weekly figure over the share of the week left at the
+    reading is the Pace it prints."""
     used = {l.get("meter") for l in catalog.get("lanes", {}).values() if l.get("enabled", True)}
     all_meters = catalog.get("meters", {})
     order = list(all_meters)
@@ -776,67 +745,16 @@ def popup_meters(catalog, by_meter, won_by_meter, now):
     for key in order:
         if key not in used:
             continue
-        row = by_meter.get(key) or {}
-        weekly = row.get("remaining_weekly")
-        reset = row.get("reset_weekly")
-        left = row.get("cycle_left")
-        if left is None and reset:
-            left = min(1.0, max(usage.CYCLE_FLOOR, (reset - now) / (WEEK_DAYS * 86400)))
-        shares5 = bool(all_meters[key].get("model_meter")) or row.get("remaining_weekly_model") is not None
+        reading = meters.readout(key, catalog)
+        own_5h = not reading.shares_five_h   # a Model meter's 5h is its harness's
         out.append({"key": key, "label": get_meter_label(key, all_meters[key], all_meters),
-                    "weekly": weekly, "left": left, "pace": row.get("pace"), "reset": reset,
-                    "f5": None if shares5 else row.get("remaining_5h"),
-                    "reset5": None if shares5 else row.get("reset_5h"),
+                    "weekly": reading.weekly, "left": reading.week_left, "pace": reading.pace,
+                    "reset": reading.reset_weekly,
+                    "f5": reading.five_h if own_5h else None,
+                    "reset5": reading.reset_5h if own_5h else None,
                     "won": won_by_meter.get(key, set())})
     out.sort(key=lambda m: (0 if m["won"] else 1, min(m["won"] or {99}), order.index(m["key"])))
     return out
-
-
-def handover(preview, meter, margin, gate):
-    """How far the Tier leader's Meter can fall before another Lane leads.
-
-    Replays rank's choice (`rank.choose`) with only the leader's Meter
-    spending: its weekly Remaining drops in small steps, the Pace of every Lane
-    on it follows, and the first step where the Pick changes, or the Meter
-    falls under the Gate, is the answer. Returns (points, new leader or None),
-    or None when the leader's Meter has no weekly figure to spend.
-    """
-    rows = [r for r in preview["rows"] if r["eligible"]]
-    lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
-    if lead is None or not meter or meter["weekly"] is None or not meter["left"]:
-        return None
-    others = [r for r in rows if r["meter"] != lead["meter"]]
-    five = meter["f5"]
-    spent = 0.0
-    while True:
-        spent += HANDOVER_STEP
-        weekly = meter["weekly"] - spent
-        remaining = weekly if five is None else min(five, weekly)
-        if remaining < gate:
-            # the leader's Meter is vetoed: the rest of the Tier decides
-            pool = sorted(others, key=lambda r: eligible_order(r, True))
-            return min(spent, meter["weekly"]), (choose(pool, margin, True)[0]["lane"] if pool else None)
-        trial = [dict(r, pace=weekly / meter["left"]) if r["meter"] == lead["meter"] else r for r in rows]
-        trial.sort(key=lambda r: eligible_order(r, True))
-        pick = choose(trial, margin, True)[0]["lane"]
-        if pick != lead["lane"]:
-            return spent, pick
-
-
-def pace_to_lead(preview, meter_key, top):
-    """The lowest Pace at which a Lane on `meter_key` would lead the Tier, by
-    rank's own choice (Pace order, then a steal by the Margin across Order),
-    with every other Meter as it reads now; None when none up to `top` does."""
-    rows = [r for r in preview["rows"] if r["eligible"]]
-    margin = preview.get("margin", 0)
-    pace = 0.0
-    while pace <= top:
-        trial = [dict(r, pace=pace) if r["meter"] == meter_key else r for r in rows]
-        trial.sort(key=lambda r: eligible_order(r, True))
-        if choose(trial, margin, True)[0]["meter"] == meter_key:
-            return pace
-        pace = round(pace + 0.01, 2)
-    return None
 
 
 def pace_axis(paces, width):
@@ -854,13 +772,14 @@ def axis_labels(top, x, width, c):
     return c["DIM"] + "".join(cells) + c["R"]
 
 
-def track(top, x, width, c, dot=None, steal=None, steal_col=""):
-    """One row of the Pace axis: the grid, Pace 1 as │, the steal line, the dot."""
+def track(top, x, width, c, dot=None, need=None, need_col=""):
+    """One row of the Pace axis: the grid, Pace 1 as │, the Pace to lead as ┊
+    (on the last cell when it lies past the axis), the dot."""
     cells = [(c["MUTE"], "─")] * width
     for k in range(int(top) + 1):
         cells[x(k)] = (c["MUTE"], "│" if k == 1 else "┼")
-    if steal is not None:
-        cells[x(steal)] = (steal_col, "┊")
+    if need is not None:
+        cells[x(need)] = (need_col, "┊")
     if dot is not None and dot[0] is not None:
         cells[x(dot[0])] = (dot[1], dot[2])
     return "".join(f"{col}{ch}{c['R']}" for col, ch in cells)
@@ -870,24 +789,25 @@ def when_short(t):
     return time.strftime("%a %H:%M", time.localtime(t)) if t else "—"
 
 
-def popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now):
+def popup_lines(catalog, snapshot, present, picks, won_by_meter, c, width, now):
     routing = catalog.get("routing", {})
     margin, gate = routing["margin"], routing["gate"]
-    by_meter = usage.observations(usage_doc) or {}
-    meters = popup_meters(catalog, by_meter, won_by_meter, now)
+    meters = popup_meters(catalog, snapshot, won_by_meter)
     by_key = {m["key"]: m for m in meters}
     try:
-        previews = tier_leaders(catalog, usage_doc, present)
+        previews = tier_leaders(catalog, snapshot, present)
     except Exception:
         previews = []
 
     left_w = 2 + POPUP_METER_W + POPUP_LANE_W + 1
     axis_w = max(24, width - left_w - 2 - POPUP_NUM_W)
-    steals = [r["pace"] + margin for p in previews for r in p["rows"]
-              if r["lane"] == p["leader"] and r["pace"] is not None]
-    top, x = pace_axis([m["pace"] for m in meters] + steals, axis_w)
+    # The axis reaches every Meter's Pace and every Pace to lead, up to its
+    # cap; a Pace to lead past the cap keeps its value in the row's note, and
+    # its mark sits on the axis's last cell.
+    needs = [v for p in previews for v in p["pace_to_lead"].values() if v is not None]
+    top, x = pace_axis([m["pace"] for m in meters] + needs, axis_w)
 
-    age = dur_short(now, usage_doc.get("probed_at") or now) or "0m"
+    age = dur_short(now, snapshot.taken_at or now) or "0m"
     lines = [f"{c['BOLD']}delegate usage{c['R']}  {c['DIM']}read {age} ago · Margin {margin:.2f} · "
              f"Gate {gate:.0%}{c['R']}",
              f"{c['DIM']}{POPUP_LEGEND}{c['R']}",
@@ -907,24 +827,25 @@ def popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now)
                      f"{c['DIM']}{when_short(m['reset'])}{c['R']}")
     lines.append("")
     for p in previews:
-        lines += tier_block(p, by_key, margin, gate, c, top, x, axis_w)
+        lines += tier_block(p, by_key, c, top, x, axis_w)
     lines.append(classes_line(picks, routing.get("classes", {}), c))
     return [clip(l, width).rstrip() for l in lines]
 
 
-def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
-    """A Tier's header (its leader and what changes next), then one row per
-    Meter with Lanes in the Tier: the leader's Meter first, then by Pace."""
+def tier_block(preview, by_key, c, top, x, axis_w):
+    """A Tier's header (its leader and the Handover the preview gives), then
+    one row per Meter with Lanes in the Tier: the leader's Meter first, then
+    by Pace. Each other Meter's row says the Pace to lead the preview gives it."""
     t = preview["tier"]
     tc = c["TIER_COL"][t]
     head = f"{tc}{c['BOLD']}{TIER_GLYPH[t]} Tier {t}{c['R']}  "
-    rows = [r for r in preview["rows"] if r["veto"] in (None, "gate", "cli")]
+    rows = [r for r in preview["rows"] if r["cause"] not in ("disabled", "floor", "ceiling")]
     if not rows:
         return [head + f"{c['MUTE']}no eligible lane{c['R']}"]
     lead = next((r for r in rows if r["lane"] == preview["leader"]), None)
-    preview = dict(preview, margin=margin)
+    paces = preview["pace_to_lead"]
     out = [head + f"{c['DIM']}leader{c['R']} {tc}{c['BOLD']}{preview['leader'] or 'none'}{c['R']}  "
-           f"{c['DIM']}{handover_note(preview, lead, by_key, margin, gate)}{c['R']}"]
+           f"{c['DIM']}{handover_note(preview, lead, by_key)}{c['R']}"]
     groups = {}
     for r in rows:
         groups.setdefault(r["meter"], []).append(r)
@@ -937,16 +858,18 @@ def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
         col = tc if is_lead else c["FG"]
         bold = c["BOLD"] if is_lead else ""
         name = r["lane"].split("@")[0] + (f" +{len(group) - 1}" if len(group) > 1 else "")
-        dot = (r["pace"], c["RED"], "✗") if r["veto"] == "gate" else (r["pace"], col + c["BOLD"], "●")
+        dot = (r["pace"], c["RED"], "✗") if r["cause"] == "gate" else (r["pace"], col + c["BOLD"], "●")
         need = None
-        if r["veto"] == "gate":
+        if r["cause"] == "gate":
             note = f"{c['RED']}under the Gate{c['R']}"
-        elif r["veto"] == "cli":
+        elif r["cause"] == "cli":
             note = "no CLI here"
-        elif is_lead or lead is None or r["pace"] is None:
+        elif is_lead or key not in paces:
+            # the leader's Meter, a Pace unknown, or no leader: nothing to reach
             note = ""
         else:
-            need = pace_to_lead(preview, key, top)
+            # None only when no Pace a Meter can read (usage.MAX_PACE) leads
+            need = paces[key]
             note = "cannot lead on Pace" if need is None else f"needs {need:.2f} (+{max(0.0, need - r['pace']):.2f})"
         if len(group) > 1:
             note = (note + " · " if note else "") + "with " + ", ".join(o["lane"].split("@")[0] for o in group[1:])
@@ -958,18 +881,18 @@ def tier_block(preview, by_key, margin, gate, c, top, x, axis_w):
     return out
 
 
-def handover_note(preview, lead, by_key, margin, gate):
-    if lead is None:
+def handover_note(preview, lead, by_key):
+    """The preview's Handover in words, in quota points: who leads once the
+    leader's Meter drops that far, or how far it is above the Gate."""
+    handover = preview.get("handover")
+    if lead is None or handover is None:
         return ""
     meter = by_key.get(lead["meter"])
-    found = handover(preview, meter, margin, gate)
-    if found is None:
-        return ""
-    points, new = found
-    label = meter["label"]
-    if new is None:
-        return f"only lane · {label} is {points * 100:.0f} pts above the Gate"
-    return f"→ {new} leads after {label} drops {points * 100:.1f} pts"
+    label = meter["label"] if meter else str(lead["meter"])
+    points = handover["points"] * 100
+    if handover["to"] is None:
+        return f"only lane · {label} is {points:.0f} pts above the Gate"
+    return f"→ {handover['to']} leads after {label} drops {points:.1f} pts"
 
 
 def classes_line(picks, classes, c):
@@ -993,7 +916,7 @@ def main():
 
     lim = sub.add_parser("limits", parents=[cfg], help="the Current limits table")
     lim.add_argument("--refresh", action="store_true", help="force a re-probe")
-    lim.add_argument("--max-age-min", type=float, help="cache TTL override")
+    lim.add_argument("--max-age-min", type=float, help="the age in minutes a reading may reach before it is probed again (default 10)")
     lim.add_argument("--eligible", action="store_true", help="drop meters rank.py would skip")
     lim.add_argument("--all", action="store_true", help="include meters no lane can spend")
     lim.set_defaults(fn=cmd_limits)

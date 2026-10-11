@@ -27,21 +27,58 @@ Lane loses its global place in the Tier it left; `catalog.project_tier_changes()
 names the Lanes in effect for `show` and the rank header, and `edit_catalog(op="set",
 field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
 preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
-use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
-`usage.load_cached()` / `rank.load_cached_usage()` read observations without a vendor
-probe. `usage.acquire()` is the refresh path. `usage.observations()`
-owns cache validity (`rank.meter_observations()` re-exports it): valid envelope and
-legacy map formats keep their behavior; any malformed observation makes the whole
-document unknown. Envelope observations require a finite timestamp; raw Window/reset fields are
-validated before display. `usage.eligible(observation, gate)` is the Gate predicate
-(unknown Remaining never vetoes; Remaining equal to Gate is eligible). Every Meter
-derives its combined figures through one arithmetic, `usage.combined()`: Remaining is
+use `rank.tier_leaders()`; it and the Class-facing `rank()` share the ranking core.
+`usage.read(routing, freshness, path=...)` returns the Meter snapshot, with the
+usage-limit holds in `limits.json` beside the document it read (`usage.hold`,
+`usage.release`); `Snapshot.of(document)` reads an in-memory document, which carries no
+hold. CACHED never probes or writes; FRESH probes when the reading is older than
+`max_age_min` (10) or absent; FORCED probes now. Either probes only with
+`routing.meters` on, or with routing None (`delegate status --refresh`), in the usage.py
+child process (`--refresh --cache PATH`, so it writes the read's own path) under one
+180 s bound, and writes nothing to the Ledger; a probe that fails or runs late gives the
+last reading when it is fresh enough, else status `stale` (ticket 18). `rank.py` reads
+FRESH for a Class and CACHED for `tiers` or `--meters`; `delegate run` reads FRESH
+(CACHED with `--meters` or `--no-probe`), and its dispatch reads FRESH before the relay
+and FORCED after it, so a run probes once before its relay and a named dispatch over a
+fresh reading does not; `--no-probe` reads nothing; `report.py limits` reads FRESH, or
+FORCED with `--refresh`. `Snapshot.readout(meter, cat)` joins one Meter with a
+catalog: Remaining, Pace, the Weekly figure, `gated` (the Gate predicate: unknown
+Remaining never vetoes, Remaining equal to Gate passes, and nothing is gated with
+`routing.meters` off), `week_dollars` and `held_until`; `readout(meter, cat, spend=x)`
+is the same Meter with x more of its week spent (the Weekly figure falls by x, Pace and
+`gated` follow, and a held Meter stays at 0). `rank_range`, `rank` and `tier_leaders`
+take only a snapshot: `rank_range` reads each Lane's Meter once into a map, Meter to
+Readout, and a private core ranks over that map, so a what-if replaces one Readout and
+ranks again with no second read (ticket 18); the dashboard and `catalog_edit` hand it
+the snapshot they read (ticket 16). Every row carries one `cause` from `rank.CAUSES`
+(pick, steal, eligible, unknown, or the veto: disabled, floor, ceiling, gate, cli);
+`eligible` and `pick` follow from it, the `reason` text is its display, and the
+dashboard and the deck read `cause`, never the text (ticket 20). `tier_leaders` reads
+the snapshot once and gives each Tier its `steal_threshold` (`{unit, value}` in the quota
+unit) and `pace_to_lead` (`{meter: pace or None}`): it reruns the core with one Readout's
+Pace replaced (`dataclasses.replace`) at 0 and at the first two 0.01 steps at or above
+each value where that Meter's Lanes cross a rival in the sort or a steal, up to
+`usage.MAX_PACE`, and the deck's aid and the usage popup draw those (tickets 21 and 22).
+Each Tier also carries its `handover` (`{points, to}` or None): rank reruns the core with
+the leader's Readout replaced by `snapshot.readout(meter, cat, spend=x)` in half-point
+steps, at most 200, until another Lane leads or the Meter falls under the Gate, and
+reports quota points, never a time; the popup only renders it (ticket 23). Rank's sort
+key, steal test and choice are private, so nothing outside rank replays its Pick.
+The statusline, the popup's Meter rows, `report.py limits` and the deck's Gate draw each
+Meter's Readout, so every display shows one Weekly figure and one Gate per Meter (ticket 17).
+One validity rule serves every reader: valid envelope and legacy map formats keep their
+behavior; any malformed observation makes the whole document unknown. Envelope observations require a finite
+timestamp; raw Window/reset fields are validated before display. Every Meter
+derives its combined figures through one private arithmetic in `usage.py`: Remaining is
 the lower Window fraction and Pace comes from the weekly Window. agy runs through it
 like the Claude Meters, and its note says the combined figure is the lower Window, an
 assumption, not a vendor bound (ticket 31, reversing modular ticket 13). A cache
 written under that older rule holds the Windows beside a null Remaining and Pace, so a
-read derives them (`usage._filled`) rather than probing again. This intentionally
-replaces partial use of invalid documents.
+read derives them rather than probing again. This intentionally
+replaces partial use of invalid documents. `usage.py`'s public names are its interface:
+CACHED, FRESH, FORCED, `MAX_PACE` (one over the cycle floor, 50: the highest Pace a Meter can
+read), `read`, `hold`, `release`, `cache_path`, `Snapshot`, `Readout` and `main`, and
+`usage.py --pretty` prints one line per Meter from its Readout (ticket 19).
 
 ## Scripts and assets
 
@@ -143,9 +180,11 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
 - `scripts/runs.py`: the Run module (ticket 24; delegate-deepening 01 to 04). `execute(request,
   prompt, work)` runs every Run from its start to its Outcome: the run directory, `prompt.md`,
   `dispatch.json` and the Ledger start, then the work, then `return.json`, the outcome, the
-  Usage-limit hold and the Ledger finish. Relayed work (`delegate.relay_work`) runs the relay through
-  `relay.run(job, run.path)`, which returns the `Finish`; the relay is `relays.Ads(ads_dir)` unless
-  the caller hands one to `dispatch(relay=...)` or `run(relay=...)`.
+  Usage-limit hold (`usage.hold` and `usage.release`, beside the cache every reader reads) and the
+  Ledger finish. Relayed work (`delegate.relay_work`) runs, in order, the preflight,
+  `usage.read(routing, FRESH)`, the relay through `relay.run(job, run.path)`, which returns the
+  `Finish`, and `usage.read(routing, FORCED)` (no read with `--no-probe`); the relay is
+  `relays.Ads(ads_dir)` unless the caller hands one to `dispatch(relay=...)` or `run(relay=...)`.
   A native Run ends as a hand-off: its work returns a `HandOff` (the agent and the spawn line), and
   the Run ends at once with status `native`, reason `handed to <agent>`, secs null, no
   `return.json` and the Meter left as it is; `report.py log --run` reads status `native` for it and
@@ -212,10 +251,15 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   spellings; `tests/fixtures/kiro/kiro-models.json` is an assumed shape until a real listing
   replaces it.
 - `scripts/usage.py`: cached subscription-meter probes; each harness's probe is in its adapter.
-  A usage row is keyed by `meter`, the full Meter name (`usage.meter_name`), with `group` the
-  probe's own word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded
-  on read (`usage.row_meter`). Each adapter's `meter_names()`/`reports_meter()` say which Meters
-  its probe reports, and `catalog check` refuses a Lane on any other (ticket 25).
+  An adapter's `read_meters` hands back `harnesses.base.Windows` (meter, group, five_h, weekly,
+  reset_5h, reset_weekly, note, weekly_model) through `Harness.windows(group, ...)`, with the
+  probe helpers `run_cli` and `iso_time` beside them in `base.py`, and imports no usage;
+  `usage.py` builds each row from them, holding fractions to 0..1, taking a Model meter's lower
+  week as its Weekly figure and deriving the combined figures (ticket 19). A usage row is keyed
+  by `meter`, the full Meter name (`Harness.meter_name(group)`), with `group` the probe's own
+  word; a row cached before ticket 25 (`lane` the name, `meter` the group) is upgraded on read.
+  Each adapter's `meter_names()`/`reports_meter()` say which Meters its probe reports, and
+  `catalog check` refuses a Lane on any other (ticket 25).
   A probe writes nothing to the Ledger, which records Runs only; the latest Meter reading lives
   in the usage cache. `runs.py` owns the Ledger: its v1 start and finish lines (schema unchanged;
   a native Run's finish has `secs` null and `rc` 0), `$DELEGATE_LEDGER` (`runs.LEDGER_ENV`, which

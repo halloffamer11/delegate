@@ -67,8 +67,9 @@ test the way a person drives it, `q` and its answer included.
   and value in the count.
 - `Tab` and `Shift+Tab` cycle the three bodies: the Tier list, the Harness table
   (Harnesses down, Tiers across) and the Gate/Margin aid, which draws per Meter the
-  Remaining against the Gate mark and the Pace against the Pick's Pace plus the Margin,
-  the rule at `rank.py:177-183`. `a` reaches the aid and returns.
+  Remaining against the Gate mark and the Pace against the Pace to lead rank gives it
+  (the lowest of its Tiers' `pace_to_lead`), with the steal rule worded for the quota
+  unit. `a` reaches the aid and returns.
 - In the list `h`/`l` close and open a deck. In the table `j`/`k` walk down one Tier
   column and `h`/`l` cross to the nearest Lane one column over.
 - `d` writes the terms and every reason code at the foot, `z` folds the deck or the
@@ -82,8 +83,9 @@ staged editing through `stage_move_lane()`, `stage_move_lane_tier()`,
 `move_lane()`, `move_lane_tier()` and `save_project_policy()` are the immediate writers
 underneath; no key reaches them any more, and they stay as the reference a staged save
 is compared against byte for byte. Construction resolves and pins one Git root.
-Refreshes read the effective catalog and call delegate's canonical `tier_leaders()`;
-they use cached observations and never acquire Meter data or run a vendor probe.
+Refreshes read the effective catalog and call delegate's canonical `tier_leaders()`
+with the Meter snapshot `usage.read(None, usage.CACHED, path=...)`; they never acquire
+Meter data or run a vendor probe.
 
 The public state contains `project`, sourced `policy`, read-only `usage`, four `tiers`,
 `harnesses` (the harness registry's order, which gives each harness its colour: the
@@ -93,13 +95,24 @@ though the canonical ranking result puts its Pick first. Each row's `order_sourc
 effective catalog: `p` marks project Order and `g` marks global Order or fallback. A
 fallback position can be derived, not literally stored. `project_tiers` is
 `catalog.project_tier_changes()`, `{lane: {from, to}}`, and each row's `tier_source` is
-`project` or `global` from it. A project Tier drops the Lane's global Order, so such a
+`project` or `global` from it. Each row's `gated` is its Meter's Readout's, the Gate rank
+applies: the deck's Remaining colour and the aid's "under the Gate" read it, so with
+metering off neither draws a veto (ticket 17). Each row's `cause` is rank's: the model drops
+`disabled` rows on it, and `deck.reason_code` maps it to the row's code through
+`CAUSE_CODES`, VETO for a cause the table lacks. Nothing reads the `reason` text, which is
+display only (ticket 20). Each tier copies rank's `steal_threshold` and `pace_to_lead`
+(ticket 21) and `handover` (ticket 23). The aid's verdict says a Meter holds the Pick in
+the first Tier whose leader runs on it, or needs its lowest Pace to lead, and draws that
+Pace as its mark (ticket 21). A project Tier drops the Lane's global Order, so such a
 row shows `—` in Ord and sorts after the placed Lanes in its new Tier.
 
-Project policy, project Lanes, global catalog and Meter cache watches compare file
-bytes. An invalid policy reload retains the last valid view with an error; missing or
-malformed Meter data becomes explicit unknown observations through
-`rank.meter_observations()`. The dashboard does not maintain a separate validity rule.
+Project policy, project Lanes and global catalog watches compare file bytes; the Meter
+watch compares the snapshot's `signature`, so a usage-limit hold written or lifted
+beside the cache reloads the view (ticket 16). An invalid policy reload retains the last
+valid view with an error; a missing or malformed Meter cache reads as unknown Meters,
+and `usage` reports the snapshot's `status`, `detail` and `taken_at` (as `probed_at`).
+The dashboard neither finds nor parses the cache itself, and keeps no validity rule of
+its own. The same snapshot goes to `catalog_edit.edit_catalog` as `meters`.
 
 ## Staged edits
 

@@ -207,8 +207,9 @@ def test_kiro():
     record("a read-only kiro run passes the effort, the timeout and --read-only to the relay",
            kiro.run_args("high", "30m", None) == (["--effort", "high", "--timeout", "30m", "--read-only"], None))
     absent = kiro.meters()
-    record("kiro's Meter row has no Remaining, which the Gate never vetoes",
-           len(absent) == 1 and absent[0]["remaining_weekly"] is None and absent[0]["harness"] == "kiro")
+    record("kiro's Meter has no Window read, so no Remaining, which the Gate never vetoes",
+           len(absent) == 1 and absent[0].meter == "kiro" and absent[0].group is None
+           and absent[0].five_h is None and absent[0].weekly is None, repr(absent))
 
     samples = os.path.join(HERE, "..", "assets", "samples")
     lanes_doc = catalog.load_json(os.path.join(samples, "lanes.json"))
@@ -284,27 +285,109 @@ def test_effort_words():
 
 
 def test_claude_model_meter():
-    """A version in a /usage model label does not move the row off its Meter."""
+    """A version in a /usage model label does not move the row off its Meter,
+    and a Model meter's Windows are the shared ones beside its own week."""
     import json
     import types
-    import usage
+    from unittest import mock
     from harnesses import claude as claude_module
     adapter = harnesses.get("claude")
-    saved = usage.run
     text = ("Current session: 40% used\nCurrent week (all models): 30% used\n"
             "Current week (Fable 5.2): 96% used\n")
-    try:
-        adapter.installed = lambda: True
-        usage.run = lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=json.dumps({"result": text}))
-        rows = adapter.meters()
-    finally:
-        usage.run = saved
-        del adapter.installed
+    with mock.patch.object(adapter, "installed", return_value=True), \
+         mock.patch.object(claude_module, "run_cli", return_value=types.SimpleNamespace(
+             returncode=0, stdout=json.dumps({"result": text}))):
+        windows = adapter.meters()
     record("'Current week (Fable 5.2)' is the claude-fable Meter, as 'Fable' was",
-           [r["meter"] for r in rows] == ["claude-general", "claude-fable"]
+           [w.meter for w in windows] == ["claude-general", "claude-fable"]
+           and [w.group for w in windows] == ["general", "fable"]
            and claude_module.model_meter_name("Fable") == "fable"
            and claude_module.model_meter_name("Fable v6") == "fable",
-           repr([r["meter"] for r in rows]))
+           repr(windows))
+    fable = windows[-1] if windows else None
+    record("a claude Model meter hands over the session, the week for all models and its own week",
+           fable is not None and abs(fable.five_h - 0.6) < 1e-9 and abs(fable.weekly - 0.7) < 1e-9
+           and abs(fable.weekly_model - 0.04) < 1e-9 and windows[0].weekly_model is None,
+           repr(windows))
+
+
+def test_claude_reset():
+    """`/usage` prints a reset as 'Sep 8 at 2:59pm (America/New_York)', with
+    no year; the adapter reads it as epoch seconds (moved from
+    test_usage_reset)."""
+    from harnesses.claude import reset
+    t_3pm = reset("Sep 8 at 3pm (America/New_York)")
+    t_259pm = reset("Sep 8 at 2:59pm (America/New_York)")
+    record("claude reads a reset with and without minutes, a minute apart",
+           t_3pm is not None and t_259pm is not None and t_3pm - t_259pm == 60.0,
+           f"{t_3pm} {t_259pm}")
+    record("claude reads a reset at 12am",
+           reset("Sep 8 at 12am (America/New_York)") is not None)
+    record("claude reads no reset from empty or other text",
+           reset("") is None and reset("invalid text") is None)
+
+
+AGY_TWO_GROUPS = {"command": {"data": {"groups": [
+    {"name": "Gemini Models", "buckets": [
+        {"window": "5h", "remaining_fraction": 0.9, "reset_time": "2026-10-03T18:00:00Z"},
+        {"window": "weekly", "remaining_fraction": 0.7, "reset_time": "2026-10-08T00:00:00Z"}]},
+    {"name": "Claude and GPT models", "buckets": [
+        {"window": "5h", "remaining_fraction": 0.4, "reset_time": "2026-10-03T17:00:00Z"},
+        {"window": "weekly", "remaining_fraction": 0.6, "reset_time": "2026-10-09T00:00:00Z"}]}]}}}
+
+# Probes agy in a fresh interpreter and prints what came back, and whether
+# usage was imported on the way.
+_PROBE_CHILD = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import harnesses
+from harnesses import base
+probed = harnesses.get("agy").meters()
+windows = getattr(base, "Windows", None)
+print(json.dumps({
+    "windows": windows is not None and all(isinstance(w, windows) for w in probed),
+    "probed": [w._asdict() if hasattr(w, "_asdict") else w for w in probed],
+    "usage": "usage" in sys.modules,
+}))
+"""
+
+
+def test_a_probe_hands_back_windows_without_importing_usage():
+    """The harness port (Meters ticket B4): a probe hands the Meters module
+    its Windows, and usage.py builds the rows, so no adapter imports usage."""
+    import json
+    from datetime import datetime
+    from harnesses.agy import COMBINED_NOTE
+    with tempfile.TemporaryDirectory() as d:
+        agy = os.path.join(d, "agy")
+        with open(agy, "w") as f:
+            f.write("#!/bin/sh\nprintf '%s\\n' '" + json.dumps(AGY_TWO_GROUPS) + "'\n")
+        os.chmod(agy, 0o755)
+        child = subprocess.run([sys.executable, "-c", _PROBE_CHILD, SCRIPTS],
+                               capture_output=True, text=True, env=dict(os.environ, PATH=d))
+    try:
+        out = json.loads(child.stdout)
+    except ValueError:
+        out = {}
+    probed = {w.get("meter"): w for w in out.get("probed") or () if isinstance(w, dict)}
+    gemini = probed.get("agy-gemini") or {}
+    week_end = datetime.fromisoformat("2026-10-08T00:00:00+00:00").timestamp()
+    record("a probe hands back Windows without importing usage",
+           child.returncode == 0 and out.get("windows") is True and out.get("usage") is False
+           and list(probed) == ["agy-gemini", "agy-claude-gpt"]
+           and [w["group"] for w in probed.values()] == ["gemini", "claude-gpt"]
+           and gemini.get("five_h") == 0.9 and gemini.get("weekly") == 0.7
+           and gemini.get("reset_weekly") == week_end and gemini.get("weekly_model") is None
+           and all(w["note"] == COMBINED_NOTE for w in probed.values()),
+           child.stdout + child.stderr)
+    adapters = os.path.join(SCRIPTS, "harnesses")
+    importers = []
+    for name in sorted(os.listdir(adapters)):
+        if name.endswith(".py"):
+            with open(os.path.join(adapters, name), encoding="utf-8") as f:
+                if any(line.strip().startswith(("import usage", "from usage")) for line in f):
+                    importers.append(name)
+    record("no adapter imports usage", importers == [], importers)
 
 
 def test_meter_identity():
@@ -312,8 +395,8 @@ def test_meter_identity():
     holds a Lane's Meter to them (ticket 25)."""
     import json
     import types
-    import usage
     from unittest import mock
+    from harnesses import agy as agy_module
     sample = catalog.load_json(os.path.join(SCRIPTS, "..", "assets", "samples", "lanes.json"))
     models = {}
     for lane in sample["lanes"].values():
@@ -333,12 +416,15 @@ def test_meter_identity():
     listing = {"command": {"data": {"groups": [{"name": "Gemini Models", "buckets": []},
                                                {"name": "Claude and GPT", "buckets": []}]}}}
     with mock.patch.object(agy, "installed", return_value=True), \
-         mock.patch.object(usage, "run", return_value=types.SimpleNamespace(
+         mock.patch.object(agy_module, "run_cli", return_value=types.SimpleNamespace(
              returncode=0, stdout=json.dumps(listing))):
-        rows = agy.meters()
-    record("agy's probe rows are the Meters it declares, under `meter`",
-           tuple(r["meter"] for r in rows) == agy.meter_names()
-           and [r["group"] for r in rows] == ["gemini", "claude-gpt"], repr(rows))
+        windows = agy.meters()
+    record("agy's probe Windows are the Meters it declares",
+           tuple(w.meter for w in windows) == agy.meter_names()
+           and [w.group for w in windows] == ["gemini", "claude-gpt"], repr(windows))
+    record("a Meter's name is the harness's, or `<harness>-<group>`",
+           agy.meter_name("gemini") == "agy-gemini" and harnesses.get("codex").meter_name(None) == "codex"
+           and agy.windows("claude-gpt", weekly=0.5).meter == "agy-claude-gpt")
 
 
 
@@ -347,8 +433,8 @@ def test_agy_opus_pool():
     with Sonnet and GPT-OSS (any-harness ticket 31)."""
     import json
     import types
-    import usage
     from unittest import mock
+    from harnesses import agy as agy_module
     agy = harnesses.get("agy")
     record("agy owns Gemini and Opus, and no other vendor's model",
            agy.owns("gemini-3.8-flash-high") and agy.owns("claude-opus-5-5-high")
@@ -359,24 +445,21 @@ def test_agy_opus_pool():
            and harnesses.get("codex").lane_meter("gpt-6-sol") is None)
     # The shape of the user's `agy --print /usage --output-format json`, 2026-10-03:
     # two groups, each with a 5h and a weekly bucket.
-    listing = {"command": {"data": {"groups": [
-        {"name": "Gemini Models", "buckets": [
-            {"window": "5h", "remaining_fraction": 0.9, "reset_time": "2026-10-03T18:00:00Z"},
-            {"window": "weekly", "remaining_fraction": 0.7, "reset_time": "2026-10-08T00:00:00Z"}]},
-        {"name": "Claude and GPT models", "buckets": [
-            {"window": "5h", "remaining_fraction": 0.4, "reset_time": "2026-10-03T17:00:00Z"},
-            {"window": "weekly", "remaining_fraction": 0.6, "reset_time": "2026-10-09T00:00:00Z"}]}]}}}
     with mock.patch.object(agy, "installed", return_value=True), \
-         mock.patch.object(usage, "run", return_value=types.SimpleNamespace(
-             returncode=0, stdout=json.dumps(listing))):
-        rows = {r["meter"]: r for r in agy.meters()}
-    filled = all(rows.get(name, {}).get(key) is not None
+         mock.patch.object(agy_module, "run_cli", return_value=types.SimpleNamespace(
+             returncode=0, stdout=json.dumps(AGY_TWO_GROUPS))):
+        windows = {w.meter: w for w in agy.meters()}
+    filled = all(getattr(windows.get(name), key, None) is not None
                  for name in ("agy-gemini", "agy-claude-gpt")
-                 for key in ("remaining_5h", "remaining_weekly", "reset_5h", "reset_weekly"))
+                 for key in ("five_h", "weekly", "reset_5h", "reset_weekly"))
     record("agy's two-group usage gives agy-gemini and agy-claude-gpt with both Windows",
-           sorted(rows) == ["agy-claude-gpt", "agy-gemini"] and filled
-           and rows["agy-claude-gpt"]["remaining_5h"] == 0.4
-           and rows["agy-claude-gpt"]["remaining_weekly"] == 0.6, repr(rows))
+           sorted(windows) == ["agy-claude-gpt", "agy-gemini"] and filled
+           and windows["agy-claude-gpt"].five_h == 0.4
+           and windows["agy-claude-gpt"].weekly == 0.6, repr(windows))
+    from harnesses.agy import COMBINED_NOTE
+    record("agy's note calls the combined figure the lower Window, an assumption",
+           "assumption" in COMBINED_NOTE and "not a vendor bound" in COMBINED_NOTE
+           and all(w.note == COMBINED_NOTE for w in windows.values()), COMBINED_NOTE)
 
 
 def test_usage_limit():
@@ -398,6 +481,8 @@ if __name__ == "__main__":
     test_lane_name()
     test_effort_words()
     test_claude_model_meter()
+    test_claude_reset()
+    test_a_probe_hands_back_windows_without_importing_usage()
     test_binary_need_not_be_the_name()
     test_family()
     test_run_args()

@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc1 = write_meters_doc(meters_path, m1)
 
-    rows1 = rank.rank("impl", cat, doc1, ALL_HARNESSES)
+    rows1 = rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES)
     pick1_ok = (rows1[0]["lane"] == "grok46-high@grok" and rows1[0]["pick"] is True and rows1[0]["reason"] == "pick")
     eligible_names = [r["lane"] for r in rows1 if r["eligible"]]
     vetoed_names = [r["lane"] for r in rows1 if not r["eligible"]]
@@ -146,7 +146,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc2 = write_meters_doc(meters_path, m2)
 
-    rows2 = rank.rank("impl", cat, doc2, ALL_HARNESSES)
+    rows2 = rank.rank("impl", cat, usage.Snapshot.of(doc2), ALL_HARNESSES)
     pick2_ok = (
         rows2[0]["lane"] == "grok46-high@grok" and
         rows2[0]["pick"] is True and
@@ -188,7 +188,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc3 = write_meters_doc(meters_path, m3)
 
-    rows3 = rank.rank("impl", cat3, doc3, ALL_HARNESSES)
+    rows3 = rank.rank("impl", cat3, usage.Snapshot.of(doc3), ALL_HARNESSES)
     pick3_ok = (
         rows3[0]["lane"] == "fable-xhigh@claude" and
         rows3[0]["pick"] is True and
@@ -219,7 +219,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc4 = write_meters_doc(meters_path, m4)
 
-    rows4 = rank.rank("impl", cat, doc4, ALL_HARNESSES)
+    rows4 = rank.rank("impl", cat, usage.Snapshot.of(doc4), ALL_HARNESSES)
     terra4 = next(r for r in rows4 if r["lane"] == "terra-high@codex")
     sol4 = next(r for r in rows4 if r["lane"] == "sol-high@codex")
     gate4_ok = (
@@ -228,7 +228,7 @@ with tempfile.TemporaryDirectory() as td:
         sol4["reason"] == "vetoed:gate, sol-high@codex: codex meter 5% left < gate 10%"
     )
     # Also verify mechanical (where luna has tier 1 >= 1, so luna gets vetoed: gate)
-    rows4_mech = rank.rank("mechanical", cat, doc4, ALL_HARNESSES)
+    rows4_mech = rank.rank("mechanical", cat, usage.Snapshot.of(doc4), ALL_HARNESSES)
     luna4_mech = next(r for r in rows4_mech if r["lane"] == "luna-low@codex")
     luna_gate_ok = luna4_mech["reason"] == "vetoed:gate, luna-low@codex: codex meter 5% left < gate 10%"
     record("case 4 rank() gate r 0.05", gate4_ok and luna_gate_ok)
@@ -255,7 +255,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc5 = write_meters_doc(meters_path, m5)
 
-    rows5 = rank.rank("impl", cat, doc5, ALL_HARNESSES)
+    rows5 = rank.rank("impl", cat, usage.Snapshot.of(doc5), ALL_HARNESSES)
     terra5 = next(r for r in rows5 if r["lane"] == "terra-high@codex")
     sol5 = next(r for r in rows5 if r["lane"] == "sol-high@codex")
     gate5_ok = (
@@ -282,7 +282,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc6 = write_meters_doc(meters_path, m6)
 
-    rows6 = rank.rank("impl", cat, doc6, ALL_HARNESSES)
+    rows6 = rank.rank("impl", cat, usage.Snapshot.of(doc6), ALL_HARNESSES)
     terra6 = next(r for r in rows6 if r["lane"] == "terra-high@codex")
     sol6 = next(r for r in rows6 if r["lane"] == "sol-high@codex")
     lanes_order6 = [r["lane"] for r in rows6 if r["eligible"]]
@@ -301,7 +301,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=None, five_h=None, pace=None, status="unknown"),
     ]
     doc6_all = write_meters_doc(meters_path, m6_all_unknown)
-    rows6_all = rank.rank("impl", cat, doc6_all, ALL_HARNESSES)
+    rows6_all = rank.rank("impl", cat, usage.Snapshot.of(doc6_all), ALL_HARNESSES)
     all_unknown6_ok = (
         rows6_all[0]["lane"] == "grok46-high@grok" and
         rows6_all[0]["pick"] is True and
@@ -325,7 +325,7 @@ with tempfile.TemporaryDirectory() as td:
     # 7. CLI absent: --harnesses claude,codex,agy
     doc7 = write_meters_doc(meters_path, m1)
     present7 = {"claude", "codex", "agy"}
-    rows7 = rank.rank("impl", cat, doc7, present7)
+    rows7 = rank.rank("impl", cat, usage.Snapshot.of(doc7), present7)
     grok7 = next(r for r in rows7 if r["lane"] == "grok46-high@grok")
     cli7_rank_ok = (grok7["eligible"] is False and grok7["reason"] == "vetoed:cli, grok46-high@grok: grok not on PATH")
     record("case 7 rank() CLI absent", cli7_rank_ok)
@@ -348,7 +348,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc8 = write_meters_doc(meters_path, m8)
     present8 = {"codex", "agy", "grok"}
-    rows8 = rank.rank("hard-impl", cat, doc8, present8)
+    rows8 = rank.rank("hard-impl", cat, usage.Snapshot.of(doc8), present8)
     rank8_ok = (
         len([r for r in rows8 if r["eligible"]]) == 0 and
         all(r["reason"].startswith("vetoed:") for r in rows8)
@@ -379,7 +379,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
     ]
     doc9a = write_meters_doc(meters_path, m9a)
-    rows9a = rank.rank("mechanical", cat, doc9a, ALL_HARNESSES)
+    rows9a = rank.rank("mechanical", cat, usage.Snapshot.of(doc9a), ALL_HARNESSES)
     flash9a = next(r for r in rows9a if r["lane"] == "flash-high@agy")
     # Neither lane has an order and both paces are 1.00, so the name breaks the tie.
     mech9a_ok = (
@@ -396,7 +396,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
     ]
     doc9b = write_meters_doc(meters_path, m9b)
-    rows9b = rank.rank("mechanical", cat, doc9b, ALL_HARNESSES)
+    rows9b = rank.rank("mechanical", cat, usage.Snapshot.of(doc9b), ALL_HARNESSES)
     flash9b = next(r for r in rows9b if r["lane"] == "flash-high@agy")
     mech9b_ok = (
         rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True
@@ -411,7 +411,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
     ]
     doc9c = write_meters_doc(meters_path, m9c)
-    rows9c = rank.rank("mechanical", cat, doc9c, ALL_HARNESSES)
+    rows9c = rank.rank("mechanical", cat, usage.Snapshot.of(doc9c), ALL_HARNESSES)
     mech9c_ok = (
         rows9c[0]["lane"] == "luna-low@codex" and
         rows9c[0]["pick"] is True and
@@ -444,7 +444,7 @@ with tempfile.TemporaryDirectory() as td:
     catalog.write_json(p_file, {"classes": {"impl": {"floor": 3}}})
 
     cat10 = catalog.load_catalog(cwd=fake_git, config_dir=cfg_dir)
-    rows10 = rank.rank("impl", cat10, doc1, ALL_HARNESSES)
+    rows10 = rank.rank("impl", cat10, usage.Snapshot.of(doc1), ALL_HARNESSES)
     impl10_ok = (rows10[0]["lane"] == "sol-high@codex" and rows10[0]["pick"] is True)
     record("case 10 rank() project override", impl10_ok)
 
@@ -484,8 +484,8 @@ with tempfile.TemporaryDirectory() as td:
     data12 = json.loads(res12.stdout)
     required_row_keys = {
         "lane", "harness", "model", "effort", "tier", "order", "meter",
-        "pace", "r", "remaining_weekly", "meter_status", "eligible", "veto",
-        "pick", "overflow", "reason"
+        "pace", "r", "remaining_weekly", "meter_status", "eligible",
+        "cause", "pick", "overflow", "reason"
     }
     top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "overflow", "pick", "rows"))
     pick_matches = (data12["pick"] == data12["rows"][0]["lane"] and data12["rows"][0]["pick"] is True)
@@ -499,7 +499,7 @@ with tempfile.TemporaryDirectory() as td:
     # Also disable luna-low@codex (tier 1 < floor 2) to verify disabled check is first in veto chain
     cat13["lanes"]["luna-low@codex"]["enabled"] = False
 
-    rows13 = rank.rank("impl", cat13, doc1, ALL_HARNESSES)
+    rows13 = rank.rank("impl", cat13, usage.Snapshot.of(doc1), ALL_HARNESSES)
 
     # Pick moves to next lane (terra-high@codex instead of grok46-high@grok)
     pick13_ok = (
@@ -552,7 +552,7 @@ with tempfile.TemporaryDirectory() as td:
 
     # -------------------------------------------------------------
     # 14. Lane below floor exact reason
-    rows14 = rank.rank("impl", cat, doc1, ALL_HARNESSES)
+    rows14 = rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES)
     luna14 = next(r for r in rows14 if r["lane"] == "luna-low@codex")
     record("case 14 vetoed:floor exact reason",
            luna14["reason"] == "vetoed:floor, luna-low@codex (tier 1) < impl floor (tier 2)")
@@ -577,7 +577,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc16 = write_meters_doc(meters_path, m16)
-    rows16 = rank.rank("scout", cat16, doc16, ALL_HARNESSES)
+    rows16 = rank.rank("scout", cat16, usage.Snapshot.of(doc16), ALL_HARNESSES)
     fable16 = next(r for r in rows16 if r["lane"] == "fable-xhigh@claude")
     replay16_ok = (
         rows16[0]["lane"] == "grok46-high@grok" and
@@ -588,9 +588,9 @@ with tempfile.TemporaryDirectory() as td:
 
     # -------------------------------------------------------------
     # 17. tier= inside range narrows eligible; outside range raises ValueError
-    rows17_base = rank.rank("impl", cat, doc1, ALL_HARNESSES)
+    rows17_base = rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES)
     eligible17_base = [r["lane"] for r in rows17_base if r["eligible"]]
-    rows17_tier3 = rank.rank("impl", cat, doc1, ALL_HARNESSES, tier=3)
+    rows17_tier3 = rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES, tier=3)
     eligible17_tier3 = [r["lane"] for r in rows17_tier3 if r["eligible"]]
     grok17 = next(r for r in rows17_tier3 if r["lane"] == "grok46-high@grok")
     tier_narrows_ok = (
@@ -600,13 +600,13 @@ with tempfile.TemporaryDirectory() as td:
     )
     raised_below = False
     try:
-        rank.rank("impl", cat, doc1, ALL_HARNESSES, tier=1)
+        rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES, tier=1)
     except ValueError:
         raised_below = True
 
     raised_above = False
     try:
-        rank.rank("impl", cat, doc1, ALL_HARNESSES, tier=4)
+        rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES, tier=4)
     except ValueError:
         raised_above = True
 
@@ -617,7 +617,7 @@ with tempfile.TemporaryDirectory() as td:
     # The rule before ticket 28, restated here on its own: sort by
     # (unknown pace last, tier, pace desc, lane name), then the steal loop.
     def rank_before_order(cls, cat_doc, meters_doc, present):
-        rows = rank.rank(cls, cat_doc, meters_doc, present)
+        rows = rank.rank(cls, cat_doc, usage.Snapshot.of(meters_doc), present)
         eligible = [r for r in rows if r["eligible"]]
 
         def key(item):
@@ -642,7 +642,7 @@ with tempfile.TemporaryDirectory() as td:
     for c in (cat, cat3, cat16):
         for d in (doc1, doc2, doc3, doc4, doc5, doc6, doc6_all, doc9a, doc9b, doc9c, doc16):
             for cls in catalog.CLASSES:
-                rows = rank.rank(cls, c, d, ALL_HARNESSES)
+                rows = rank.rank(cls, c, usage.Snapshot.of(d), ALL_HARNESSES)
                 got = [r["lane"] for r in rows if r["eligible"]]
                 want = rank_before_order(cls, c, d, ALL_HARNESSES)
                 compared18 += 1
@@ -668,14 +668,14 @@ with tempfile.TemporaryDirectory() as td:
     cat19["lanes"]["grok46-high@grok"]["order"] = 2
     # m1: grok pace 0.90, codex 0.75. Without order grok leads tier 2 on pace;
     # with order terra leads, and 0.90 < 0.75 + 0.2, so no steal.
-    rows19a = rank.rank("impl", cat19, doc1, ALL_HARNESSES)
+    rows19a = rank.rank("impl", cat19, usage.Snapshot.of(doc1), ALL_HARNESSES)
     order19a_ok = (
         [r["lane"] for r in rows19a if r["eligible"]] == ["terra-high@codex", "grok46-high@grok", "sol-high@codex"]
         and rows19a[0]["pick"] is True and rows19a[0]["reason"] == "pick"
         and rows19a[0]["order"] == 1
     )
     # m2: grok pace 1.06 >= 0.75 + 0.2, so grok, second in the order, steals inside tier 2
-    rows19b = rank.rank("impl", cat19, doc2, ALL_HARNESSES)
+    rows19b = rank.rank("impl", cat19, usage.Snapshot.of(doc2), ALL_HARNESSES)
     steal19b_ok = (
         rows19b[0]["lane"] == "grok46-high@grok" and rows19b[0]["pick"] is True
         and rows19b[0]["reason"] == "stolen by pace: 1.06 >= 0.75 + 0.2"
@@ -685,7 +685,7 @@ with tempfile.TemporaryDirectory() as td:
     cat19c = copy.deepcopy(cat)
     cat19c["lanes"]["sol-high@codex"]["order"] = 1
     cat19c["lanes"]["terra-high@codex"]["order"] = 5
-    rows19c = rank.rank("impl", cat19c, doc9a, ALL_HARNESSES)
+    rows19c = rank.rank("impl", cat19c, usage.Snapshot.of(doc9a), ALL_HARNESSES)
     order19c_ok = [r["lane"] for r in rows19c if r["eligible"]] == ["terra-high@codex", "grok46-high@grok", "sol-high@codex"]
     record("case 19 rank() orders a tier by order, then pace; a steal by margin can happen inside a tier",
            order19a_ok and steal19b_ok and order19c_ok,
@@ -744,7 +744,7 @@ with tempfile.TemporaryDirectory() as td:
             meter("agy-gemini", weekly=0.80, five_h=0.80, pace=0.85, status="ok"),
         ]
     }
-    previews20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES)
+    previews20 = rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
     # Tier 1 is led by flash-high@agy: first in Order, on a Meter that now
     # reports a Remaining and a Pace of its own (ticket 31).
     expected_leaders20 = ["flash-high@agy", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
@@ -775,7 +775,7 @@ with tempfile.TemporaryDirectory() as td:
     gate_meters20 = copy.deepcopy(tier_meters)
     grok_gate20 = next(row for row in gate_meters20["lanes"] if row["lane"] == "grok")
     grok_gate20.update({"r": 0.05, "remaining_weekly": 0.05, "status": "unavailable"})
-    gate_preview20 = rank.tier_leaders(tier_cat, gate_meters20, ALL_HARNESSES)[1]
+    gate_preview20 = rank.tier_leaders(tier_cat, usage.Snapshot.of(gate_meters20), ALL_HARNESSES)[1]
     grok_row20 = next(row for row in gate_preview20["rows"] if row["lane"] == "grok46-high@grok")
     gate20_ok = (
         gate_preview20["leader"] == "terra-high@codex"
@@ -788,7 +788,7 @@ with tempfile.TemporaryDirectory() as td:
     steal_meters20 = copy.deepcopy(tier_meters)
     next(row for row in steal_meters20["lanes"] if row["lane"] == "grok")["pace"] = 0.70
     next(row for row in steal_meters20["lanes"] if row["lane"] == "codex")["pace"] = 0.95
-    steal_preview20 = rank.tier_leaders(tier_cat, steal_meters20, ALL_HARNESSES)[1]
+    steal_preview20 = rank.tier_leaders(tier_cat, usage.Snapshot.of(steal_meters20), ALL_HARNESSES)[1]
     steal20_ok = (
         steal_preview20["leader"] == "terra-high@codex"
         and steal_preview20["rows"][0]["reason"] == "stolen by pace: 0.95 >= 0.7 + 0.2"
@@ -799,7 +799,7 @@ with tempfile.TemporaryDirectory() as td:
     unknown_meters20 = copy.deepcopy(tier_meters)
     unknown_grok20 = next(row for row in unknown_meters20["lanes"] if row["lane"] == "grok")
     unknown_grok20.update({"r": None, "pace": None, "remaining_weekly": None, "status": "unknown"})
-    unknown_preview20 = rank.tier_leaders(tier_cat, unknown_meters20, ALL_HARNESSES)[1]
+    unknown_preview20 = rank.tier_leaders(tier_cat, usage.Snapshot.of(unknown_meters20), ALL_HARNESSES)[1]
     unknown_row20 = next(row for row in unknown_preview20["rows"] if row["lane"] == "grok46-high@grok")
     unknown20_ok = (
         unknown_preview20["leader"] == "terra-high@codex"
@@ -810,7 +810,7 @@ with tempfile.TemporaryDirectory() as td:
     record("case 20 unknown Meter keeps safe ranking behavior", unknown20_ok)
 
     # Harness veto, name tie-break, and a Tier with no eligible lane.
-    missing_preview20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES - {"claude"})[3]
+    missing_preview20 = rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES - {"claude"})[3]
     missing20_ok = (
         missing_preview20["leader"] is None
         and missing_preview20["rows"][0]["reason"] == "vetoed:cli, fable-xhigh@claude: claude not on PATH"
@@ -820,7 +820,7 @@ with tempfile.TemporaryDirectory() as td:
     tie_cat20["lanes"]["terra-high@codex"].pop("order")
     tie_meters20 = copy.deepcopy(tier_meters)
     next(row for row in tie_meters20["lanes"] if row["lane"] == "grok")["pace"] = 0.80
-    tie_preview20 = rank.tier_leaders(tie_cat20, tie_meters20, ALL_HARNESSES)[1]
+    tie_preview20 = rank.tier_leaders(tie_cat20, usage.Snapshot.of(tie_meters20), ALL_HARNESSES)[1]
     tie20_ok = tie_preview20["leader"] == "grok46-high@grok"
     record("case 20 harness veto, empty Tier leader, and deterministic name tie", missing20_ok and tie20_ok)
 
@@ -878,16 +878,16 @@ with tempfile.TemporaryDirectory() as td:
     # 21. All callers use one validity rule; malformed observations are unknown.
     legacy21 = {entry["lane"]: entry for entry in tier_meters["lanes"]}
     record("case 21 valid wrapped and legacy Meter inputs agree",
-           rank.rank("review", tier_cat, legacy21, ALL_HARNESSES)
-           == rank.rank("review", tier_cat, tier_meters, ALL_HARNESSES)
-           and rank.tier_leaders(tier_cat, legacy21, ALL_HARNESSES)
-           == rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES))
+           rank.rank("review", tier_cat, usage.Snapshot.of(legacy21), ALL_HARNESSES)
+           == rank.rank("review", tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+           and rank.tier_leaders(tier_cat, usage.Snapshot.of(legacy21), ALL_HARNESSES)
+           == rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES))
     for field21, value21 in (("pace", "bad"), ("pace", float("inf")),
                              ("pace", 10 ** 400), ("r", True), ("status", 42)):
         bad21 = copy.deepcopy(tier_meters)
         bad21["lanes"].append({"lane": "unused", field21: value21})
-        rows21 = rank.rank("review", tier_cat, bad21, ALL_HARNESSES)
-        tiers21 = rank.tier_leaders(tier_cat, bad21, ALL_HARNESSES)
+        rows21 = rank.rank("review", tier_cat, usage.Snapshot.of(bad21), ALL_HARNESSES)
+        tiers21 = rank.tier_leaders(tier_cat, usage.Snapshot.of(bad21), ALL_HARNESSES)
         observed21 = rows21 + [row for tier in tiers21 for row in tier["rows"]]
         record(f"case 21 malformed {field21} becomes unknown for Class and Tier ranking",
                all(row["r"] is None and row["pace"] is None
@@ -896,10 +896,6 @@ with tempfile.TemporaryDirectory() as td:
 
     record("rank.rank has no unused effort parameter",
            "effort" not in inspect.signature(rank.rank).parameters)
-    record("rank.meter_observations re-exports usage.observations",
-           rank.meter_observations is usage.observations
-           or rank.meter_observations({"lanes": []}) == usage.observations({"lanes": []}))
-
     # 22. Remaining equal to Gate is eligible; cached status is not a veto.
     m22 = [
         meter("codex", weekly=0.10, five_h=0.10, pace=0.75, status="unavailable"),
@@ -908,7 +904,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc22 = write_meters_doc(meters_path, m22)
-    rows22 = rank.rank("impl", cat, doc22, ALL_HARNESSES)
+    rows22 = rank.rank("impl", cat, usage.Snapshot.of(doc22), ALL_HARNESSES)
     terra22 = next(r for r in rows22 if r["lane"] == "terra-high@codex")
     record("case 22 r equal to gate is eligible and status is ignored",
            terra22["eligible"] is True and terra22["reason"] in ("eligible", "pick", "unknown meter, sorted last"))
@@ -928,8 +924,8 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc_gate = write_meters_doc(meters_path, m_gate)
-    rows_global = rank.rank("impl", cat, doc_gate, ALL_HARNESSES)
-    rows_project = rank.rank("impl", cat_gate, doc_gate, ALL_HARNESSES)
+    rows_global = rank.rank("impl", cat, usage.Snapshot.of(doc_gate), ALL_HARNESSES)
+    rows_project = rank.rank("impl", cat_gate, usage.Snapshot.of(doc_gate), ALL_HARNESSES)
     terra_global = next(r for r in rows_global if r["lane"] == "terra-high@codex")
     terra_project = next(r for r in rows_project if r["lane"] == "terra-high@codex")
     record("case 22 project gate overrides global gate at meter granularity",
@@ -947,7 +943,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
     ]
     doc23 = write_meters_doc(meters_path, m23)
-    rows23 = rank.rank("mechanical", cat, doc23, ALL_HARNESSES)
+    rows23 = rank.rank("mechanical", cat, usage.Snapshot.of(doc23), ALL_HARNESSES)
     flash23 = next(r for r in rows23 if r["lane"] == "flash-high@agy")
     record("case 23 agy is picked when measured alternatives are gated; its figures are on the row",
            rows23[0]["lane"] == "flash-high@agy" and rows23[0]["pick"] is True
@@ -966,10 +962,10 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.40, five_h=0.02, pace=1.90, status="ok"),
         meter("grok", weekly=0.80, pace=0.90, status="ok"),
     ]
-    rows23_gate = rank.rank("impl", agy_cat, write_meters_doc(meters_path, m23_gate), ALL_HARNESSES)
+    rows23_gate = rank.rank("impl", agy_cat, usage.Snapshot.of(write_meters_doc(meters_path, m23_gate)), ALL_HARNESSES)
     flash23_gate = next(r for r in rows23_gate if r["lane"] == "flash-high@agy")
     record("case 23b an agy Lane under the Gate is vetoed gate",
-           flash23_gate["veto"] == "gate" and flash23_gate["eligible"] is False
+           flash23_gate["cause"] == "gate" and flash23_gate["eligible"] is False
            and flash23_gate["reason"] == "vetoed:gate, flash-high@agy: agy-gemini meter 2% left < gate 10%",
            flash23_gate["reason"])
 
@@ -977,43 +973,11 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.90, five_h=0.90, pace=1.30, status="ok"),
         meter("grok", weekly=0.80, pace=0.90, status="ok"),
     ]
-    rows23_steal = rank.rank("impl", agy_cat, write_meters_doc(meters_path, m23_steal), ALL_HARNESSES)
+    rows23_steal = rank.rank("impl", agy_cat, usage.Snapshot.of(write_meters_doc(meters_path, m23_steal)), ALL_HARNESSES)
     record("case 23b an agy Lane with the Pace for it wins a Margin steal",
            rows23_steal[0]["lane"] == "flash-high@agy" and rows23_steal[0]["pick"] is True
            and rows23_steal[0]["reason"] == "stolen by pace: 1.3 >= 0.9 + 0.2",
            repr([(r["lane"], r["reason"]) for r in rows23_steal[:2]]))
-
-    # 24. Cache path and cached-only tiers: no vendor probe.
-    record("load_cached_usage uses usage.get_cache_path",
-           rank.load_cached_usage.__doc__ is not None)
-    missing_cache24 = os.path.join(td, "missing-usage-24.json")
-    os.environ["DELEGATE_CACHE"] = missing_cache24
-    probed24 = []
-    orig_probe = usage.probe
-    def mark_probe(*a, **k):
-        probed24.append("probe")
-        return orig_probe(*a, **k)
-    def boom_vendor(*a, **k):
-        probed24.append("vendor")
-        return [usage.meter_row("codex", None, note="stub")]
-    usage.probe = mark_probe
-    for h in harnesses.REGISTRY:
-        h.meters = boom_vendor
-    try:
-        cached24 = rank.load_cached_usage()
-        record("load_cached_usage on missing cache is {} and does not probe",
-               cached24 == {} and probed24 == [])
-        previews24 = rank.tier_leaders(tier_cat, cached24, ALL_HARNESSES)
-        record("tier_leaders with missing cache does not probe",
-               probed24 == [] and all(
-                   row["r"] is None and row["pace"] is None
-                   for preview in previews24 for row in preview["rows"]
-               ))
-    finally:
-        usage.probe = orig_probe
-        for h in harnesses.REGISTRY:
-            del h.meters
-        os.environ.pop("DELEGATE_CACHE", None)
 
     # 25. routing.meters off: Tier/Order/name only, no Gate, no steal, no probe.
     cat_off = copy.deepcopy(cat)
@@ -1027,7 +991,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc_off = write_meters_doc(meters_path, m_off)
-    rows_off = rank.rank("impl", cat_off, doc_off, ALL_HARNESSES)
+    rows_off = rank.rank("impl", cat_off, usage.Snapshot.of(doc_off), ALL_HARNESSES)
     terra_off = next(r for r in rows_off if r["lane"] == "terra-high@codex")
     grok_off = next(r for r in rows_off if r["lane"] == "grok46-high@grok")
     luna_off = next(r for r in rows_off if r["lane"] == "luna-low@codex")
@@ -1041,7 +1005,7 @@ with tempfile.TemporaryDirectory() as td:
         and fable_off["reason"].startswith("vetoed:ceiling"),
         repr([(r["lane"], r["reason"]) for r in rows_off[:6]]),
     )
-    rows_on = rank.rank("impl", cat, doc_off, ALL_HARNESSES)
+    rows_on = rank.rank("impl", cat, usage.Snapshot.of(doc_off), ALL_HARNESSES)
     terra_on = next(r for r in rows_on if r["lane"] == "terra-high@codex")
     record(
         "case 25b meters on restores Gate veto",
@@ -1049,40 +1013,13 @@ with tempfile.TemporaryDirectory() as td:
         terra_on["reason"],
     )
 
-    probed25 = []
-    orig_acquire = usage.acquire
-    def mark_acquire(*a, **k):
-        probed25.append("acquire")
-        return orig_acquire(*a, **k)
-    usage.acquire = mark_acquire
-    missing25 = os.path.join(td, "missing-usage-25.json")
-    os.environ["DELEGATE_CACHE"] = missing25
-    try:
-        loaded_off = rank.load_usage(cat_off, refresh=True)
-        loaded_again = rank.load_usage(cat_off, refresh=True)
-        record(
-            "case 25c load_usage with meters off never probes, even on refresh, including a later caller",
-            loaded_off == {} and loaded_again == {} and probed25 == []
-            and not os.path.exists(missing25),
-            repr(probed25),
-        )
-        loaded_on = rank.load_usage(cat, meters_path=meters_path, refresh=True)
-        record(
-            "case 25d explicit meters file is still loaded when metering is on",
-            loaded_on.get("lanes") and probed25 == [],
-            repr(probed25),
-        )
-    finally:
-        usage.acquire = orig_acquire
-        os.environ.pop("DELEGATE_CACHE", None)
-
     fake_git_m = os.path.join(td, "repo-meters")
     os.makedirs(fake_git_m)
     open(os.path.join(fake_git_m, ".git"), "w").close()
     os.makedirs(os.path.join(fake_git_m, ".delegate"))
     catalog.write_json(os.path.join(fake_git_m, ".delegate", "routing.json"), {"meters": False})
     cat_proj = catalog.load_catalog(cwd=fake_git_m, config_dir=cfg_dir)
-    rows_proj = rank.rank("impl", cat_proj, doc_off, ALL_HARNESSES)
+    rows_proj = rank.rank("impl", cat_proj, usage.Snapshot.of(doc_off), ALL_HARNESSES)
     terra_proj = next(r for r in rows_proj if r["lane"] == "terra-high@codex")
     record(
         "case 25e project meters false skips Gate on a cache-below-gate meter",
@@ -1121,7 +1058,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc26 = write_meters_doc(meters_path, m26)
 
-    rows26 = rank.rank("mechanical", over_cat, doc26, ALL_HARNESSES)
+    rows26 = rank.rank("mechanical", over_cat, usage.Snapshot.of(doc26), ALL_HARNESSES)
     record(
         "case 26a a Gate-only outage admits the Tier above the Ceiling and ranks it",
         rows26[0]["lane"] == "fable-xhigh@claude" and rows26[0]["pick"] is True
@@ -1140,7 +1077,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc26b = write_meters_doc(meters_path, m26b)
-    rows26b = rank.rank("mechanical", over_cat, doc26b, {"claude", "codex", "agy"})
+    rows26b = rank.rank("mechanical", over_cat, usage.Snapshot.of(doc26b), {"claude", "codex", "agy"})
     grok26b = next(r for r in rows26b if r["lane"] == "grok46-high@grok")
     record(
         "case 26b a Gate and cli-absent mix still overflows; the absent CLI does not block it",
@@ -1153,7 +1090,7 @@ with tempfile.TemporaryDirectory() as td:
 
     off_cat26 = copy.deepcopy(over_cat)
     off_cat26["routing"]["overflow"] = False
-    rows26c = rank.rank("mechanical", off_cat26, doc26, ALL_HARNESSES)
+    rows26c = rank.rank("mechanical", off_cat26, usage.Snapshot.of(doc26), ALL_HARNESSES)
     record(
         "case 26c routing.overflow false keeps today's stop",
         catalog.overflow_enabled(off_cat26["routing"]) is False
@@ -1165,7 +1102,7 @@ with tempfile.TemporaryDirectory() as td:
     empty_cat26 = copy.deepcopy(over_cat)
     for lane_name in ("luna-low@codex", "terra-high@codex", "grok46-high@grok"):
         empty_cat26["lanes"][lane_name]["enabled"] = False
-    rows26d = rank.rank("mechanical", empty_cat26, doc26, ALL_HARNESSES)
+    rows26d = rank.rank("mechanical", empty_cat26, usage.Snapshot.of(doc26), ALL_HARNESSES)
     record(
         "case 26d a Range with no carried Lane stops; overflow needs a Gate outage",
         rows26d[0]["pick"] is False and all(r.get("overflow") is None for r in rows26d),
@@ -1182,7 +1119,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc26e = write_meters_doc(meters_path, m26e)
-    rows26e = rank.rank("impl", over_cat, doc26e, ALL_HARNESSES)
+    rows26e = rank.rank("impl", over_cat, usage.Snapshot.of(doc26e), ALL_HARNESSES)
     flash26e = next(r for r in rows26e if r["lane"] == "flash-high@agy")
     record(
         "case 26e Tier 4 is never admitted by overflow",
@@ -1195,7 +1132,7 @@ with tempfile.TemporaryDirectory() as td:
     # One Tier at a time, and as many steps as it takes below Tier 4.
     step_cat26 = copy.deepcopy(over_cat)
     step_cat26["routing"]["classes"]["mechanical"] = {"floor": 1, "ceiling": 1}
-    rows26f = rank.rank("mechanical", step_cat26, doc26, ALL_HARNESSES)
+    rows26f = rank.rank("mechanical", step_cat26, usage.Snapshot.of(doc26), ALL_HARNESSES)
     record(
         "case 26f overflow steps again when the admitted Tier is also all under the Gate",
         rows26f[0]["lane"] == "fable-xhigh@claude"
@@ -1207,7 +1144,7 @@ with tempfile.TemporaryDirectory() as td:
     # With metering off there are no Gate vetoes, so overflow cannot fire.
     meters_off26 = copy.deepcopy(over_cat)
     meters_off26["routing"]["meters"] = False
-    rows26g = rank.rank("mechanical", meters_off26, doc26, ALL_HARNESSES)
+    rows26g = rank.rank("mechanical", meters_off26, usage.Snapshot.of(doc26), ALL_HARNESSES)
     record(
         "case 26g with routing.meters off the Gate never vetoes, so overflow never fires",
         rows26g[0]["lane"] == "luna-low@codex" and rows26g[0]["tier"] == 1
@@ -1288,27 +1225,27 @@ with tempfile.TemporaryDirectory() as td:
     # a disabled Lane neither saves the Range nor blocks the overflow.
     disabled26 = copy.deepcopy(over_cat)
     disabled26["lanes"]["grok46-high@grok"]["enabled"] = False
-    rows26k = rank.rank("mechanical", disabled26, doc26b, ALL_HARNESSES)
+    rows26k = rank.rank("mechanical", disabled26, usage.Snapshot.of(doc26b), ALL_HARNESSES)
     grok26k = next(r for r in rows26k if r["lane"] == "grok46-high@grok")
     record(
         "case 26k a disabled Lane on a healthy Meter does not block the overflow",
         rows26k[0]["lane"] == "fable-xhigh@claude"
         and rows26k[0].get("overflow") == {
             "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
-        and grok26k["veto"] == "disabled",
+        and grok26k["cause"] == "disabled",
         repr(rows26k[0].get("overflow")),
     )
 
     # Every carried in-Range Lane cli-absent and none of them gated: there is
     # no Gate outage to answer, so the Class stops.
     doc26healthy = write_meters_doc(meters_path, m26healthy)
-    rows26l = rank.rank("mechanical", over_cat, doc26healthy, {"claude"})
+    rows26l = rank.rank("mechanical", over_cat, usage.Snapshot.of(doc26healthy), {"claude"})
     record(
         "case 26l all in-Range Lanes cli-absent and none gated stops, and never overflows",
         rows26l[0]["pick"] is False
         and all(r.get("overflow") is None for r in rows26l)
-        and all(r["veto"] == "cli" for r in rows26l
-                if r["tier"] in (1, 2) and r["veto"] != "disabled"),
+        and all(r["cause"] == "cli" for r in rows26l
+                if r["tier"] in (1, 2) and r["cause"] != "disabled"),
         rows26l[0]["reason"],
     )
 
@@ -1317,14 +1254,14 @@ with tempfile.TemporaryDirectory() as td:
     floor26 = copy.deepcopy(over_cat)
     floor26["lanes"]["flash-high@agy"]["tier"] = 1   # healthy Meter, so eligible
     floor26["routing"]["classes"]["impl"] = {"floor": 2, "ceiling": 2}
-    rows26m = rank.rank("impl", floor26, doc26, ALL_HARNESSES)
+    rows26m = rank.rank("impl", floor26, usage.Snapshot.of(doc26), ALL_HARNESSES)
     flash26m = next(r for r in rows26m if r["lane"] == "flash-high@agy")
     record(
         "case 26m overflow never reaches below the Floor for a healthy Lane",
         rows26m[0]["lane"] == "fable-xhigh@claude"
         and rows26m[0].get("overflow") == {
             "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
-        and flash26m["veto"] == "floor" and flash26m["pick"] is False,
+        and flash26m["cause"] == "floor" and flash26m["pick"] is False,
         flash26m["reason"],
     )
 
@@ -1340,7 +1277,7 @@ with tempfile.TemporaryDirectory() as td:
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
     ]
     doc26steal = write_meters_doc(meters_path, m26steal)
-    rows26n = rank.rank("mechanical", steal26, doc26steal, ALL_HARNESSES)
+    rows26n = rank.rank("mechanical", steal26, usage.Snapshot.of(doc26steal), ALL_HARNESSES)
     record(
         "case 26n a Margin steal happens inside the admitted Tier",
         rows26n[0]["lane"] == "fable-xhigh@claude"
@@ -1354,12 +1291,12 @@ with tempfile.TemporaryDirectory() as td:
     # Metering off removes the Gate, so a stop there is never an overflow.
     off_meters26 = copy.deepcopy(over_cat)
     off_meters26["routing"]["meters"] = False
-    rows26o = rank.rank("mechanical", off_meters26, doc26, {"claude"})
+    rows26o = rank.rank("mechanical", off_meters26, usage.Snapshot.of(doc26), {"claude"})
     record(
         "case 26o with meters off a stop stays a stop and never overflows",
         rows26o[0]["pick"] is False
         and all(r.get("overflow") is None for r in rows26o)
-        and all(r["veto"] != "gate" for r in rows26o),
+        and all(r["cause"] != "gate" for r in rows26o),
         rows26o[0]["reason"],
     )
 
@@ -1382,26 +1319,26 @@ with tempfile.TemporaryDirectory() as td:
                        {"lanes": {"sol-high@codex": {"tier": 2}}})
 
     cat27 = catalog.load_catalog(cwd=proj27, config_dir=cfg_dir)
-    rows27_mech = rank.rank("mechanical", cat27, doc27, ALL_HARNESSES)   # Range 1-2
-    rows27_rev = rank.rank("review", cat27, doc27, ALL_HARNESSES)        # Range 3-3
+    rows27_mech = rank.rank("mechanical", cat27, usage.Snapshot.of(doc27), ALL_HARNESSES)   # Range 1-2
+    rows27_rev = rank.rank("review", cat27, usage.Snapshot.of(doc27), ALL_HARNESSES)        # Range 3-3
     sol27_mech = next(r for r in rows27_mech if r["lane"] == "sol-high@codex")
     sol27_rev = next(r for r in rows27_rev if r["lane"] == "sol-high@codex")
     record(
         "case 27 a project Tier makes the Lane eligible in Range 1-2 and not in Range 3-3",
         sol27_mech["tier"] == 2 and sol27_mech["eligible"] is True
         and sol27_rev["tier"] == 2 and sol27_rev["eligible"] is False
-        and sol27_rev["veto"] == "floor",
+        and sol27_rev["cause"] == "floor",
         f"{sol27_mech['reason']} | {sol27_rev['reason']}",
     )
 
     cat27_global = catalog.load_catalog(cwd=td, config_dir=cfg_dir)
-    rows27_global = rank.rank("review", cat27_global, doc27, ALL_HARNESSES)
+    rows27_global = rank.rank("review", cat27_global, usage.Snapshot.of(doc27), ALL_HARNESSES)
     sol27_global = next(r for r in rows27_global if r["lane"] == "sol-high@codex")
     record(
         "case 27b the same catalog with no project file ranks as before",
         sol27_global["tier"] == 3 and sol27_global["eligible"] is True
         and [r["lane"] for r in rows27_global] == [
-            r["lane"] for r in rank.rank("review", cat, doc27, ALL_HARNESSES)],
+            r["lane"] for r in rank.rank("review", cat, usage.Snapshot.of(doc27), ALL_HARNESSES)],
         repr(sol27_global["reason"]),
     )
 
@@ -1410,7 +1347,7 @@ with tempfile.TemporaryDirectory() as td:
     order27 = copy.deepcopy(cat27)
     order27["lanes"]["terra-high@codex"]["order"] = 1
     order27["lanes"]["grok46-high@grok"]["order"] = 2
-    rows27_place = rank.rank_range(order27, doc27, ALL_HARNESSES, floor=2, ceiling=2)
+    rows27_place = rank.rank_range(order27, usage.Snapshot.of(doc27), ALL_HARNESSES, floor=2, ceiling=2)
     record(
         "case 27c a moved Lane with no place sorts after the placed Lanes",
         [r["lane"] for r in rows27_place if r["eligible"]] == [
@@ -1422,7 +1359,7 @@ with tempfile.TemporaryDirectory() as td:
                        {"project_order": ["sol-high@codex", "terra-high@codex",
                                           "grok46-high@grok"]})
     cat27_ordered = catalog.load_catalog(cwd=proj27, config_dir=cfg_dir)
-    rows27_ordered = rank.rank_range(cat27_ordered, doc27, ALL_HARNESSES, floor=2, ceiling=2)
+    rows27_ordered = rank.rank_range(cat27_ordered, usage.Snapshot.of(doc27), ALL_HARNESSES, floor=2, ceiling=2)
     record(
         "case 27d project_order places a Lane inside its project Tier",
         cat27_ordered["lanes"]["sol-high@codex"]["order"] == 1
@@ -1481,9 +1418,9 @@ m29 = {"probed_at": 1700000000, "lanes": [
     meter("grok", weekly=1.00, pace=0.80),
     meter("claude-fable", weekly=0.70, five_h=0.70, pace=1.00),
 ]}
-rows29a = rank.rank("impl", cat29, m29, ALL_HARNESSES)
+rows29a = rank.rank("impl", cat29, usage.Snapshot.of(m29), ALL_HARNESSES)
 cat29["routing"]["quota_unit"] = "plan_dollars"
-rows29b = rank.rank("impl", cat29, m29, ALL_HARNESSES)
+rows29b = rank.rank("impl", cat29, usage.Snapshot.of(m29), ALL_HARNESSES)
 record(
     "case 29a by Pace codex leads Tier 2; by plan dollars grok does (0.8 x $30 > 0.9 x $20)",
     rows29a[0]["lane"] == "terra-high@codex" and rows29b[0]["lane"] == "grok46-high@grok"
@@ -1492,7 +1429,7 @@ record(
     [(r["lane"], r["reason"]) for r in rows29a[:2] + rows29b[:2]],
 )
 cat29["routing"]["classes"]["impl"]["ceiling"] = 4
-rows29c = rank.rank("impl", cat29, m29, ALL_HARNESSES)
+rows29c = rank.rank("impl", cat29, usage.Snapshot.of(m29), ALL_HARNESSES)
 record(
     "case 29b with plan dollars the steal compares values and the Margin is a fraction",
     rows29c[0]["lane"] == "fable-xhigh@claude"
@@ -1500,12 +1437,49 @@ record(
     and rows29c[0]["reason"].endswith("x (1 + 0.2)"),
     rows29c[0]["reason"],
 )
-pick29 = {"lane": "a", "pace": 1.0, "weight": 10.0}
+
+
+def pair_cat(price_x=20, price_y=20, *, dollars=True, margin=0.2, gate=0.1, lone=False):
+    """The sample routing over two Tier 2 Lanes of its own: a@x on Meter mx at
+    order 1 and b@y on Meter my at order 2, each Meter at its plan price per
+    month (None for no price). `lone` keeps a@x alone."""
+    out = catalog.load_catalog(config_dir=_samples28)
+    out["routing"].update(margin=margin, gate=gate,
+                          quota_unit="plan_dollars" if dollars else "pace")
+    out["meters"] = {}
+    out["lanes"] = {}
+    for name, meter_name, price, order in (("a@x", "mx", price_x, 1), ("b@y", "my", price_y, 2)):
+        if lone and name == "b@y":
+            continue
+        harness = name.split("@")[1]
+        out["meters"][meter_name] = {"harness": harness, "plan": meter_name}
+        if price is not None:
+            out["meters"][meter_name]["price_month"] = price
+        out["lanes"][name] = {"harness": harness, "model": name.split("@")[0], "effort": "high",
+                              "meter": meter_name, "tier": 2, "order": order}
+    return out
+
+
+PAIR_HARNESSES = {"x", "y"}
+
+
+def pair_pick(cat_, pace_y):
+    """The Pick rank() gives impl with a@x at Pace 1.0 and b@y at `pace_y`."""
+    doc = {"probed_at": 1700000000, "lanes": [meter("mx", weekly=0.5, pace=1.0),
+                                              meter("my", weekly=0.5, pace=pace_y)]}
+    rows = rank.rank("impl", cat_, usage.Snapshot.of(doc), PAIR_HARNESSES)
+    return rows[0]["lane"] if rows and rows[0]["pick"] else None
+
+
+# case 29c (ticket 23 replaced a check of rank.steals): through rank(), on
+# equally priced Meters a value 20% ahead steals at Margin 0.2, 19% ahead does
+# not, and a Meter with no plan price never steals.
+picks29c = (pair_pick(pair_cat(), 1.2), pair_pick(pair_cat(), 1.19),
+            pair_pick(pair_cat(price_y=None), 9.0))
 record(
-    "case 29c a value 20% ahead steals at Margin 0.2, 19% ahead does not",
-    rank.steals({"lane": "b", "pace": 1.2, "weight": 10.0}, pick29, 0.2)
-    and not rank.steals({"lane": "b", "pace": 1.19, "weight": 10.0}, pick29, 0.2)
-    and not rank.steals({"lane": "b", "pace": 9.0, "weight": None}, pick29, 0.2),
+    "case 29c a value 20% ahead steals at Margin 0.2, 19% ahead does not, an unpriced Meter never",
+    picks29c == ("b@y", "a@x", "a@x"),
+    picks29c,
 )
 for bad29 in ("dollars", 1, None):
     try:
@@ -1515,5 +1489,416 @@ for bad29 in ("dollars", 1, None):
     except catalog.CatalogError as e:
         ok29 = "quota_unit" in str(e)
     record(f"case 29d quota_unit {bad29!r} is refused", ok29)
+
+# case 30 (ticket 16): rank reads each Lane's Meter through the Meter snapshot,
+# so a usage-limit hold beside the document it read vetoes the held Lane, and
+# a plain document (Snapshot.of) carries no hold.
+with tempfile.TemporaryDirectory() as td30:
+    p30 = os.path.join(td30, "usage.json")
+    doc30 = write_meters_doc(p30, [
+        meter("codex", weekly=0.55, five_h=0.55, pace=0.75),
+        meter("grok", weekly=1.00, pace=0.90),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85),
+        meter("claude-general", weekly=0.70, five_h=0.70, pace=0.85),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27),
+    ])
+    usage.hold("grok", "You've reached your free Grok Build usage limit", path=p30)
+    held30 = rank.rank("impl", cat, usage.read(None, usage.CACHED, path=p30), ALL_HARNESSES)
+    plain30 = rank.rank("impl", cat, usage.Snapshot.of(doc30), ALL_HARNESSES)
+    grok30 = next(r for r in held30 if r["lane"] == "grok46-high@grok")
+record(
+    "case 30 a hold beside the read document vetoes its Lane; the plain document holds nothing",
+    grok30["reason"] == "vetoed:gate, grok46-high@grok: grok meter 0% left < gate 10%"
+    and grok30["r"] == 0.0 and grok30["pace"] == 0.0 and grok30["remaining_weekly"] == 0.0
+    and grok30["meter_status"] == "unavailable"
+    and held30[0]["lane"] == "terra-high@codex" and held30[0]["pick"]
+    and plain30[0]["lane"] == "grok46-high@grok",
+    [(r["lane"], r["reason"]) for r in held30],
+)
+
+# case 31 (ticket 18): rank takes only a Meter snapshot. rank_range reads one
+# Readout per Meter into a map and ranks over it in a private core, so a
+# what-if (the Routing preview's) replaces one Readout and ranks again with no
+# second read; a Snapshot is never hashed, and hashing one cannot raise.
+import dataclasses  # noqa: E402
+doc31 = {"probed_at": 1700000000, "lanes": [
+    meter("codex", weekly=0.55, five_h=0.55, pace=0.75),
+    meter("grok", weekly=1.00, pace=0.90),
+]}
+refused31 = []
+for call31 in (lambda d: rank.rank_range(cat29, d, ALL_HARNESSES, floor=2, ceiling=2),
+               lambda d: rank.rank("impl", cat29, d, ALL_HARNESSES),
+               lambda d: rank.tier_leaders(cat29, d, ALL_HARNESSES)):
+    try:
+        call31(doc31)
+    except TypeError as e:
+        refused31.append("Snapshot.of" in str(e))
+record("case 31a rank_range, rank and tier_leaders refuse a plain usage document",
+       refused31 == [True, True, True], refused31)
+
+snap31 = usage.Snapshot.of(doc31)
+try:
+    hash(snap31)
+    hashed31 = True
+except TypeError:
+    hashed31 = False
+record("case 31b hash(usage.Snapshot.of(doc)) does not raise", hashed31)
+
+cat31 = catalog.load_catalog(config_dir=_samples28)
+reads31 = []
+
+
+class Counted(usage.Snapshot):
+    def readout(self, meter, cat, **kw):
+        reads31.append(meter)
+        return usage.Snapshot.readout(self, meter, cat, **kw)
+
+
+counted31 = Counted(path=None, status=snap31.status, detail=None, taken_at=snap31.taken_at,
+                    signature=snap31.signature, _rows=snap31._rows, _held=snap31._held)
+rows31 = rank.rank_range(cat31, counted31, ALL_HARNESSES, floor=2, ceiling=2)
+shared31 = [lane["meter"] for lane in cat31["lanes"].values()]
+readouts31 = {m: snap31.readout(m, cat31) for m in set(shared31)}
+readouts31["grok"] = dataclasses.replace(readouts31["grok"], pace=0.5)
+whatif31 = rank._rank_readouts(cat31, readouts31, ALL_HARNESSES, 2, 2, "tier")
+record("case 31c rank_range reads each Meter once and the core ranks a replaced Readout with no second read",
+       sorted(reads31) == sorted(set(shared31)) and len(shared31) > len(set(shared31))
+       and rows31[0]["lane"] == "grok46-high@grok"
+       and whatif31[0]["lane"] == "terra-high@codex"
+       and next(r for r in whatif31 if r["lane"] == "grok46-high@grok")["pace"] == 0.5,
+       (reads31, rows31[0]["lane"], whatif31[0]["lane"]))
+
+# case 32 (ticket 20): every row carries one machine-readable `cause` from
+# rank.CAUSES, the value the deck and the dashboard read in place of the
+# `reason` text. `eligible` is true exactly for pick, steal, eligible and
+# unknown; `pick` exactly for pick and steal.
+EXPECTED_CAUSES32 = ("pick", "steal", "eligible", "unknown",
+                     "disabled", "floor", "ceiling", "gate", "cli")
+
+
+def cause_of32(rows, lane_name):
+    return next(r for r in rows if r["lane"] == lane_name).get("cause")
+
+
+steal32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(steal_meters20), ALL_HARNESSES)
+gate32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(gate_meters20), ALL_HARNESSES)
+unknown32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(unknown_meters20), ALL_HARNESSES)
+nocli32 = rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES - {"claude"})
+sample32 = rank.rank("impl", cat, usage.Snapshot.of(doc1), ALL_HARNESSES)
+range32 = rank.rank_range(cat, usage.Snapshot.of(doc1), ALL_HARNESSES, floor=2, ceiling=3)
+off_cat32 = copy.deepcopy(cat)
+off_cat32["routing"]["meters"] = False
+off32 = rank.rank("impl", off_cat32, usage.Snapshot.of(doc6), ALL_HARNESSES)
+got32 = {
+    "terra steal (case 20)": cause_of32(steal32[1]["rows"], "terra-high@codex"),
+    "grok eligible (case 20)": cause_of32(steal32[1]["rows"], "grok46-high@grok"),
+    "grok gate (case 20)": cause_of32(gate32[1]["rows"], "grok46-high@grok"),
+    "grok unknown (case 20)": cause_of32(unknown32[1]["rows"], "grok46-high@grok"),
+    "fable cli (case 20)": cause_of32(nocli32[3]["rows"], "fable-xhigh@claude"),
+    "grok disabled (case 13)": cause_of32(rows13, "grok46-high@grok"),
+    "luna disabled (case 13)": cause_of32(rows13, "luna-low@codex"),
+    "terra pick (case 13)": cause_of32(rows13, "terra-high@codex"),
+    "grok pick (sample impl)": cause_of32(sample32, "grok46-high@grok"),
+    "luna floor (sample impl)": cause_of32(sample32, "luna-low@codex"),
+    "fable ceiling (sample impl)": cause_of32(sample32, "fable-xhigh@claude"),
+    "fable plan-dollars steal (case 29b)": cause_of32(rows29c, "fable-xhigh@claude"),
+    "terra unknown (case 6)": cause_of32(rows6, "terra-high@codex"),
+    "terra eligible with meters off and no reading": cause_of32(off32, "terra-high@codex"),
+}
+want32 = {
+    "terra steal (case 20)": "steal",
+    "grok eligible (case 20)": "eligible",
+    "grok gate (case 20)": "gate",
+    "grok unknown (case 20)": "unknown",
+    "fable cli (case 20)": "cli",
+    "grok disabled (case 13)": "disabled",
+    "luna disabled (case 13)": "disabled",
+    "terra pick (case 13)": "pick",
+    "grok pick (sample impl)": "pick",
+    "luna floor (sample impl)": "floor",
+    "fable ceiling (sample impl)": "ceiling",
+    "fable plan-dollars steal (case 29b)": "steal",
+    "terra unknown (case 6)": "unknown",
+    "terra eligible with meters off and no reading": "eligible",
+}
+record("case 32a rank.CAUSES names the nine causes",
+       getattr(rank, "CAUSES", None) == EXPECTED_CAUSES32, getattr(rank, "CAUSES", None))
+record("case 32b each fixture's Lanes carry the cause rank gives them",
+       got32 == want32, {k: got32[k] for k in got32 if got32[k] != want32[k]})
+
+every32 = [row for previews in (steal32, gate32, unknown32, nocli32, previews20)
+           for preview in previews for row in preview["rows"]]
+every32 += rows1 + rows6 + rows6_all + rows7 + rows13 + rows_off + rows29a + rows29b + rows29c
+every32 += sample32 + range32 + off32 + held30
+bad32 = [
+    (r["lane"], r.get("cause"), r["eligible"], r["pick"])
+    for r in every32
+    if r.get("cause") not in EXPECTED_CAUSES32
+    or r["eligible"] != (r.get("cause") in ("pick", "steal", "eligible", "unknown"))
+    or r["pick"] != (r.get("cause") in ("pick", "steal"))
+]
+record("case 32c every row from rank_range, rank and tier_leaders has one cause, "
+       "eligible exactly for pick/steal/eligible/unknown and pick exactly for pick/steal",
+       bool(every32) and not bad32, bad32[:6])
+
+# case 33 (ticket 21): each Tier preview carries the Steal threshold in
+# routing's quota unit and each other Meter's Pace to lead: the lowest Pace on
+# the 0.01 grid at which a Lane on that Meter leads the Tier, with every other
+# Meter as it reads now, None when no Pace a Meter can read (usage.MAX_PACE)
+# does. The spec's case 31; 31 and 32 were taken on this branch.
+import math  # noqa: E402
+
+with open(_meters28, encoding="utf-8") as f33:
+    fixture33 = json.load(f33)
+samples33 = catalog.load_catalog(config_dir=_samples28)
+WEEK33 = 7 / 30.4375  # a Meter's plan price per month to its price per week
+
+
+def near33(got, want):
+    """Two previews' facts equal, numbers within 1e-9."""
+    if isinstance(want, dict):
+        return (isinstance(got, dict) and set(got) == set(want)
+                and all(near33(got[k], want[k]) for k in want))
+    if want is None or isinstance(want, str):
+        return got == want
+    return isinstance(got, (int, float)) and abs(got - want) < 1e-9
+
+
+def facts33(preview):
+    return {"steal_threshold": preview.get("steal_threshold"),
+            "pace_to_lead": preview.get("pace_to_lead")}
+
+
+def with_pace33(doc, meter_name, pace):
+    out = copy.deepcopy(doc)
+    next(row for row in out["lanes"] if row["lane"] == meter_name)["pace"] = pace
+    return out
+
+
+def leads33(cat_, doc, tier, meter_name):
+    preview = rank.tier_leaders(cat_, usage.Snapshot.of(doc), ALL_HARNESSES)[tier - 1]
+    leader = next((r for r in preview["rows"] if r["lane"] == preview["leader"]), None)
+    return leader is not None and leader["meter"] == meter_name
+
+
+# (a) the sample catalog's Tier 2 is unordered: grok leads at 0.90, and codex
+# leads once it sorts ahead of grok, at 0.91, below the Steal threshold 1.1.
+a33 = rank.tier_leaders(samples33, usage.Snapshot.of(fixture33), ALL_HARNESSES)
+record("case 33a sample Tier 2: codex needs 0.91 to lead, the Steal threshold is Pace 1.1",
+       near33(facts33(a33[1]), {"steal_threshold": {"unit": "pace", "value": 1.1},
+                                "pace_to_lead": {"codex": 0.91}}),
+       facts33(a33[1]))
+
+# (b) case 20's layout puts grok first in the Order, so codex must steal.
+b33 = rank.tier_leaders(tier_cat, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+record("case 33b grok at order 1 and terra at order 2: codex needs 1.1 by Pace",
+       near33(facts33(b33[1]), {"steal_threshold": {"unit": "pace", "value": 1.1},
+                                "pace_to_lead": {"codex": 1.1}}),
+       facts33(b33[1]))
+
+# (c) the same with plan dollars: the steal is 0.9 x grok's weight x 1.2, and
+# codex reaches it at that value over codex's weight, up to the next 0.01 step.
+dollars_cat33 = copy.deepcopy(tier_cat)
+dollars_cat33["routing"]["quota_unit"] = "plan_dollars"
+c33 = rank.tier_leaders(dollars_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+steal_c33 = 0.9 * (30 * WEEK33) * 1.2
+need_c33 = math.ceil(round(steal_c33 / (20 * WEEK33) * 100, 9)) / 100
+record("case 33c with plan dollars the Steal threshold is in plan dollars and codex's "
+       "Pace to lead is the first 0.01 step that reaches it",
+       near33(facts33(c33[1]), {"steal_threshold": {"unit": "plan_dollars", "value": steal_c33},
+                                "pace_to_lead": {"codex": need_c33}})
+       and abs(need_c33 - 1.62) < 1e-9,
+       (facts33(c33[1]), steal_c33, need_c33))
+
+# (d) every Pace to lead above, read back through tier_leaders: a document
+# with that Meter at its Pace to lead puts a Lane on it in the lead, and the
+# same document 0.01 lower does not.
+checked33 = []
+for cat33, doc33, previews33 in ((samples33, fixture33, a33),
+                                 (tier_cat, tier_meters, b33),
+                                 (dollars_cat33, tier_meters, c33)):
+    for preview33 in previews33:
+        for meter33, need33 in sorted((preview33.get("pace_to_lead") or {}).items()):
+            if need33 is None:
+                continue
+            below33 = round(need33 - 0.01, 2)
+            checked33.append((preview33["tier"], meter33, need33,
+                              leads33(cat33, with_pace33(doc33, meter33, need33),
+                                      preview33["tier"], meter33),
+                              leads33(cat33, with_pace33(doc33, meter33, below33),
+                                      preview33["tier"], meter33)))
+record("case 33d at its Pace to lead a Meter leads the Tier, and 0.01 below it does not",
+       len(checked33) >= 3 and all(at and not below for _t, _m, _n, at, below in checked33),
+       checked33)
+
+# (e) what has no Pace to lead: Meters off, a gated Meter, an unknown Meter,
+# and a Meter priced at 1 against 100 under plan dollars, which would need a
+# Pace no Meter can read (108 > usage.MAX_PACE).
+off_cat33 = copy.deepcopy(tier_cat)
+off_cat33["routing"]["meters"] = False
+off33 = rank.tier_leaders(off_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)
+gate33 = rank.tier_leaders(tier_cat, usage.Snapshot.of(gate_meters20), ALL_HARNESSES)[1]
+unknown33 = rank.tier_leaders(tier_cat, usage.Snapshot.of(unknown_meters20), ALL_HARNESSES)[1]
+cheap_cat33 = copy.deepcopy(dollars_cat33)
+cheap_cat33["meters"]["grok"]["price_month"] = 100
+cheap_cat33["meters"]["codex"]["price_month"] = 1
+cheap33 = rank.tier_leaders(cheap_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)[1]
+record("case 33e Meters off: an empty Pace to lead and no Steal threshold value",
+       all(p.get("pace_to_lead") == {}
+           and p.get("steal_threshold") == {"unit": "pace", "value": None} for p in off33),
+       [facts33(p) for p in off33])
+record("case 33e a gated Meter and an unknown Meter have no Pace to lead",
+       gate33["leader"] == "terra-high@codex" and gate33.get("pace_to_lead") == {}
+       and unknown33["leader"] == "terra-high@codex" and unknown33.get("pace_to_lead") == {},
+       (facts33(gate33), facts33(unknown33)))
+record("case 33e a Meter priced at 1 against 100 under plan dollars reads None",
+       cheap33["leader"] == "grok46-high@grok"
+       and cheap33.get("pace_to_lead") == {"codex": None},
+       facts33(cheap33))
+
+# Rank reads the highest readable Pace as usage.MAX_PACE: raise it, and the
+# same Meter reads the Pace that steals at 1 against 100.
+saved33 = usage.MAX_PACE
+usage.MAX_PACE = 200
+try:
+    raised33 = rank.tier_leaders(cheap_cat33, usage.Snapshot.of(tier_meters), ALL_HARNESSES)[1]
+finally:
+    usage.MAX_PACE = saved33
+record("case 33e the highest Pace rank tries is usage.MAX_PACE",
+       near33(raised33.get("pace_to_lead"), {"codex": 108.0}),
+       facts33(raised33))
+
+# The what-if substitutes Readouts: one tier_leaders call reads each Meter of
+# the Snapshot once, whatever it asks about.
+reads33 = []
+
+
+class Counted33(usage.Snapshot):
+    def readout(self, meter, cat, **kw):
+        reads33.append(meter)
+        return usage.Snapshot.readout(self, meter, cat, **kw)
+
+
+snap33 = usage.Snapshot.of(fixture33)
+counted33 = Counted33(path=None, status=snap33.status, detail=None, taken_at=snap33.taken_at,
+                      signature=snap33.signature, _rows=snap33._rows, _held=snap33._held)
+counted_previews33 = rank.tier_leaders(samples33, counted33, ALL_HARNESSES)
+meters33 = {lane["meter"] for lane in samples33["lanes"].values()}
+record("case 33f tier_leaders reads each Meter once, Paces to lead included",
+       sorted(reads33) == sorted(meters33)
+       and [facts33(p) for p in counted_previews33] == [facts33(p) for p in a33],
+       sorted(reads33))
+
+# JSON-safe previews, and `rank tiers --json` carries both facts.
+try:
+    for previews33 in (a33, b33, c33, off33, [gate33, unknown33, cheap33]):
+        json.dumps(previews33, allow_nan=False)
+    json33 = True
+except ValueError as e:
+    json33 = str(e)
+res33 = subprocess.run(
+    [sys.executable, RANK_PY, "tiers", "--config-dir", _samples28, "--meters", _meters28,
+     "--harnesses", ALL_HARNESSES_ARG, "--json"],
+    capture_output=True, text=True)
+try:
+    tiers33 = json.loads(res33.stdout)["tiers"]
+except (ValueError, KeyError):
+    tiers33 = []
+record("case 33g previews pass json.dumps(allow_nan=False) and rank tiers --json carries both facts",
+       json33 is True and res33.returncode == 0 and len(tiers33) == 4
+       and all("steal_threshold" in t and "pace_to_lead" in t for t in tiers33)
+       and near33(facts33(tiers33[1]), facts33(a33[1])),
+       (json33, res33.stdout[-400:], res33.stderr))
+
+# case 34 (ticket 23): each Tier preview carries the Handover: how far the
+# leader's Meter can fall, in quota points on a half-point grid, before another
+# Lane leads the Tier or the Meter falls under the Gate, and who leads then.
+# Rank spends the Meter through Snapshot.readout(spend=), so the rows carry
+# `cycle_left`, the share of the week left that a spent Pace divides by. The
+# spec's case 32; 32 and 33 were taken on this branch.
+doc34 = {"probed_at": 1700000000, "lanes": [
+    dict(meter("mx", weekly=0.5, pace=1.0), cycle_left=0.5),
+    dict(meter("my", weekly=0.45, pace=0.9), cycle_left=0.5),
+]}
+
+
+def handover34(cat_, doc=doc34):
+    """Tier 2's Handover through tier_leaders, and its leader."""
+    preview = rank.tier_leaders(cat_, usage.Snapshot.of(doc), PAIR_HARNESSES)[1]
+    return preview["leader"], preview.get("handover", "missing")
+
+
+def near34(found, points, to):
+    """A Handover of about `points` (within a grid step and a bit) to `to`."""
+    return (isinstance(found, dict) and set(found) == {"points", "to"}
+            and found["to"] == to and abs(found["points"] - points) < 0.006)
+
+
+lead34, pair34 = handover34(pair_cat(dollars=False, gate=0.05))
+record("case 34a a@x hands Tier 2 to b@y once its Pace falls a Margin under b@y's: about 0.15",
+       lead34 == "a@x" and near34(pair34, 0.15, "b@y"), (lead34, pair34))
+lead34, alone34 = handover34(pair_cat(dollars=False, gate=0.05, lone=True))
+record("case 34b a lone leader runs down to the Gate: about 0.45, to no Lane",
+       lead34 == "a@x" and near34(alone34, 0.45, None), (lead34, alone34))
+# plan dollars, weights 20 and 10: 20 x Pace falls to 9 / 1.2 at Pace 0.375,
+# a Weekly figure of 0.1875, so 0.3125 spent
+lead34, dollars34 = handover34(pair_cat(20 / WEEK33, 10 / WEEK33, dollars=True, gate=0.05))
+record("case 34c with plan dollars at weights 20 and 10 the Handover is about 0.3125 to b@y",
+       lead34 == "a@x" and near34(dollars34, 0.3125, "b@y"), (lead34, dollars34))
+off_cat34 = pair_cat(dollars=False, gate=0.05)
+off_cat34["routing"]["meters"] = False
+lead34, off34 = handover34(off_cat34)
+record("case 34d Meters off: no Handover", lead34 == "a@x" and off34 is None, (lead34, off34))
+
+# None too with no leader, and when the leader's Meter has no Weekly figure or
+# no share of the week left to read a spent Pace from.
+none34 = rank.tier_leaders(pair_cat(dollars=False, gate=0.05), usage.Snapshot.of(doc34), set())[1]
+no_week34 = copy.deepcopy(doc34)
+no_week34["lanes"][0].update(remaining_weekly=None)
+no_left34 = copy.deepcopy(doc34)
+no_left34["lanes"][0].update(cycle_left=None)
+got34 = (none34["leader"], none34.get("handover", "missing"),
+         handover34(pair_cat(dollars=False, gate=0.05), no_week34),
+         handover34(pair_cat(dollars=False, gate=0.05), no_left34))
+record("case 34e no Handover with no leader, no Weekly figure or no share of the week left",
+       got34 == (None, None, ("a@x", None), ("a@x", None)), got34)
+
+# Rank spends only the leader's Meter, and only through readout(spend=): one
+# plain read per Meter, then spend reads of mx alone, on the 0.005 grid.
+reads34 = []
+
+
+class Counted34(usage.Snapshot):
+    def readout(self, meter, cat, **kw):
+        reads34.append((meter, kw.get("spend", 0.0)))
+        return usage.Snapshot.readout(self, meter, cat, **kw)
+
+
+snap34 = usage.Snapshot.of(doc34)
+counted34 = Counted34(path=None, status=snap34.status, detail=None, taken_at=snap34.taken_at,
+                      signature=snap34.signature, _rows=snap34._rows, _held=snap34._held)
+spent34 = rank.tier_leaders(pair_cat(dollars=False, gate=0.05), counted34, PAIR_HARNESSES)[1]
+plain34 = sorted(m for m, s in reads34 if not s)
+spends34 = [(m, s) for m, s in reads34 if s]
+record("case 34f the Handover spends the leader's Meter only through Snapshot.readout(spend=)",
+       plain34 == ["mx", "my"] and spends34 and len(spends34) <= 200
+       and all(m == "mx" and abs(s * 200 - round(s * 200)) < 1e-9 for m, s in spends34)
+       and near34(spent34.get("handover"), 0.15, "b@y"),
+       (plain34, spends34[:3], len(spends34)))
+
+# JSON-safe, and `rank tiers --json` carries the Handover on every Tier.
+try:
+    json.dumps([pair34, alone34, dollars34, off34], allow_nan=False)
+    json34 = True
+except ValueError as e:
+    json34 = str(e)
+record("case 34g Handovers pass json.dumps(allow_nan=False) and rank tiers --json carries them",
+       json34 is True and len(tiers33) == 4 and all("handover" in t for t in tiers33),
+       (json34, [sorted(t) for t in tiers33]))
+
+# The selection rule's pieces are rank's own: nothing outside it replays them.
+public34 = [name for name in ("score", "eligible_order", "steals", "choose") if hasattr(rank, name)]
+record("case 34h rank exposes no public score, eligible_order, steals or choose",
+       public34 == [], public34)
 
 sys.exit(1 if fails else 0)

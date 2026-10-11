@@ -819,23 +819,12 @@ def meters_enabled(routing):
 # becomes a fraction of the Pick's value.
 QUOTA_UNITS = ("pace", "plan_dollars")
 
-WEEK_DAYS = 7
-DAYS_PER_MONTH = 30.4375
-
 
 def quota_unit(routing):
     """Effective routing.quota_unit: absent means `pace`."""
     if not isinstance(routing, dict):
         return "pace"
     return routing.get("quota_unit", "pace")
-
-
-def week_dollars(meter):
-    """A Meter's plan price per week, or None when it has no price."""
-    pm = (meter or {}).get("price_month")
-    if type(pm) is bool or not isinstance(pm, (int, float)):
-        return None
-    return pm * WEEK_DAYS / DAYS_PER_MONTH
 
 
 def overflow_enabled(routing):

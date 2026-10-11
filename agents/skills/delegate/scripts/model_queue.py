@@ -61,7 +61,7 @@ OFF = ("off", "0", "false", "no")
 def path():
     """The queue file: $DELEGATE_MODEL_QUEUE, else beside the meter cache."""
     return (os.environ.get("DELEGATE_MODEL_QUEUE")
-            or os.path.join(os.path.dirname(usage.get_cache_path()), "new-models.json"))
+            or os.path.join(os.path.dirname(usage.cache_path()), "new-models.json"))
 
 
 def _now():

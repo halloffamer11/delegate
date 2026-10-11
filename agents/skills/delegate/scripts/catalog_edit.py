@@ -21,6 +21,7 @@ import catalog  # noqa: E402
 import catalog_commit  # noqa: E402
 import harnesses  # noqa: E402
 import rank  # noqa: E402
+import usage  # noqa: E402
 
 
 # The refusal when a source changed between the preview and the apply, at the
@@ -47,9 +48,15 @@ def _present_harnesses(present=None):
 
 
 def _cached_meters(meters=None):
-    if meters is not None:
-        return meters
-    return rank.load_cached_usage()
+    """The Meter snapshot a preview ranks on: `meters` itself, or the cache as
+    it is. A plain usage document is refused, as rank refuses one: it carries
+    no usage-limit hold, so ranking it would skip any hold in force."""
+    if meters is None:
+        return usage.read(None, usage.CACHED)
+    if not isinstance(meters, usage.Snapshot):
+        raise TypeError(f"edit_catalog takes a usage.Snapshot for meters, not {type(meters).__name__}; "
+                        "wrap a usage document with usage.Snapshot.of")
+    return meters
 
 
 def _catalog_from_docs(lanes_doc, routing_doc, project_doc, files, project_lanes_doc=None):
@@ -117,23 +124,24 @@ def _catalog_from_docs(lanes_doc, routing_doc, project_doc, files, project_lanes
     }
 
 
-def _rank_preview(cat, meters_doc, present):
+def _rank_preview(cat, meter_snap, present):
     picks = {}
     for cls in catalog.class_names(cat["routing"]):
-        rows = rank.rank(cls, cat, meters_doc, present)
+        rows = rank.rank(cls, cat, meter_snap, present)
         picks[cls] = next((row["lane"] for row in rows if row.get("pick")), None)
     leaders = [
         {"tier": preview["tier"], "leader": preview["leader"]}
-        for preview in rank.tier_leaders(cat, meters_doc, present)
+        for preview in rank.tier_leaders(cat, meter_snap, present)
     ]
     return picks, leaders
 
 
-def _observations_report(meters_doc, meter_names):
-    observed = rank.meter_observations(meters_doc)
+def _observations_report(meter_snap, meter_names):
+    """("cached" | "missing" | "invalid", the catalog Meters with no reading)."""
     names = list(meter_names)
-    if observed is None:
+    if meter_snap.status not in ("ok", "missing"):
         return "invalid", sorted(names)
+    observed = set(meter_snap.names())
     missing = sorted(name for name in names if name not in observed)
     status = "cached" if observed else "missing"
     return status, missing
@@ -586,7 +594,9 @@ def edit_catalog(
 ):
     """Preview or apply one focused catalog edit. Public for setup reuse.
 
-    ``meters`` is a cached usage document; omitted means load_cached_usage().
+    ``meters`` is a Meter snapshot (``usage.read``, or ``usage.Snapshot.of``
+    for a document in memory), and anything else raises TypeError before any
+    write; omitted means the cache as it is, ``usage.read(None, usage.CACHED)``.
     ``present`` is the harness set; omitted means CLIs found on PATH.
     Applying requires ``expect`` equal to the current source revision.
     """
@@ -655,10 +665,10 @@ def edit_catalog(
         lanes_doc, routing_doc, project_doc, files, project_lanes_doc
     )
     present_set = _present_harnesses(present)
-    meters_doc = _cached_meters(meters)
-    picks_before, leaders_before = _rank_preview(before_cat, meters_doc, present_set)
-    picks_after, leaders_after = _rank_preview(after_cat, meters_doc, present_set)
-    observations, missing = _observations_report(meters_doc, before_cat["meters"])
+    meter_snap = _cached_meters(meters)
+    picks_before, leaders_before = _rank_preview(before_cat, meter_snap, present_set)
+    picks_after, leaders_after = _rank_preview(after_cat, meter_snap, present_set)
+    observations, missing = _observations_report(meter_snap, before_cat["meters"])
     # a harness this catalog runs no Lane on cannot change a Pick, so its
     # absence is not news
     in_catalog = {lane.get("harness") for lane in (after_cat.get("lanes") or {}).values()}

@@ -121,7 +121,7 @@ BAR_FULL = "█"
 BAR_PART = " ▏▎▍▌▋▊▉"
 BAR_EMPTY = "·"
 BAR_UNKNOWN = "╌"
-MARK = "┃"  # the Gate on a Remaining bar, the steal threshold on a Pace bar
+MARK = "┃"  # the Gate on a Remaining bar, the Pace to lead on a Pace bar
 HAIRLINE = "─"
 EMDASH = "—"
 TIMES = "×"
@@ -138,13 +138,15 @@ _ONE_CELL = frozenset(
 
 EFFORT = {"low": "L", "medium": "M", "high": "H", "xhigh": "XH", "max": "Max", "ultra": "U"}
 
-# The closed reason set.  Every `reason` rank.py writes maps into one of these,
-# and each one is written out at the foot of the pane in its own colour.
+# The closed set of codes.  Every `cause` rank.py gives a row maps into one of
+# these through CAUSE_CODES, and each one is written out at the foot of the pane
+# in its own colour.
 CODES = (
     ("PICK", "gold", "Ranking selects this Lane for the next job."),
-    ("STEAL", "steal", "Its Pace took the job from the Lane that sorted ahead of it."),
+    ("STEAL", "steal", "It took the job from the Lane that sorted ahead of it, "
+                       "because its Meter was ahead by the Margin."),
     ("ELIG", "fg", "Eligible. It sorts after the Pick and takes the job if the Pick cannot."),
-    ("NOMTR", "mute", "Its Meter has no reading, so ranking sorts it last."),
+    ("NOMTR", "mute", "Its Meter has no value to rank by, so ranking sorts it last."),
     ("GATE", "veto", "Its Meter's Remaining is under the Gate, so it takes no job."),
     ("CLI", "veto", "Its harness is not on PATH, so nothing can run it here."),
     ("FLOOR", "mute", "Its Tier is below the floor of the Class asking for a Lane."),
@@ -419,27 +421,28 @@ def code_color(code: str) -> str:
     return PAL.get(CODE_ROLE.get(code, "fg"), PAL["fg"])
 
 
+# rank's `cause` to its code.  The model never shows a disabled Lane, so
+# `disabled` has no code of its own; it and any cause this table does not know
+# read as VETO.
+CAUSE_CODES = {
+    "pick": "PICK",
+    "steal": "STEAL",
+    "eligible": "ELIG",
+    "unknown": "NOMTR",
+    "gate": "GATE",
+    "cli": "CLI",
+    "floor": "FLOOR",
+    "ceiling": "CEIL",
+}
+
+
 def reason_code(row: dict[str, Any]) -> tuple[str, str]:
-    """One code from the closed set, with the colour the scale gives it."""
-    reason = str(row.get("reason") or "")
-    if reason == "pick":
-        code = "PICK"
-    elif reason.startswith("stolen by pace"):
-        code = "STEAL"
-    elif reason.startswith("unknown meter") or row.get("remaining") is None:
-        code = "NOMTR"
-    elif reason.startswith("vetoed:gate"):
-        code = "GATE"
-    elif reason.startswith("vetoed:cli"):
-        code = "CLI"
-    elif reason.startswith("vetoed:floor"):
-        code = "FLOOR"
-    elif reason.startswith("vetoed:ceiling"):
-        code = "CEIL"
-    elif reason.startswith("vetoed:"):
-        code = "VETO"
-    else:
-        code = "ELIG"
+    """The code for the row's `cause`, with the colour the scale gives it.
+
+    It reads only the cause rank gives the row, never the `reason` text and
+    never the Meter reading: a Lane with no reading reads as rank ranks it.
+    """
+    code = CAUSE_CODES.get(row.get("cause"), "VETO")
     return code, code_color(code)
 
 
@@ -457,14 +460,18 @@ def status_icon(row: dict[str, Any]) -> tuple[str, str]:
 
 
 def remaining_color(row: dict[str, Any], state: dict[str, Any]) -> str:
-    """Colour Remaining by what the Gate does with it, not by how large it is."""
+    """Colour Remaining by what the Gate does with it, not by how large it is.
+
+    The veto colour is the row's `gated`, the Gate rank applies, which the
+    model takes from the Meter's Readout: never with metering off.
+    """
     remaining = row.get("remaining")
     if remaining is None:
         return PAL["mute"]
+    if row.get("gated"):
+        return PAL["veto"]
     gate = ((state.get("policy") or {}).get("gate") or {}).get("value") or 0.0
     pace = row.get("pace")
-    if remaining < gate:
-        return PAL["veto"]
     if remaining < 2 * gate or (pace is not None and pace < 0.5):
         return PAL["watch"]
     return PAL["ok"]
@@ -891,86 +898,82 @@ def table_lines(state, view, width, selected_lane):
 
 
 def meter_rows(state):
-    """One entry per Meter: its Harness, its Remaining and Pace, and its Lanes."""
+    """One entry per Meter: its Harness, its Remaining, Pace and Gate."""
     order: list[str] = []
     seen: dict[str, dict[str, Any]] = {}
     for tier in state.get("tiers") or []:
         for row in tier.get("rows") or []:
             name = str(row.get("meter") or "")
-            entry = seen.get(name)
-            if entry is None:
+            if name not in seen:
                 order.append(name)
-                entry = seen[name] = {
+                seen[name] = {
                     "meter": name,
                     "harness": str(row.get("harness") or ""),
                     "remaining": row.get("remaining"),
                     "pace": row.get("pace"),
-                    "lanes": [],
+                    "gated": row.get("gated"),
                 }
-            entry["lanes"].append(dict(row, _tier=tier.get("tier")))
     return [seen[name] for name in order]
 
 
-def steal_thresholds(state):
-    """``Pick's Pace + Margin`` per Tier: what a Lane must now reach to take it.
-
-    The rule is rank.py's, lines 177-183: scanning the eligible Lanes after the
-    first in sort order, a Lane takes the Pick when its Pace reaches the current
-    Pick's Pace plus the Margin, and the Pick then moves to it, so the bar this
-    draws is the one a further Lane has to clear.
-    """
-    margin = ((state.get("policy") or {}).get("margin") or {}).get("value") or 0.0
-    out: dict[Any, dict[str, Any]] = {}
-    for tier in state.get("tiers") or []:
-        for row in tier.get("rows") or []:
-            code, _color = reason_code(row)
-            if code in ("PICK", "STEAL"):
-                pace = row.get("pace")
-                out[tier.get("tier")] = {
-                    "pick": row.get("lane"),
-                    "meter": row.get("meter"),
-                    "pace": pace,
-                    "threshold": None if pace is None else float(pace) + float(margin),
-                }
-                break
-    return out
+def _leader_meter(tier):
+    """The Meter of the Lane that leads this Tier, or None."""
+    leader = tier.get("leader")
+    for row in tier.get("rows") or []:
+        if leader is not None and row.get("lane") == leader:
+            return str(row.get("meter") or "")
+    return None
 
 
-def meter_verdict(entry, state, thresholds):
-    """What the Gate and the Margin do to this Meter, in one phrase each."""
-    gate = ((state.get("policy") or {}).get("gate") or {}).get("value") or 0.0
+def _verdict(entry, state):
+    """meter_verdict's four values, then the Pace to lead it names, or None."""
+    meters_on = ((state.get("policy") or {}).get("meters") or {}).get("value") is not False
     remaining = entry["remaining"]
     if remaining is None:
         rem_text, rem_color = "no Meter reading", PAL["mute"]
-    elif float(remaining) < float(gate):
-        # rank.py vetoes through usage.eligible: Remaining equal to Gate passes.
+    elif entry.get("gated"):
+        # the Gate rank applies, from the Meter's Readout
         rem_text, rem_color = "under the Gate", PAL["veto"]
+    elif not meters_on:
+        rem_text, rem_color = "Gate inactive", PAL["mute"]
     else:
         rem_text, rem_color = "over the Gate", PAL["ok"]
 
-    pace = entry["pace"]
-    holds = [number for number, item in thresholds.items() if item["meter"] == entry["meter"]]
+    tiers = state.get("tiers") or []
+    holds = [tier.get("tier") for tier in tiers if _leader_meter(tier) == entry["meter"]]
     if holds:
         return (rem_text, rem_color,
-                f"holds the Pick in T{min(holds)}", PAL["gold"])
+                f"holds the Pick in T{min(holds)}", PAL["gold"], None)
     if rem_color is PAL["veto"]:
         # The Gate already vetoed it; the Margin never gets a say.
-        return rem_text, rem_color, EMDASH, PAL["mute"]
-    if pace is None:
-        return rem_text, rem_color, "no Pace reading", PAL["mute"]
-    reachable = [
-        (item["threshold"], number)
-        for number, item in thresholds.items()
-        if item["threshold"] is not None
-        and any(row["_tier"] == number and row.get("eligible") for row in entry["lanes"])
-    ]
-    if not reachable:
-        return rem_text, rem_color, "no Tier it can take", PAL["mute"]
-    threshold, number = min(reachable)
-    if float(pace) >= threshold:
-        return rem_text, rem_color, f"takes the Pick in T{number}", PAL["steal"]
+        return rem_text, rem_color, EMDASH, PAL["mute"], None
+    if not meters_on:
+        # ranking reads no Pace, so no Pace makes this Meter lead
+        return rem_text, rem_color, "Pace inactive", PAL["mute"], None
+    if entry["pace"] is None:
+        return rem_text, rem_color, "no Pace reading", PAL["mute"], None
+    # rank's own answer: the lowest Pace at which a Lane on this Meter leads
+    # each Tier, every other Meter as it reads now (ticket 21)
+    needs = []
+    for tier in tiers:
+        need = (tier.get("pace_to_lead") or {}).get(entry["meter"])
+        if need is not None:
+            needs.append((float(need), tier.get("tier")))
+    if not needs:
+        return rem_text, rem_color, "no Tier it can take", PAL["mute"], None
+    need, number = min(needs)
     return (rem_text, rem_color,
-            f"needs {threshold:.2f}{TIMES} to take T{number}", PAL["mute"])
+            f"needs {need:.2f}{TIMES} to take T{number}", PAL["mute"], need)
+
+
+def meter_verdict(entry, state):
+    """What the Gate and the Margin do to this Meter, in one phrase each.
+
+    The Pace phrase reads the Tier previews rank gives: the Meter holds the
+    Pick in the first Tier whose leader it runs, or needs the lowest Pace to
+    lead any Tier gives it.
+    """
+    return _verdict(entry, state)[:4]
 
 
 def marked_bar(value, width, *, mark_at, scale=1.0, color, mark_color):
@@ -1003,25 +1006,36 @@ def marked_bar(value, width, *, mark_at, scale=1.0, color, mark_color):
 
 def aid_lines(state, width):
     """Per Meter, under its Harness: Remaining against the Gate, Pace against
-    the Pace a Lane must reach to take the Pick."""
+    the Pace rank says the Meter needs to lead a Tier."""
     deck = max(0, min(int(width), MEASURE))
     policy = state.get("policy") or {}
     gate = (policy.get("gate") or {}).get("value") or 0.0
     gate_text = (policy.get("gate") or {}).get("display") or EMDASH
     margin_text = (policy.get("margin") or {}).get("display") or EMDASH
-    thresholds = steal_thresholds(state)
+    tiers = state.get("tiers") or []
+    unit = next(((tier.get("steal_threshold") or {}).get("unit") for tier in tiers), "pace")
     meters = meter_rows(state)
+    verdicts = {entry["meter"]: _verdict(entry, state) for entry in meters}
     paces = [entry["pace"] for entry in meters if entry["pace"] is not None]
-    paces += [item["threshold"] for item in thresholds.values() if item["threshold"] is not None]
+    paces += [verdict[4] for verdict in verdicts.values() if verdict[4] is not None]
     scale = max(2.0, (max(paces) if paces else 0.0) * 1.15)
 
+    # The Steal threshold, worded for the quota unit routing uses (decision
+    # E.4); the mark is on the Pace axis in both units.
+    if unit == "plan_dollars":
+        rule = ["A Lane after the Pick takes it when its Pace times its plan dollars a week",
+                f"reaches the Pick's value times one plus the Margin of {margin_text}."]
+    else:
+        rule = [f"A Lane after the Pick takes it when its Pace reaches the Pick's Pace plus "
+                f"the Margin of {margin_text}."]
     bar_w = max(8, min(34, deck - 46))
     out: list[list[tuple[str, str, bool]]] = [
         [("How the Gate and the Margin act, per Meter", PAL["fg"], True)],
         [(f"A Lane is vetoed when its Meter's Remaining is under {MARK}, the Gate "
           f"at {gate_text}.", PAL["mute"], False)],
-        [(f"A Lane takes the Pick when its Pace reaches {MARK}, the Pick's Pace plus "
-          f"the Margin of {margin_text}.", PAL["mute"], False)],
+    ] + [[(text, PAL["mute"], False)] for text in rule] + [
+        [(f"On a Pace bar, {MARK} is the lowest Pace at which a Meter that leads no Tier "
+          f"would lead one.", PAL["mute"], False)],
     ]
     harness = None
     meters.sort(key=lambda entry: (entry["harness"], entry["meter"]))
@@ -1030,7 +1044,7 @@ def aid_lines(state, width):
             harness = entry["harness"]
             out.append([])
             out.append([(harness_name(harness), PAL["fg"], True)])
-        rem_text, rem_color, pace_text_, pace_color = meter_verdict(entry, state, thresholds)
+        rem_text, rem_color, pace_text_, pace_color, need = verdicts[entry["meter"]]
         out.append(
             [("  " + pad(entry["meter"], 16), PAL["mute"], False),
              (pad("Rem", 5), PAL["mute"], False)]
@@ -1039,15 +1053,9 @@ def aid_lines(state, width):
             + [(" " + pad(percent(entry["remaining"]), 5, ">"), PAL["fg"], False),
                ("  " + rem_text, rem_color, False)]
         )
-        reachable = [
-            item["threshold"]
-            for number, item in thresholds.items()
-            if item["threshold"] is not None
-            and any(row["_tier"] == number and row.get("eligible") for row in entry["lanes"])
-        ]
         out.append(
             [(pad("", 18), PAL["mute"], False), (pad("Pace", 5), PAL["mute"], False)]
-            + marked_bar(entry["pace"], bar_w, mark_at=min(reachable) if reachable else None,
+            + marked_bar(entry["pace"], bar_w, mark_at=need,
                          scale=scale, color=PAL["steal"], mark_color=PAL["gold"])
             + [(" " + pad(pace_text(entry["pace"]), 5, ">"), PAL["fg"], False),
                ("  " + pace_text_, pace_color, False)]

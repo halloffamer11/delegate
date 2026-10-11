@@ -30,6 +30,7 @@ import harnesses
 import catalog_edit
 import catalog_commit  # noqa: E402
 import catalog_draft  # noqa: E402
+import usage  # noqa: E402
 
 fails = 0
 lanes_sample = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
@@ -1011,7 +1012,7 @@ def case_a_catalog_set_made_while_the_wizard_is_open_survives_its_save():
 
         def catalog_set():
             kwargs = dict(scope="global", cwd=td, config_dir=cfg, field="lanes.terra-high@codex.tier",
-                          value=1, meters={}, present=set(harnesses.NAMES))
+                          value=1, meters=usage.Snapshot.of({}), present=set(harnesses.NAMES))
             preview = catalog_edit.edit_catalog("set", **kwargs)
             catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
 
@@ -1296,7 +1297,7 @@ def case_a_focused_save_refuses_a_catalog_changed_since_launch():
 
         def catalog_set():
             kwargs = dict(scope="global", cwd=td, config_dir=cfg, field="lanes.terra-high@codex.tier",
-                          value=1, meters={}, present=set(harnesses.NAMES))
+                          value=1, meters=usage.Snapshot.of({}), present=set(harnesses.NAMES))
             preview = catalog_edit.edit_catalog("set", **kwargs)
             catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
             theirs.append(open(lanes_path, "rb").read())

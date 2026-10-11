@@ -40,7 +40,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, meters_enabled
+from catalog import load_catalog, CatalogError
 from harnesses import NAMES as HARNESSES, EFFORTS
 import catalog
 import harnesses
@@ -288,37 +288,34 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
     return prompt_bytes, prompt_path
 
 
-def probe_meters(no_probe, routing=None):
-    if no_probe or (routing is not None and not meters_enabled(routing)):
-        return
-    usage.acquire(refresh=True, timeout=180)
-
-
 def relay_work(harness, model, effort, timeout, child_cwd, write, relay, no_probe=False,
-               routing=None, probed=False):
-    """The work of a relayed Run, for `runs.execute`: preflight, probe, run
-    the relay (`relay.run` returns the `runs.Finish`), and probe.
+               routing=None):
+    """The work of a relayed Run, for `runs.execute`: the preflight, the Meters
+    read FRESH, the relay (`relay.run` returns the `runs.Finish`), and the
+    Meters read FORCED.
 
-    ``probed`` means the caller acquired the Meters just now to rank, so the
-    before-probe would only repeat it (and `claude -p /usage` can spend the
-    quota it measures).
+    The read before the relay is FRESH, so it probes only when the reading is
+    older than ten minutes (a `run` that just ranked left a fresh one); the
+    read after it is FORCED. With routing.meters off neither probes, and with
+    ``no_probe`` nothing is read.
     """
     def work(run):
         # a harness that cannot start here fails before it spends a Meter
         reason = harnesses.get(harness).preflight(write)
         if reason:
             return runs.blocked(reason)
-        if not probed:
-            probe_meters(no_probe, routing)
+        if not no_probe:
+            usage.read(routing, usage.FRESH)
         job = relays.Job(harness=harness, model=model, effort=effort, timeout=timeout,
                          prompt=run.prompt_path, cwd=child_cwd, write=write)
         finish = relay.run(job, run.path)
-        probe_meters(no_probe, routing)
+        if not no_probe:
+            usage.read(routing, usage.FORCED)
         return finish
     return work
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, probed=False, orchestrator=None, as_json=False, relay=None):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False, orchestrator=None, as_json=False, relay=None):
     profile = load_profile(orchestrator)
     if relay is None:
         relay = relays.Ads(ads_dir)
@@ -374,7 +371,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     else:
         work = relay_work(
             harness=harness, model=model, effort=eff, timeout=lane_timeout, child_cwd=child_cwd,
-            write=write, relay=relay, no_probe=no_probe, routing=resolved.get("routing"), probed=probed,
+            write=write, relay=relay, no_probe=no_probe, routing=resolved.get("routing"),
         )
     try:
         ended = runs.execute(request, prompt_bytes, work, runs_dir)
@@ -421,17 +418,18 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
             )
             sys.exit(2)
 
-    meters_doc = rank.load_usage(cat, meters, refresh=True)
-    # rank.load_usage just acquired the Meters unless a document was passed or
-    # metering is off; dispatch then ranks and runs on that one acquisition.
-    probed = meters is None and meters_enabled(cat.get("routing", {}))
+    # A FRESH read probes only when the reading is older than ten minutes, so
+    # the dispatch below finds this one fresh and does not probe again before
+    # its relay. `--meters FILE` and `--no-probe` rank on a reading as it is.
+    snap = usage.read(cat.get("routing"), usage.CACHED if (meters or no_probe) else usage.FRESH,
+                      path=meters)
 
     if present_harnesses is not None:
         present = set(h.strip() for h in present_harnesses.split(",") if h.strip())
     else:
         present = harnesses.installed()
 
-    rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
+    rows = rank.rank(class_, cat, snap, present, tier=tier)
     # with --json, stdout carries the one JSON object, so the ranking is
     # written to stderr
     text_out = sys.stderr if as_json else sys.stdout
@@ -465,7 +463,6 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         runs_dir=runs_dir,
         no_probe=no_probe,
         no_leash=no_leash,
-        probed=probed,
         orchestrator=orchestrator,
         as_json=as_json,
         relay=relay,
@@ -506,7 +503,7 @@ def main(argv=None):
     p_dispatch.add_argument("--config-dir", default=None, help="directory containing lanes.json and routing.json")
     p_dispatch.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_dispatch.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
-    p_dispatch.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
+    p_dispatch.add_argument("--no-probe", action="store_true", help="read no usage meters before or after the relay")
     p_dispatch.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
     p_dispatch.add_argument("--orchestrator", default=None, help=ORCHESTRATOR_HELP)
     p_dispatch.add_argument("--json", action="store_true", help="print one JSON object in place of the finish lines")
@@ -525,7 +522,7 @@ def main(argv=None):
                        help="the user's harness constraint: rank and run this harness's Lanes only")
     p_run.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored (default $DELEGATE_RUNS_DIR, else ~/.cache/delegate/runs)")
-    p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
+    p_run.add_argument("--no-probe", action="store_true", help="rank on the cached usage meters and probe none")
     p_run.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
     p_run.add_argument("--orchestrator", default=None, help=ORCHESTRATOR_HELP)
     p_run.add_argument("--json", action="store_true", help="print one JSON object in place of the finish lines")
