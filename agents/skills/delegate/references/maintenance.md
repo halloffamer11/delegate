@@ -6,7 +6,9 @@ the catalog format.
 ## Tests
 
 `make test` in the checkout runs every script's test (stdlib only, no
-network, no harness CLI needed). After touching one script, its own file is
+network, no harness CLI needed). It points every proxy variable at a closed
+local port, so a test that reaches the web fails on every machine; a test
+that needs a local server uses 127.0.0.1 or localhost. After touching one script, its own file is
 enough: `python3 tests/test_<script>.py` from the skill directory.
 
 ## Evals
@@ -15,7 +17,8 @@ enough: `python3 tests/test_<script>.py` from the skill directory.
   each returns `pong` with a valid `return.json`. It spends a little quota.
 - `make eval-orchestrate`: the same job sent through the skill from each
   orchestrator profile with a headless launch; each run directory must match.
-- `EVAL_ARGS=--offline` runs either against the fake relay and stub CLIs.
+- `EVAL_ARGS=--offline` runs either against the fake relay and stub CLIs, in
+  `evals.OfflineWorld`, the world `test_dispatch` and `test_relay` use too.
 
 ## Browser probes
 

@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 
-from .base import Harness
+from .base import Harness, iso_time
 
 
 class Grok(Harness):
@@ -38,7 +38,6 @@ class Grok(Harness):
         creditUsagePercent, currentPeriod{type,start,end}, includedUsed, totalUsed,
         monthlyLimit, onDemandCap/Used, prepaidBalance, subscription_tier. Zero-valued
         fields are omitted, so a missing creditUsagePercent means 0% used."""
-        import usage
         p = subprocess.Popen(["grok", "agent", "stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, text=True)
         def send(i, method, params):
@@ -66,12 +65,12 @@ class Grok(Harness):
         if isinstance(pct, dict): pct = pct.get("val")
         pct = float(pct or 0)
         period = cfg.get("currentPeriod") or {}
-        end = usage.iso(period.get("end") or cfg.get("billingPeriodEnd") or "")
+        end = iso_time(period.get("end") or cfg.get("billingPeriodEnd") or "")
         ptype = (period.get("type") or "").replace("USAGE_PERIOD_TYPE_", "").lower() or "weekly"
         tier = res.get("subscription_tier")
         # single rolling meter (weekly on SuperGrok); no 5h window exists
-        return [usage.meter_row(self.name, None, None, 1 - pct / 100.0, None, end,
-                           note=f"tier={tier}; {ptype} meter only ({pct:g}% used); via _x.ai/billing")]
+        return [self.windows(None, None, 1 - pct / 100.0, None, end,
+                             note=f"tier={tier}; {ptype} meter only ({pct:g}% used); via _x.ai/billing")]
 
     # 2026-10-04 on the free Grok Build tier: "You've reached your free Grok
     # Build usage limit for now. Get SuperGrok for much higher limits, or try

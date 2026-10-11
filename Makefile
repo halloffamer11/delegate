@@ -4,8 +4,9 @@
 #   make install             # link the skills, each orchestrator's agents (Claude's courier) and the `delegate` command; then runtime
 #   make runtime             # what a plugin install also needs: the codex home and the relays at the pin
 #                            # (ads.sh install, skipped when ads.sh check passes). `delegate setup` runs it.
-#   make test                # every script test and the dashboard test (stdlib only, no network);
-#                            # PYTHON=python3.X picks the interpreter, 3.9 or newer
+#   make test                # every script test and the dashboard test (stdlib only, no network:
+#                            # the proxy points at a closed port); PYTHON=python3.X picks the
+#                            # interpreter, 3.9 or newer
 #   make eval-ping           # eval 1: a pong job on every installed harness (spends a little quota);
 #                            # EVAL_ARGS=--offline runs it on the fake relay and stub CLIs
 #   make eval-orchestrate    # eval 3: the same job sent through the skill from each orchestrator harness
@@ -38,6 +39,12 @@ DELEGATE_DASHBOARD_PLACEMENT ?= split
 # The interpreter `make test` runs. Every entry point calls plain `python3`, so the
 # oldest one in use sets the minimum: 3.9, macOS's /usr/bin/python3.
 PYTHON ?= python3
+# `make test` points every proxy variable at a closed local port, so a test that
+# reaches the web fails on every machine, not only on one that is offline. A test
+# that needs a local server uses 127.0.0.1 or localhost, which stay reachable.
+OFFLINE := http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 \
+	HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
+	no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
 
 .PHONY: install runtime test eval-ping eval-orchestrate delegate-codex-home delegate-wizard delegate-dashboard
 
@@ -68,9 +75,9 @@ runtime: delegate-codex-home
 test:
 	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else "make test: delegate needs Python 3.9 or newer; $(PYTHON) is " + sys.version.split()[0])'
 	@cd $(CURDIR)/agents/skills/delegate && for f in tests/test_*.py; do \
-		$(PYTHON) $$f >/dev/null 2>&1 && echo "ok   $$f" || { echo "FAIL $$f"; fail=1; }; \
+		$(OFFLINE) $(PYTHON) $$f >/dev/null 2>&1 && echo "ok   $$f" || { echo "FAIL $$f"; fail=1; }; \
 	done; exit $${fail:-0}
-	$(PYTHON) $(CURDIR)/tools/delegate-dashboard/test_dashboard.py >/dev/null 2>&1 && echo "ok   tools/delegate-dashboard/test_dashboard.py"
+	$(OFFLINE) $(PYTHON) $(CURDIR)/tools/delegate-dashboard/test_dashboard.py >/dev/null 2>&1 && echo "ok   tools/delegate-dashboard/test_dashboard.py"
 
 eval-ping:
 	$(PYTHON) $(CURDIR)/agents/skills/delegate/scripts/evals.py ping $(EVAL_ARGS)
@@ -87,7 +94,7 @@ delegate-codex-home:
 		echo "NOTE: ~/.codex/auth.json is absent — run 'codex login', then 'make delegate-codex-home' again"; \
 	fi
 
-# Writes this machine's catalog, ~/.config/delegate, and the agent file of each new
+# Writes this machine's catalog, ~/.config/delegate, and the agent file of every
 # native claude lane straight into ~/.claude/agents, so a new lane is live with no
 # second command (ticket 33). Neither is in the repo.
 delegate-wizard:

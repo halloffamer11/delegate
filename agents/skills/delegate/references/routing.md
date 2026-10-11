@@ -36,14 +36,43 @@ A meter whose probe is unknown sorts last and never blocks. A meter whose
 harness refused a run for its usage limit reads 0% left, so the gate vetoes
 it, until its reset, a new reset read by a probe, a finished run on it, or 24
 hours, whichever comes first. The hold lives in `limits.json` beside the usage
-cache; `delegate status` notes it on the meter. With `meters` on
-(the default), meters are probed when a run starts and when it finishes.
+cache; `delegate status` prints a `Usage-limit hold:` line naming each held meter
+and when its hold ends. With `meters` on
+(the default), a run reads the meters fresh before it starts, probing only when
+the last reading is older than ten minutes, and probes them when it finishes.
 
 `--tier <n>` raises the floor for one job. It never admits a tier outside the
 range; only overflow reaches past the ceiling.
 
 When nothing is eligible the command prints `STOP: no lane eligible for
 <class>` with the reasons, exits 1, and starts nothing.
+
+Each `--json` row carries a `cause`, why that lane holds its place: `pick`,
+`steal` (the pick, which took the job by the margin), `eligible`, `unknown`
+(no meter value to rank by, so it sorts last), or the veto that stopped it:
+`disabled`, `floor`, `ceiling`, `gate` or `cli`. `eligible` is true for the
+first four, and `pick` for `pick` and `steal`. Read `cause`; the `reason`
+text only displays it. Rows carry no `veto` field: `cause` replaced it.
+
+`delegate rank tiers --json` previews each tier on its own. Beside its
+`leader` and `rows`, each tier carries what would change the leader.
+`steal_threshold` is `{unit, value}`: what a lane that sorts after the leader
+must reach to take the tier, in the quota unit (the leader's pace plus the
+margin, or with plan dollars its value times `1 + margin`). `pace_to_lead`
+maps each other meter with an eligible lane of known pace in the tier to the
+lowest pace, in steps of 0.01, at which a lane on it would lead, every other
+meter as it reads now; null when no pace a meter can read (up to 50) would. A
+gated meter, a meter with no CLI and a meter with an unknown pace have no key.
+With metering off the value is null and the map is empty. The usage popup
+prints each pace to lead as it is, even past the end of its pace axis.
+`handover` is `{points, to}`:
+how far the leader's meter can fall, in quota points of its week on a grid of
+0.005, before another lane leads the tier or the meter falls under the gate,
+and that lane, or null when no other lane is eligible. It is never a time.
+`handover` is null with no leader, with metering off, when the leader's meter
+has no weekly figure or reset to read a spent pace from, or when the leader
+still leads with its whole week spent (a gate of 0). The usage popup prints it
+beside each tier's leader.
 
 ## Plan dollars
 
@@ -54,7 +83,7 @@ compares Pace times the meter's plan price per week
 for more. The margin then becomes a fraction: a lane steals when its value is
 at least the pick's times `1 + margin`. A plan change needs only its meter's
 `price_month` changed. `--json` rows carry the weekly price as `weight`, and
-the usage popup's handover points follow the same rule.
+each tier's `handover` follows the same rule.
 
     delegate catalog set routing.quota_unit '"plan_dollars"' --scope global
 

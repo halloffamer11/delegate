@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -22,12 +23,13 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog_cli.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
-import published_names
 import class_guides
 import catalog_edit
+import catalog_commit
 import catalog_cli
 import harnesses  # noqa: E402
 import rank
+import usage
 
 fails = 0
 
@@ -675,44 +677,6 @@ record(
     check_catalog_error(catalog.validate_lanes, shared) is None,
 )
 
-# 7.5 resolution: what the pre-screen asks of the catalog
-resolve = published_names.resolve_published_model
-astra = copy.deepcopy(lanes_sample)
-astra["lanes"]["astra-high@codex"] = copy.deepcopy(astra["lanes"]["sol-high@codex"])
-astra["lanes"]["astra-high@codex"]["model"] = "gpt-6-astra"
-astra["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1"]
-cases = (
-    ("GPT-6 Astra", "gpt-6-astra", "a display name differing only in case and separators"),
-    ("gpt-6-astra", "gpt-6-astra", "a slug already in catalog form"),
-    ("GPT-5.6 Sol", "gpt-5.6-sol", "a display name whose dot is a separator"),
-    ("Gemini 3.8 Flash", "gemini-3.8-flash-high", "a lane model carrying an effort suffix"),
-    ("Fable 5.1", "claude-fable-5-1", "a published_as entry"),
-    ("fable  5.1", "claude-fable-5-1", "a published_as entry, loosely typed"),
-    ("GLM-5.3", None, "a model that is nobody's lane"),
-    ("", None, "an empty name"),
-    (None, None, "no name at all"),
-)
-for name, want, tag in cases:
-    got = resolve(name, astra)
-    record(f"7.5 resolve {tag}", got == want, f"{name!r} -> {got!r}, wanted {want!r}")
-
-ambiguous = copy.deepcopy(lanes_sample)
-ambiguous["lanes"]["flash-medium@agy"] = copy.deepcopy(ambiguous["lanes"]["flash-high@agy"])
-ambiguous["lanes"]["flash-medium@agy"]["effort"] = "medium"
-ambiguous["lanes"]["flash-medium@agy"]["model"] = "gemini-3.8-flash-medium"
-record(
-    "7.6 a name two lane models could denote resolves to neither",
-    resolve("Gemini 3.8 Flash", ambiguous) is None,
-    repr(resolve("Gemini 3.8 Flash", ambiguous)),
-)
-record(
-    "7.6b an agy family name resolves by the row's effort, and to neither at an effort no member runs",
-    resolve("Gemini 3.8 Flash", ambiguous, effort="medium") == "gemini-3.8-flash-medium"
-    and resolve("Gemini 3.8 Flash", ambiguous, effort="high") == "gemini-3.8-flash-high"
-    and resolve("Gemini 3.8 Flash", ambiguous, effort="low") is None,
-    repr([resolve("Gemini 3.8 Flash", ambiguous, effort=e) for e in ("medium", "high", "low")]),
-)
-
 # 7.7 A published_as entry may not be pointed at a model another lane runs: the
 #     explicit map is consulted first, so such an entry would silently read that
 #     lane's rows as this one's — its own numbers would then switch it off as
@@ -740,91 +704,25 @@ record(
     check_catalog_error(catalog.validate_lanes, own) is None,
 )
 
+# 7.10 A published name names the Model, so the Lanes of one Model on two
+#      Harnesses may share it: Claude Code runs Opus as `claude-opus-5-5`, agy as
+#      `claude-opus-5-5-high`, and both are the one Model.
+opus_two = copy.deepcopy(lanes_sample)
+opus_two["lanes"]["opus-high@claude"] = dict(
+    opus_two["lanes"]["fable-xhigh@claude"], model="claude-opus-5-5", effort="high",
+    published_as=["Opus 5.5 Thinking"])
+opus_two["lanes"]["opus-high@agy"] = dict(
+    opus_two["lanes"]["flash-high@agy"], model="claude-opus-5-5-high", effort="high",
+    published_as=["Opus 5.5 Thinking"])
+msg = check_catalog_error(catalog.validate_lanes, opus_two)
 record(
-    "7.7 an entry the derived rule cannot reach still resolves",
-    resolve("Fable 5.1", {"lanes": {
-        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
-        "b@claude": {"model": "claude-fable-5-1", "effort": "xhigh",
-                     "published_as": ["Fable 5.1"]},
-    }}) == "claude-fable-5-1",
+    "7.10 one published name on Lanes of one Model on two harnesses is accepted",
+    msg is None,
+    msg,
 )
 
-record(
-    "7.8 every effort strips as a suffix, longest first",
-    [published_names.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]
-    == [("m", e) for e in harnesses.EFFORTS]
-    and published_names.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
-    and published_names.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
-    str([published_names.strip_effort_suffix(f"m-{e}") for e in harnesses.EFFORTS]),
-)
-
-# The published name is reconciled against the lane's model, reaching past an
-# effort suffix the *catalog* carries (gemini-3.8-flash-high). A suffix on the
-# *published* side is left alone on purpose: a row states its effort in its own
-# field, and reading `gpt-6-astra-max` as plain `gpt-6-astra` would let a name
-# and a field disagree with nobody noticing. The row's own `effort` field is
-# what separates agy family members (7.6b).
-record(
-    "7.8 a suffix on the published side is not silently dropped",
-    resolve("gpt-6-astra-max", {"lanes": {
-        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
-    }}) is None
-    and resolve("Gemini 3.8 Flash", {"lanes": {
-        "a@agy": {"model": "gemini-3.8-flash-high", "effort": "high"},
-    }}) == "gemini-3.8-flash-high",
-)
-
-# 7.9 ticket 19: every Claude name an accepted rows file prints resolves to the
-#     lane model it denotes in a catalog, and a Claude model that is nobody's
-#     lane resolves to none. A new Claude name in the rows fails here until
-#     someone decides which it is. The catalog is machine-local (the user,
-#     2026-09-29), so the repo has none to read: these are its Claude lanes as
-#     they stood that day, one effort each.
-_data_dir = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "..", ".scratch", "delegate-redesign", "_data"))
-# Which model each printed name denotes. What it resolves to is that model while
-# a lane runs it, and nothing once no lane does, so this table follows the
-# catalog through a refresh instead of being rewritten after one (ticket 33).
-_denotes = {
-    "Claude Fable 5.1": "claude-fable-5-1", "Fable 5.1": "claude-fable-5-1",
-    "Claude Fable 5": "claude-fable-5", "Fable 5": "claude-fable-5",
-    "Claude Opus 5": "claude-opus-5", "Opus 5": "claude-opus-5",
-    "claude-opus-5": "claude-opus-5",
-    # "Opus 5.5", the short form, is deliberately absent: the opus55 lanes carry
-    # no `published_as` for it, so it resolves to nothing. No rows file prints it
-    # yet, and the `_seen` check below fails the day one does, which is when
-    # someone has to decide whether the catalog should claim it.
-    "Claude Opus 5.5": "claude-opus-5-5",
-    "Claude Opus 4.8": "claude-opus-4-8", "Opus 4.8": "claude-opus-4-8",
-    "Claude Sonnet 5": "claude-sonnet-5", "Sonnet 5": "claude-sonnet-5",
-    "claude-sonnet-5": "claude-sonnet-5",
-    "Claude Sonnet 4.6": "claude-sonnet-4-6",
-    "Claude 4.5 Haiku": "claude-haiku-4-5-20251001",
-}
-_claude_doc = {"lanes": {
-    "fable-high@claude": {"harness": "claude", "model": "claude-fable-5-1", "effort": "high",
-                          "published_as": ["Fable 5.1"]},
-    "haiku-high@claude": {"harness": "claude", "model": "claude-haiku-4-5-20251001",
-                          "effort": "high", "published_as": ["Claude 4.5 Haiku"]},
-    "sonnet55-high@claude": {"harness": "claude", "model": "claude-sonnet-5-5", "effort": "high"},
-    "opus55-high@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": "high"},
-}}
-_claude_models = {l["model"] for l in _claude_doc["lanes"].values()}
-_claude_names = {n: (m if m in _claude_models else None) for n, m in _denotes.items()}
-_seen = set()
-for _file in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json"):
-    _p = os.path.join(_data_dir, _file)
-    if os.path.isfile(_p):
-        with open(_p, encoding="utf-8") as _f:
-            _seen |= {r["model"] for r in json.load(_f)
-                      if any(w in r["model"].lower() for w in ("claude", "fable", "opus", "sonnet", "haiku"))}
-_wrong = {n: resolve(n, _claude_doc) for n in _claude_names
-          if resolve(n, _claude_doc) != _claude_names[n]}
-record(
-    "7.9 every Claude name in the accepted rows resolves to its lane model, and other versions to none",
-    _seen and _seen <= set(_claude_names) and not _wrong,
-    f"unaccounted={sorted(_seen - set(_claude_names))} wrong={_wrong}",
-)
+# 7.5, 7.6, the 7.7 resolve case, the 7.8 published-suffix case and 7.9 moved to
+# test_lane_evidence (ticket 25): a printed name is identified there.
 
 
 # 8. Ticket 04: Project order is a project-only overlay on global Order.
@@ -1060,10 +958,10 @@ with tempfile.TemporaryDirectory() as td:
     # Reload the fixture after the project write: both public ranking projections
     # must consume the one effective catalog rather than applying an overlay again.
     present = set(harnesses.NAMES)
-    before_pick = next(r["lane"] for r in rank.rank("impl", before, {}, present) if r["pick"])
-    before_tier2 = rank.tier_leaders(before, {}, present)[1]["leader"]
-    after_pick = next(r["lane"] for r in rank.rank("impl", effective, {}, present) if r["pick"])
-    previews = rank.tier_leaders(effective, {}, present)
+    before_pick = next(r["lane"] for r in rank.rank("impl", before, usage.Snapshot.of({}), present) if r["pick"])
+    before_tier2 = rank.tier_leaders(before, usage.Snapshot.of({}), present)[1]["leader"]
+    after_pick = next(r["lane"] for r in rank.rank("impl", effective, usage.Snapshot.of({}), present) if r["pick"])
+    previews = rank.tier_leaders(effective, usage.Snapshot.of({}), present)
     record(
         "8.8 reloaded fixture changes Class ranking and the Tier leader through the public seam",
         before_pick == "terra-high@codex"
@@ -1280,7 +1178,7 @@ with tempfile.TemporaryDirectory() as missing_dir:
 
 # 10. Focused catalog edits (ticket 11 CLI). Fixtures only; never the live config.
 ALL_HARNESSES = set(harnesses.NAMES)
-EMPTY_METERS = {}
+EMPTY_METERS = usage.Snapshot.of({})
 
 
 def make_edit_fixture(td, *, project=None, project_lanes=None, dotted=False, symlink=False):
@@ -1444,6 +1342,50 @@ with tempfile.TemporaryDirectory() as td:
         repr(applied.get("changed")),
     )
 
+    # Ticket 16: `meters` takes a Meter snapshot, which carries the usage-limit
+    # hold beside the document it read. A plain document carries none, so it
+    # is refused, as rank refuses one, rather than ranked without the hold.
+    meters_path = os.path.join(td, "usage.json")
+    with open(meters_path, "w", encoding="utf-8") as f:
+        json.dump({"probed_at": time.time(), "lanes": [
+            {"meter": "codex", "r": 0.5, "pace": 0.5, "remaining_weekly": 0.5},
+            {"meter": "grok", "r": 0.9, "pace": 1.5, "remaining_weekly": 0.9}]}, f)
+    with open(meters_path, encoding="utf-8") as f:
+        plain_doc = json.load(f)
+    usage.hold("grok", "You've reached your free Grok Build usage limit", path=meters_path)
+    snap = usage.read(None, usage.CACHED, path=meters_path)
+    held = catalog_edit.edit_catalog(
+        "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+        config_dir=cfg, present=present, meters=snap,
+    )
+    try:
+        catalog_edit.edit_catalog(
+            "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+            config_dir=cfg, present=present, meters=plain_doc,
+        )
+        plain = "accepted"
+    except TypeError as e:
+        plain = str(e)
+    held_picks, held_leaders = expected_picks_leaders(repo, cfg, meters=snap)
+    invalid = catalog_edit.edit_catalog(
+        "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+        config_dir=cfg, present=present, meters=usage.Snapshot.of({"lanes": []}),
+    )
+    record(
+        "10.1c edit_catalog ranks on a Meter snapshot, hold included, refuses a plain document, "
+        "and names the Meters it has no reading for",
+        held["picks"]["before"] == held_picks
+        and held["leaders"]["before"] == held_leaders
+        and held_leaders[1]["leader"] == "terra-high@codex"
+        and "usage.Snapshot" in plain
+        and held["observations"] == "cached"
+        and held["missing_observations"] == ["agy-gemini", "claude-fable", "claude-general"]
+        and invalid["observations"] == "invalid"
+        and set(invalid["missing_observations"]) == set(lanes_sample["meters"]),
+        repr((held["leaders"]["before"], plain, held["observations"],
+              held["missing_observations"], invalid["observations"])),
+    )
+
     stale = check_catalog_error(
         catalog_edit.edit_catalog,
         "set",
@@ -1586,7 +1528,7 @@ with tempfile.TemporaryDirectory() as td:
         cwd=repo,
         config_dir=cfg,
         apply=True,
-        expect=catalog_edit.catalog_revision(cwd=repo, config_dir=cfg),
+        expect=catalog_commit.read(cfg, project_dir=repo).revision,
         present=ALL_HARNESSES,
         meters=EMPTY_METERS,
     )
@@ -1772,7 +1714,7 @@ with tempfile.TemporaryDirectory() as td:
         and project_doc["note"] == "other tiers stay",
     )
 
-    rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    rev = catalog_commit.read(cfg, project_dir=repo).revision
     preview_p = catalog_edit.edit_catalog(
         "order",
         lane="terra-high@codex",
@@ -1939,10 +1881,10 @@ with tempfile.TemporaryDirectory() as td:
         res_bad.stderr,
     )
 
-    absent_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    absent_rev = catalog_commit.read(cfg, project_dir=repo).revision
     os.makedirs(os.path.join(repo, ".delegate"), exist_ok=True)
     catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), {"gate": 0.2})
-    present_rev = catalog_edit.catalog_revision(cwd=repo, config_dir=cfg)
+    present_rev = catalog_commit.read(cfg, project_dir=repo).revision
     record(
         "10.9 absent project file is part of the revision",
         absent_rev != present_rev,
@@ -2003,18 +1945,18 @@ with tempfile.TemporaryDirectory() as td:
             item.pop("order", None)
     catalog.write_json(path, doc)
     preview = catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
-        field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES)
+        field=f"lanes.{moving}.tier", value=dest, meters=EMPTY_METERS, present=ALL_HARNESSES)
     catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
-        field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES,
+        field=f"lanes.{moving}.tier", value=dest, meters=EMPTY_METERS, present=ALL_HARNESSES,
         apply=True, expect=preview["revision"])
     after = catalog.load_json(path)["lanes"]
     record("10.11 Tier move follows unordered destination Lanes",
-          catalog_edit._carried_in_tier(after, dest)[-1] == moving, preview)
+          catalog.carried_in_tier(after, dest)[-1] == moving, preview)
 
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _ = make_edit_fixture(td)
     preview = catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
-        field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+        field="routing.gate", value=0.2, meters=EMPTY_METERS, present=ALL_HARNESSES)
     original_preview = catalog_edit._rank_preview
     path = os.path.join(cfg, "routing.json")
     def intervening_write(*args):
@@ -2025,7 +1967,7 @@ with tempfile.TemporaryDirectory() as td:
     catalog_edit._rank_preview = intervening_write
     try:
         msg = check_catalog_error(lambda: catalog_edit.edit_catalog("set", scope="global",
-            cwd=repo, config_dir=cfg, field="routing.gate", value=0.2, meters={},
+            cwd=repo, config_dir=cfg, field="routing.gate", value=0.2, meters=EMPTY_METERS,
             present=ALL_HARNESSES, apply=True, expect=preview["revision"]))
     finally:
         catalog_edit._rank_preview = original_preview
@@ -2041,9 +1983,144 @@ with tempfile.TemporaryDirectory() as td:
     with open(path, "w") as f:
         f.write("null\n")
     msg = check_catalog_error(catalog_edit.edit_catalog, "set", scope="project", cwd=repo,
-        config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+        config_dir=cfg, field="routing.gate", value=0.2, meters=EMPTY_METERS, present=ALL_HARNESSES)
     record("10.13 Present null project is invalid, not an absent overlay",
         msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
+
+# A dangling link at the project's routing.json names a file outside the
+# repository. The set refuses it, at the preview, and never creates that file
+# (deepening D, bug 5).
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    outside = os.path.join(td, "outside", "routing.json")
+    link = os.path.join(repo, ".delegate", "routing.json")
+    os.makedirs(os.path.dirname(link))
+    os.symlink(outside, link)
+    def set_gate():
+        preview = catalog_edit.edit_catalog("set", scope="project", cwd=repo, config_dir=cfg,
+            field="routing.gate", value=0.2, meters=EMPTY_METERS, present=ALL_HARNESSES)
+        catalog_edit.edit_catalog("set", scope="project", cwd=repo, config_dir=cfg,
+            field="routing.gate", value=0.2, meters=EMPTY_METERS, present=ALL_HARNESSES,
+            apply=True, expect=preview["revision"])
+    msg = check_catalog_error(set_gate)
+    record("10.14 a project set refuses a dangling link and creates nothing outside the project",
+        msg is not None and link in msg and outside in msg
+        and not os.path.lexists(outside) and not os.path.isdir(os.path.dirname(outside))
+        and os.path.islink(link), msg)
+
+# An apply writes through the Catalog commit (deepening D4), so a global set
+# copies the lanes.json it replaces to <config dir>/backups first.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    lanes_path = os.path.join(cfg, "lanes.json")
+    replaced = file_bytes(lanes_path)
+    kwargs = dict(scope="global", cwd=repo, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                  value=3, meters=EMPTY_METERS, present=ALL_HARNESSES)
+    preview = catalog_edit.edit_catalog("set", **kwargs)
+    catalog_edit.edit_catalog("set", apply=True, expect=preview["revision"], **kwargs)
+    folder = os.path.join(cfg, "backups")
+    found = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    record("10.15 a global set backs up lanes.json beside the catalog",
+        len(found) == 1 and found[0].startswith("lanes-") and found[0].endswith(".json")
+        and file_bytes(os.path.join(folder, found[0])) == replaced
+        and catalog.load_json(lanes_path)["lanes"]["terra-high@codex"]["tier"] == 3, found)
+
+# `catalog set` on a live layout: the catalog in a temp HOME's
+# ~/.config/delegate, with claude Lanes that have no Agent file yet. A global
+# set of lanes.json gives every claude Lane its Agent file and says so on
+# stderr; a project set never touches ~/.claude/agents. Either way stdout is
+# the one JSON result, keys as before.
+RESULT_KEYS = ["op", "scope", "revision", "target", "sources", "values", "changed", "picks",
+               "leaders", "unavailable_harnesses", "missing_observations", "observations",
+               "noop", "written"]
+
+
+def live_layout(td):
+    """(env, config dir, agents dir, repo) for a temp HOME holding the live
+    catalog: the refresh fixture's lanes (sixteen claude Lanes) and the sample
+    routing."""
+    home = os.path.join(td, "home")
+    cfg = os.path.join(home, ".config", "delegate")
+    os.makedirs(cfg)
+    shutil.copy(os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json"), cfg)
+    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), cfg)
+    repo = os.path.join(td, "repo")
+    os.makedirs(repo)
+    open(os.path.join(repo, ".git"), "w").close()
+    env = isolated_cli_env(td)
+    env["HOME"] = home
+    env["DELEGATE_MODEL_QUEUE"] = os.path.join(td, "new-models.json")
+    env.pop("DELEGATE_ORCHESTRATORS_DIR", None)
+    return env, cfg, os.path.join(home, ".claude", "agents"), repo
+
+
+def cli_set(env, repo, *args):
+    """Preview then apply one `catalog set` on the live catalog; returns the apply."""
+    preview = run_catalog_cli(["set", *args, "--cwd", repo], env)
+    revision = json.loads(preview.stdout)["revision"]
+    return run_catalog_cli(["set", *args, "--cwd", repo, "--apply", "--expect", revision], env)
+
+
+def one_json_result(stdout):
+    """Whether stdout is exactly one formatted result, with its keys in order."""
+    try:
+        doc = json.loads(stdout)
+    except ValueError:
+        return False
+    return list(doc) == RESULT_KEYS and stdout == catalog.format_json(doc)
+
+
+with tempfile.TemporaryDirectory() as td:
+    env, cfg, agents, repo = live_layout(td)
+    res = cli_set(env, repo, "routing.gate", "0.2", "--scope", "project")
+    record("10.16 a project set on the live catalog writes no agent file and prints only its JSON",
+        res.returncode == 0 and one_json_result(res.stdout) and res.stderr == ""
+        and json.loads(res.stdout)["written"] is True
+        and catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))["gate"] == 0.2
+        and not os.path.exists(agents) and not os.path.exists(os.path.join(cfg, "backups")),
+        res.stderr + res.stdout[:200])
+
+with tempfile.TemporaryDirectory() as td:
+    env, cfg, agents, repo = live_layout(td)
+    res = cli_set(env, repo, "lanes.opus-high@claude.tier", "2", "--scope", "global")
+    claude = [name for name, lane in catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"].items()
+              if lane["harness"] == "claude"]
+    files = sorted(os.listdir(agents)) if os.path.isdir(agents) else []
+    wanted = sorted(f"lane-{name.split('@')[0]}.md" for name in claude)
+    noted = sorted(line for line in res.stderr.splitlines() if line.startswith("wrote "))
+    record("10.17 a global set on the live catalog gives every claude Lane its agent file, notes on stderr",
+        res.returncode == 0 and one_json_result(res.stdout)
+        and json.loads(res.stdout)["written"] is True
+        and files == wanted and len(claude) == 16
+        and noted == sorted(f"wrote {os.path.join(agents, f)}" for f in wanted)
+        and len(os.listdir(os.path.join(cfg, "backups"))) == 1,
+        f"files={files} stderr={res.stderr[:300]!r}")
+
+# An edit that lands after the apply's revision check, while it ranks, is
+# caught by the commit, and the refusal is the text the dashboard matches.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    path = os.path.join(cfg, "lanes.json")
+    kwargs = dict(scope="global", cwd=repo, config_dir=cfg, field="lanes.terra-high@codex.tier",
+                  value=3, meters=EMPTY_METERS, present=ALL_HARNESSES)
+    preview = catalog_edit.edit_catalog("set", **kwargs)
+    original_preview = catalog_edit._rank_preview
+    def lands_while_ranking(*args):
+        catalog.write_json(path, dict(catalog.load_json(path), note="a set landed meanwhile"))
+        return original_preview(*args)
+    catalog_edit._rank_preview = lands_while_ranking
+    try:
+        msg = check_catalog_error(catalog_edit.edit_catalog, "set", apply=True,
+                                  expect=preview["revision"], **kwargs)
+    finally:
+        catalog_edit._rank_preview = original_preview
+    theirs = catalog.load_json(path)
+    record("10.18 an edit landing after the revision check is refused with the dashboard's text",
+        msg == "intervening edit: source documents or resolved paths changed; preview again"
+        and theirs.get("note") == "a set landed meanwhile"
+        and theirs["lanes"]["terra-high@codex"]["tier"] != 3
+        and not os.path.exists(os.path.join(cfg, "backups")), msg)
+
 # 11. routing.meters: validators, default on, project override, no-op absence.
 doc_m = copy.deepcopy(routing_sample)
 record("11.1 legacy routing without meters defaults on",
@@ -2773,7 +2850,7 @@ with tempfile.TemporaryDirectory() as td:
     sys.stderr = stale_err
     try:
         cat_stale = catalog.load_catalog(cwd=repo, config_dir=cfg)
-        rows = rank.rank("impl", cat_stale, {}, ALL_HARNESSES)
+        rows = rank.rank("impl", cat_stale, usage.Snapshot.of({}), ALL_HARNESSES)
     finally:
         sys.stderr = _stderr
     warned = stale_err.getvalue()
@@ -2835,7 +2912,7 @@ with tempfile.TemporaryDirectory() as td:
     sys.stderr = off_err
     try:
         cat_off = catalog.load_catalog(cwd=repo, config_dir=cfg)
-        off_rows = rank.rank("impl", cat_off, {}, ALL_HARNESSES)
+        off_rows = rank.rank("impl", cat_off, usage.Snapshot.of({}), ALL_HARNESSES)
     finally:
         sys.stderr = _stderr
     said = off_err.getvalue()
@@ -2901,7 +2978,7 @@ with tempfile.TemporaryDirectory() as which_tmp:
         and answers == {"claude": (False, False), "codex": (False, False),
                         "agy": (True, True), "grok": (False, False), "kiro": (False, False)}
         and present == {"agy"}
-        and [r.get("note") for r in absent_row] == ["absent"],
+        and [w.note for w in absent_row] == ["absent"],
         f"answers={answers} present={present} codex_row={absent_row}",
     )
 
@@ -2950,11 +3027,11 @@ with tempfile.TemporaryDirectory() as td:
            and cat["routing"]["classes"] == routing_sample["classes"]
            and cat["sources"]["classes.review.floor"] == catalog.DEFAULT_CLASSES_SOURCE,
            repr(cat["routing"]["classes"]))
-    picks = {c: rank.rank(c, cat, {}, set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
+    picks = {c: rank.rank(c, cat, usage.Snapshot.of({}), set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, copy.deepcopy(routing_sample["classes"]))
     cat_full = catalog.load_catalog(cwd=cwd, config_dir=config)
-    picks_full = {c: rank.rank(c, cat_full, {}, set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
+    picks_full = {c: rank.rank(c, cat_full, usage.Snapshot.of({}), set(harnesses.NAMES))[0]["lane"] for c in catalog.CLASSES}
 record("19.2 the shipped Classes rank the same whether the catalog writes them or not",
        picks == picks_full, f"{picks} vs {picks_full}")
 
@@ -2962,7 +3039,7 @@ with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"review": {"floor": 2, "ceiling": 3},
                                    "triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    rows = rank.rank("triage", cat, {}, set(harnesses.NAMES))
+    rows = rank.rank("triage", cat, usage.Snapshot.of({}), set(harnesses.NAMES))
     record("19.3 a global Class extends the defaults and rank accepts it",
            catalog.class_names(cat["routing"]) == list(catalog.CLASSES) + ["triage"]
            and cat["routing"]["classes"]["review"] == {"floor": 2, "ceiling": 3}
@@ -3016,16 +3093,6 @@ with tempfile.TemporaryDirectory() as td:
     msg = check_catalog_error(catalog.load_catalog, cwd=cwd, config_dir=config)
     record("19.9 a project Class with no ceiling is rejected, by name",
            bool(msg and "triage" in msg and "ceiling" in msg), msg)
-
-# One effort list: the suffixes are EFFORTS longest first, not a copy of it.
-record(
-    "20.1 the effort suffixes are EFFORTS, longest first",
-    sorted(e for _, e in published_names.MODEL_EFFORT_SUFFIXES) == sorted(harnesses.EFFORTS)
-    and all(suffix == f"-{e}" for suffix, e in published_names.MODEL_EFFORT_SUFFIXES)
-    and [len(e) for _, e in published_names.MODEL_EFFORT_SUFFIXES]
-    == sorted((len(e) for e in harnesses.EFFORTS), reverse=True),
-    str(published_names.MODEL_EFFORT_SUFFIXES),
-)
 
 # agy carries the effort in the slug, so a slug agy lists at xhigh is a lane at
 # xhigh, though xhigh is not among the efforts agy was known to offer; an xhigh
@@ -3087,9 +3154,30 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     config, cwd = class_world(td, {"triage": {"floor": 1, "ceiling": 2}}, guide=TRIAGE_GUIDE)
     cat = catalog.load_catalog(cwd=cwd, config_dir=config)
-    picks, _leaders = catalog_edit._rank_preview(cat, {}, set(harnesses.NAMES))
+    picks, _leaders = catalog_edit._rank_preview(cat, usage.Snapshot.of({}), set(harnesses.NAMES))
     record("21.5 the rank preview picks for every Class the catalog defines",
            list(picks) == catalog.class_names(cat["routing"]) and picks["triage"] is not None,
            repr(picks))
+
+# 22. Deepening F.1: one tie-break places the carried Lanes of a Tier. Order
+# first, a Lane without one after every Lane with one, ties by lane name.
+try:
+    tie_lanes = {
+        "zed@codex": {"tier": 2},
+        "mid@codex": {"tier": 2, "order": 7},
+        "abe@codex": {"tier": 2},
+        "top@codex": {"tier": 2, "order": 1},
+        "off@codex": {"tier": 2, "order": 2, "enabled": False},
+        "low@codex": {"tier": 1, "order": 1},
+        "two@codex": {"tier": 2, "order": 7, "enabled": True},
+    }
+    record("22.1 carried_in_tier orders by Order, then lane name, and skips off Lanes",
+           catalog.carried_in_tier(tie_lanes, 2)
+           == ["top@codex", "mid@codex", "two@codex", "abe@codex", "zed@codex"]
+           and catalog.carried_in_tier(tie_lanes, 1) == ["low@codex"]
+           and catalog.carried_in_tier(tie_lanes, 3) == [],
+           repr(catalog.carried_in_tier(tie_lanes, 2)))
+except Exception as e:
+    record("22.1 carried_in_tier orders by Order, then lane name, and skips off Lanes", False, repr(e))
 
 sys.exit(1 if fails else 0)

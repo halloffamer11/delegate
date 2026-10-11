@@ -14,8 +14,9 @@ nothing until he confirms. The rule is data, `routing.json`'s `tier_proposal`
   diversity          true keeps, in each Tier, the best Lane of every harness
                      with a Lane clearing that Tier
 
-A Lane's score is the row measured at its own model and effort
-(`bench.effort_attributes`); a Lane with none gets no proposal. Cost per task
+A Lane's score is a row of its evidence (`LaneEvidence.lane_rows`, the rows the
+carry pre-screen reads too): its Model, on any Harness, measured at its own
+effort. A Lane with none gets no proposal. Cost per task
 is the second axis, never a filter on its own. From Tier 4 down, the Lanes
 clearing a Tier that no higher Tier took are its candidates; the Tier keeps the
 candidates no other candidate beats on both score and cost (the cost frontier),
@@ -33,7 +34,6 @@ if HERE not in sys.path:
 
 import bench  # noqa: E402
 import carry  # noqa: E402
-import published_names  # noqa: E402
 
 FRONTIER = "frontier"
 DIVERSITY = "diversity"
@@ -44,29 +44,23 @@ def benchmark_matches(name, wanted):
     return name == wanted or (isinstance(name, str) and name.startswith(wanted + " "))
 
 
-def lane_scores(lanes_doc, effort_rows, settings, names=None):
-    """{lane: {"score", "cost", "benchmark"}} for each Lane with a row on the
-    chosen benchmark measured at its own effort."""
+def lane_scores(lanes_doc, evidence, settings, names=None):
+    """{lane: {"score", "cost", "benchmark"}} for each Lane with a row of its
+    evidence on the chosen benchmark: the first such row, in input order."""
     lanes = (lanes_doc or {}).get("lanes") or {}
     names = list(lanes) if names is None else list(names)
     out = {}
-    for row in effort_rows or []:
-        if (not isinstance(row, dict) or row.get("source") != settings["source"]
-                or row.get("uncertain")
-                or not benchmark_matches(row.get("benchmark"), settings["benchmark"])):
-            continue
-        score = bench.as_number(row.get("score"))
-        if score is None:
-            continue
-        models = published_names.resolve_published_models(row.get("model"), lanes_doc,
-                                                          effort=row.get("effort"))
-        for name in names:
-            lane = lanes[name]
-            if lane.get("model") not in models or name in out:
+    for name in names:
+        for row in evidence.lane_rows(name):
+            if (row.get("source") != settings["source"] or row.get("uncertain")
+                    or not benchmark_matches(row.get("benchmark"), settings["benchmark"])):
                 continue
-            if bench.effort_attributes(row.get("effort"), lane.get("effort")):
-                out[name] = {"score": score, "cost": bench.as_number(row.get("cost_usd")),
-                             "benchmark": row.get("benchmark")}
+            score = bench.as_number(row.get("score"))
+            if score is None:
+                continue
+            out[name] = {"score": score, "cost": bench.as_number(row.get("cost_usd")),
+                         "benchmark": row.get("benchmark")}
+            break
     return out
 
 
@@ -76,8 +70,9 @@ def band(score, thresholds):
     return max(cleared, default=1)
 
 
-def propose(lanes_doc, effort_rows, settings, names=None):
-    """{lane: proposal} for each scored Lane among `names` (default all).
+def propose(lanes_doc, evidence, settings, names=None):
+    """{lane: proposal} for each scored Lane among `names` (default all), from
+    the `lane_evidence.LaneEvidence` of this catalog and the accepted rows.
 
     A proposal holds `tier`, `band` (the highest Tier its score clears),
     `score`, `cost`, `benchmark`, `why` (frontier, diversity or floor),
@@ -85,7 +80,7 @@ def propose(lanes_doc, effort_rows, settings, names=None):
     its order inside the Tier from 1.
     """
     lanes = lanes_doc["lanes"]
-    scores = lane_scores(lanes_doc, effort_rows, settings, names)
+    scores = lane_scores(lanes_doc, evidence, settings, names)
     thresholds = settings["thresholds"]
     out = {}
     beaten_by = {}

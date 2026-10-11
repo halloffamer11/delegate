@@ -5,17 +5,60 @@ harness lives in its module: the binary, the efforts it offers, how its models
 are listed and parsed, how its Meters are probed, and the relay flags a run on
 it takes. The rest of delegate asks the registry (`harnesses.get(name)`) and
 never names a harness itself.
+
+A probe hands the Meters module (`usage.py`) its Windows, as the CLI reported
+them, and `usage.py` builds the rows from them, so no adapter imports usage.
 """
+from __future__ import annotations
+
 import copy
 import os
 import re
 import shutil
 import subprocess
+from datetime import datetime
+from typing import NamedTuple, Optional
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # The same words longest first, for a pattern that reads an effort off the end
 # of a name: `-xhigh` has to be tried before `-high`.
 EFFORTS_LONGEST_FIRST = tuple(sorted(EFFORTS, key=len, reverse=True))
+
+
+class Windows(NamedTuple):
+    """One Meter's Windows as a probe read them, before any arithmetic.
+
+    Fractions are what the CLI reported as remaining, even outside 0..1 (an
+    overspent Window); resets are epoch seconds. A Model meter's `weekly` is
+    its harness's week for all models and `weekly_model` its own week. None is
+    a Window the probe did not read.
+    """
+    meter: str
+    group: Optional[str]
+    five_h: Optional[float] = None
+    weekly: Optional[float] = None
+    reset_5h: Optional[float] = None
+    reset_weekly: Optional[float] = None
+    note: Optional[str] = None
+    weekly_model: Optional[float] = None
+
+
+def run_cli(cmd, timeout=60, stdin_data=None, cwd=None):
+    """Run a probe command; its CompletedProcess, or None when the CLI is
+    missing or outlasts `timeout` seconds."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              input=stdin_data, cwd=cwd)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def iso_time(text):
+    """An ISO 8601 time ('2026-10-08T00:00:00Z') as epoch seconds, or None."""
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 class Harness:
@@ -169,32 +212,42 @@ class Harness:
     # -- meters ------------------------------------------------------------
 
     def meters(self):
-        """The harness's Meter rows, as `usage.meter_row` builds them. An absent CLI
-        gives one `absent` row and a probe that raises one `probe failed` row,
-        here for every harness; each adapter's `read_meters` reads the rest.
-        Every such row has an unknown Remaining, which the Gate never vetoes."""
-        import usage
+        """The harness's Windows, one per Meter its probe reports. An absent
+        CLI gives one `absent` Windows and a probe that raises one `probe
+        failed`, here for every harness; each adapter's `read_meters` reads the
+        rest. Such a Windows has no Window read, so its Meter's Remaining is
+        unknown, which the Gate never vetoes."""
         if not self.installed():
-            return [usage.meter_row(self.name, None, note="absent")]
+            return [self.windows(None, note="absent")]
         try:
             return self.read_meters()
         except Exception as e:  # noqa
-            return [usage.meter_row(self.name, None, note=f"probe failed: {e}")]
+            return [self.windows(None, note=f"probe failed: {e}")]
 
     def read_meters(self):
-        """The Meter rows the installed CLI reports. A harness with no usage
-        source reports one row with an unknown Remaining."""
-        import usage
-        return [usage.meter_row(self.name, None, note="no usage source")]
+        """The Windows the installed CLI reports. A harness with no usage
+        source reports one with no Window read."""
+        return [self.windows(None, note="no usage source")]
 
-    # The probe groups `read_meters` reports, each one Meter
-    # (`usage.meter_name`): None is the harness's own name.
+    def windows(self, group, five_h=None, weekly=None, reset_5h=None, reset_weekly=None,
+                note=None, weekly_model=None):
+        """The Windows a probe read for the Meter of one probe group."""
+        return Windows(self.meter_name(group), group, five_h, weekly, reset_5h, reset_weekly,
+                       note, weekly_model)
+
+    # The probe groups `read_meters` reports, each one Meter (`meter_name`):
+    # None is the harness's own name.
     meter_groups = (None,)
+
+    def meter_name(self, group):
+        """The Meter a probe group reports: `<harness>-<group>`, or the
+        harness's own name for None. The catalog's Meter names are these
+        (`reports_meter` checks them)."""
+        return f"{self.name}-{group}" if group else self.name
 
     def meter_names(self):
         """The Meter names this harness's probe reports, for a message."""
-        import usage
-        return tuple(usage.meter_name(self.name, group) for group in self.meter_groups)
+        return tuple(self.meter_name(group) for group in self.meter_groups)
 
     def reports_meter(self, name, models=()):
         """Whether the probe reports a Meter by this name, given the models
