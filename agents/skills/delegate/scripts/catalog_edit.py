@@ -42,13 +42,15 @@ def _present_harnesses(present=None):
 
 
 def _cached_meters(meters=None):
-    """The Meter snapshot a preview ranks on: `meters` itself, a plain usage
-    document read through `Snapshot.of` (until ticket 18), or the cache as it is."""
+    """The Meter snapshot a preview ranks on: `meters` itself, or the cache as
+    it is. A plain usage document is refused, as rank refuses one: it carries
+    no usage-limit hold, so ranking it would skip any hold in force."""
     if meters is None:
         return usage.read(None, usage.CACHED)
-    if isinstance(meters, usage.Snapshot):
-        return meters
-    return usage.Snapshot.of(meters)
+    if not isinstance(meters, usage.Snapshot):
+        raise TypeError(f"edit_catalog takes a usage.Snapshot for meters, not {type(meters).__name__}; "
+                        "wrap a usage document with usage.Snapshot.of")
+    return meters
 
 
 def _loads_strict(content, path):
@@ -779,9 +781,9 @@ def edit_catalog(
 ):
     """Preview or apply one focused catalog edit. Public for setup reuse.
 
-    ``meters`` is a Meter snapshot (``usage.read``), or a plain usage document
-    read through ``usage.Snapshot.of``; omitted means the cache as it is,
-    ``usage.read(None, usage.CACHED)``.
+    ``meters`` is a Meter snapshot (``usage.read``, or ``usage.Snapshot.of``
+    for a document in memory), and anything else raises TypeError before any
+    write; omitted means the cache as it is, ``usage.read(None, usage.CACHED)``.
     ``present`` is the harness set; omitted means CLIs found on PATH.
     Applying requires ``expect`` equal to the current source revision.
     """

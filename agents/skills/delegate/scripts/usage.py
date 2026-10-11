@@ -19,15 +19,15 @@ this module builds the rows from them. Per Meter:
 Codex, agy, and grok probes are status/RPC commands. The Claude probe runs
 `claude -p /usage` and can spend the meter being measured.
 
-  usage.py            serve cache if younger than TTL, else re-probe
+  usage.py            serve the document if it is younger than ten minutes, else re-probe
   usage.py --refresh  force re-probe
-  usage.py --max-age-min N   override TTL (default 10)
+  usage.py --max-age-min N   the oldest a served document may be, in minutes (default 10)
   usage.py --cache PATH      the document to read and write (default cache_path())
   usage.py --pretty   one line per Meter, from its Readout, instead of JSON
 
 Cache: cache_path() — the explicit path, else $DELEGATE_CACHE, else
 $CONSULT_CACHE, else ~/.cache/delegate/usage.json. Absence of a CLI, auth
-failure, or a probe timeout marks that lane "unknown" — never a crash. Exit 0
+failure, or a probe timeout marks that Meter "unknown" — never a crash. Exit 0
 always. A probe writes nothing to the Ledger, which records Runs only.
 
 The Meters module (tickets 16 to 19): `read(routing, freshness, path=...)`
@@ -492,11 +492,15 @@ def _cached(path):
     return _snapshot(document, path=path, holds=_read_holds(path), now=time.time())
 
 
+def _young(taken_at, max_age_min):
+    """True when a reading taken at `taken_at` is no older than `max_age_min`
+    minutes (and not from the future): the one age rule for every read."""
+    return taken_at is not None and 0 <= time.time() - taken_at <= max_age_min * 60
+
+
 def _fresh_enough(snap, max_age_min):
     """True when `snap` is a reading no older than `max_age_min` minutes."""
-    if snap.status != "ok" or snap.taken_at is None:
-        return False
-    return 0 <= time.time() - snap.taken_at <= max_age_min * 60
+    return snap.status == "ok" and _young(snap.taken_at, max_age_min)
 
 
 def _probe(path):
@@ -593,9 +597,7 @@ def _young_document(path, max_age_min):
     if status != "ok" or not isinstance(d, dict) or "lanes" not in d:
         return None
     parsed = _parse(d)
-    if parsed is None or parsed[0] is None:
-        return None
-    return d if 0 <= time.time() - parsed[0] <= max_age_min * 60 else None
+    return d if parsed is not None and _young(parsed[0], max_age_min) else None
 
 
 def _write_document(d, p):
@@ -650,10 +652,10 @@ def main(argv=None):
     --refresh --cache PATH; `delegate status --json` runs it too."""
     args = sys.argv[1:] if argv is None else list(argv)
     refresh = "--refresh" in args; pretty = "--pretty" in args
-    ttl = _MAX_AGE_MIN
-    if "--max-age-min" in args: ttl = float(args[args.index("--max-age-min") + 1])
+    max_age = _MAX_AGE_MIN
+    if "--max-age-min" in args: max_age = float(args[args.index("--max-age-min") + 1])
     path = cache_path(args[args.index("--cache") + 1] if "--cache" in args else None)
-    d = None if refresh else _young_document(path, ttl)
+    d = None if refresh else _young_document(path, max_age)
     from_cache = d is not None
     if not from_cache:
         d = _probe_document(path)

@@ -33,7 +33,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decision B.3)
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-10-11. usage.py has the read side of the Meters module (`CACHED`, `read`, `Snapshot`, `Readout`, `hold`, `release`, `cache_path`), and rank, the dashboard and `catalog_edit` read each Meter through it, so a usage-limit hold reaches the dashboard and follows the document it overlays; test_usage cases 1 to 7, test_dashboard `test_a_held_meter_is_vetoed_and_its_release_reloads`, test_rank case 30, test_catalog 10.1c and test_dispatch 36 verify it. One box stays open for the lane's builder at the rebase onto run-and-relay: C's test_runs usage-limit case is not on this branch yet, so only the test_dispatch half of the held_until box is done.
+**Status:** landed 2026-10-11 (6cdbf3e). usage.py has the read side of the Meters module (`CACHED`, `read`, `Snapshot`, `Readout`, `hold`, `release`, `cache_path`), and rank, the dashboard and `catalog_edit` read each Meter through it, so a usage-limit hold reaches the dashboard and follows the document it overlays; test_usage cases 1 to 7, test_dashboard `test_a_held_meter_is_vetoed_and_its_release_reloads`, test_rank case 30, test_catalog 10.1c and test_dispatch 36 verify it. One box stays open for the lane's builder at the rebase onto run-and-relay: C's test_runs usage-limit case is not on this branch yet, so only the test_dispatch half of the held_until box is done.
 
 - [x] test_dashboard `test_a_held_meter_is_vetoed_and_its_release_reloads` fails on the code before this ticket (grok46-high@grok reads 90% and leads Tier 4) and passes: `usage.hold` beside the fixture cache makes the lane read 0% with reason `vetoed:gate`, and `usage.release` makes `refresh_if_changed()` return True with the lane leading again.
 - [x] test_usage "a hold lives beside the document it overlays" (dirs A, B, C; `DELEGATE_CACHE` at C) passes: `hold(path=A)` ends at A's weekly reset, only A reads 0%, `release(path=A)` lifts it; the same fixture through the old `usage.load_cached(A)` shows codex unheld.
@@ -45,6 +45,11 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decision B.3)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: `6cdbf3e`. The review of candidate B followed in "delegate-deepening B: review
+fixes", the next commit on this branch. It made `catalog_edit` refuse a plain usage
+document for `meters` with a TypeError, as rank does, so no caller ranks without the
+holds; test_catalog 10.1c checks the refusal.
 
 `usage.py` gained the read side of the Meters module. `read(routing, CACHED, path=...)`
 reads the document at `cache_path(path)` (the explicit path, else `$DELEGATE_CACHE`,

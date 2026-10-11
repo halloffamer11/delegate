@@ -27,7 +27,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decision B.1)
 
 **Blocked by:** 16 Every reader of the Meters sees a usage-limit hold, the dashboard included
 
-**Status:** landed 2026-10-11. Every display draws each Meter from its Readout, so a Model meter shows one Weekly figure everywhere, `delegate status` names each held Meter, and the deck draws only the Gate rank applies; `Snapshot.readout` takes `spend=`. test_report "statusline and popup print one weekly figure per Meter" and "status names a held Meter and when its hold ends", test_dashboard `test_meters_off_draws_no_meter_under_the_gate` and test_usage case 8 verify it. No box is left open.
+**Status:** landed 2026-10-11 (00b966e). Every display draws each Meter from its Readout, so a Model meter shows one Weekly figure everywhere, `delegate status` names each held Meter, and the deck draws only the Gate rank applies; `Snapshot.readout` takes `spend=`. test_report "statusline and popup print one weekly figure per Meter" and "status names a held Meter and when its hold ends", test_dashboard `test_meters_off_draws_no_meter_under_the_gate` and test_usage case 8 verify it. No box is left open.
 
 - [x] test_report "statusline and popup print one weekly figure per Meter" (fixture `pp_usage.json`: claude-fable `remaining_weekly` 0.46, `remaining_weekly_model` 0.59) fails on the code before this ticket (59% against 46%) and passes, with every Meter's statusline percentage equal to its popup "= W ÷ L" numerator.
 - [x] The check "statusline fable shows remaining_weekly_model" is replaced by "statusline fable shows its Weekly figure" (46%·4d), and the renamed-meter checks still pass.
@@ -41,6 +41,9 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decision B.1)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: `00b966e`. The review of candidate B followed in "delegate-deepening B: review
+fixes", the next commit on this branch.
 
 `usage.Snapshot.readout(meter, cat, spend=x)` answers what a Meter would read with x
 more of its week spent: the Weekly figure falls by x (never below 0), Remaining is the

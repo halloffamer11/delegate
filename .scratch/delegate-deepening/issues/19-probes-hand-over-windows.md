@@ -21,7 +21,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decision B.4)
 
 **Blocked by:** 18 A job reads the Meters once, by freshness, with no probed flag
 
-**Status:** landed 2026-10-11. Each adapter's probe hands back `harnesses.base.Windows` and imports no usage, and `usage.py` builds the rows from them, prints `--pretty` from Readouts and exposes only its interface, `MAX_PACE` included. test_harnesses "a probe hands back Windows without importing usage" and "no adapter imports usage", and test_usage 12 (`--pretty`), 13a and 13b (rows from Windows) and 14a and 14b (the public names and `MAX_PACE`) verify it. No box is left open.
+**Status:** landed 2026-10-11 (6b17a70). Each adapter's probe hands back `harnesses.base.Windows` and imports no usage, and `usage.py` builds the rows from them, prints `--pretty` from Readouts and exposes only its interface, `MAX_PACE` included. test_harnesses "a probe hands back Windows without importing usage" and "no adapter imports usage", and test_usage 12 (`--pretty`), 13a and 13b (rows from Windows) and 14a and 14b (the public names and `MAX_PACE`) verify it. No box is left open.
 
 - [x] test_harnesses "a probe hands back Windows without importing usage" (a fake agy CLI on PATH printing the two-group `/usage` JSON, run in a subprocess) fails on the code before this ticket and passes: Windows named agy-gemini and agy-claude-gpt, and `usage` absent from `sys.modules`.
 - [x] test_usage "usage.py --pretty prints one line per Meter" (a fresh cache with rows in the current shape, `--max-age-min 60`) fails on the code before this ticket with `KeyError: 'lane'` and passes.
@@ -31,6 +31,10 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decision B.4)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: `6b17a70`. The review of candidate B followed in "delegate-deepening B: review
+fixes", the next commit on this branch. It replaced the TTL wording in `usage.py`'s
+usage text with the age in minutes.
 
 `harnesses/base.py` has the harness port:
 - `Windows`, a NamedTuple of meter, group, five_h, weekly, reset_5h, reset_weekly, note

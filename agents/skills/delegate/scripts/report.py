@@ -1002,7 +1002,7 @@ def main():
 
     lim = sub.add_parser("limits", parents=[cfg], help="the Current limits table")
     lim.add_argument("--refresh", action="store_true", help="force a re-probe")
-    lim.add_argument("--max-age-min", type=float, help="cache TTL override")
+    lim.add_argument("--max-age-min", type=float, help="the age in minutes a reading may reach before it is probed again (default 10)")
     lim.add_argument("--eligible", action="store_true", help="drop meters rank.py would skip")
     lim.add_argument("--all", action="store_true", help="include meters no lane can spend")
     lim.set_defaults(fn=cmd_limits)

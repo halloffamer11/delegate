@@ -1447,7 +1447,8 @@ with tempfile.TemporaryDirectory() as td:
     )
 
     # Ticket 16: `meters` takes a Meter snapshot, which carries the usage-limit
-    # hold beside the document it read; a plain document carries none.
+    # hold beside the document it read. A plain document carries none, so it
+    # is refused, as rank refuses one, rather than ranked without the hold.
     meters_path = os.path.join(td, "usage.json")
     with open(meters_path, "w", encoding="utf-8") as f:
         json.dump({"probed_at": time.time(), "lanes": [
@@ -1461,26 +1462,31 @@ with tempfile.TemporaryDirectory() as td:
         "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
         config_dir=cfg, present=present, meters=snap,
     )
-    plain = catalog_edit.edit_catalog(
-        "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
-        config_dir=cfg, present=present, meters=plain_doc,
-    )
+    try:
+        catalog_edit.edit_catalog(
+            "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
+            config_dir=cfg, present=present, meters=plain_doc,
+        )
+        plain = "accepted"
+    except TypeError as e:
+        plain = str(e)
     held_picks, held_leaders = expected_picks_leaders(repo, cfg, meters=snap)
     invalid = catalog_edit.edit_catalog(
         "set", field="routing.margin", value=0.3, scope="global", cwd=repo,
         config_dir=cfg, present=present, meters=usage.Snapshot.of({"lanes": []}),
     )
     record(
-        "10.1c edit_catalog ranks on a Meter snapshot, hold included, and names the Meters it has no reading for",
+        "10.1c edit_catalog ranks on a Meter snapshot, hold included, refuses a plain document, "
+        "and names the Meters it has no reading for",
         held["picks"]["before"] == held_picks
         and held["leaders"]["before"] == held_leaders
         and held_leaders[1]["leader"] == "terra-high@codex"
-        and plain["leaders"]["before"][1]["leader"] == "grok46-high@grok"
+        and "usage.Snapshot" in plain
         and held["observations"] == "cached"
         and held["missing_observations"] == ["agy-gemini", "claude-fable", "claude-general"]
         and invalid["observations"] == "invalid"
         and set(invalid["missing_observations"]) == set(lanes_sample["meters"]),
-        repr((held["leaders"]["before"], plain["leaders"]["before"], held["observations"],
+        repr((held["leaders"]["before"], plain, held["observations"],
               held["missing_observations"], invalid["observations"])),
     )
 
@@ -2043,9 +2049,9 @@ with tempfile.TemporaryDirectory() as td:
             item.pop("order", None)
     catalog.write_json(path, doc)
     preview = catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
-        field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES)
+        field=f"lanes.{moving}.tier", value=dest, meters=EMPTY_METERS, present=ALL_HARNESSES)
     catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
-        field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES,
+        field=f"lanes.{moving}.tier", value=dest, meters=EMPTY_METERS, present=ALL_HARNESSES,
         apply=True, expect=preview["revision"])
     after = catalog.load_json(path)["lanes"]
     record("10.11 Tier move follows unordered destination Lanes",
@@ -2054,7 +2060,7 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     cfg, repo, _ = make_edit_fixture(td)
     preview = catalog_edit.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
-        field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+        field="routing.gate", value=0.2, meters=EMPTY_METERS, present=ALL_HARNESSES)
     original_preview = catalog_edit._rank_preview
     path = os.path.join(cfg, "routing.json")
     def intervening_write(*args):
@@ -2065,7 +2071,7 @@ with tempfile.TemporaryDirectory() as td:
     catalog_edit._rank_preview = intervening_write
     try:
         msg = check_catalog_error(lambda: catalog_edit.edit_catalog("set", scope="global",
-            cwd=repo, config_dir=cfg, field="routing.gate", value=0.2, meters={},
+            cwd=repo, config_dir=cfg, field="routing.gate", value=0.2, meters=EMPTY_METERS,
             present=ALL_HARNESSES, apply=True, expect=preview["revision"]))
     finally:
         catalog_edit._rank_preview = original_preview
@@ -2081,7 +2087,7 @@ with tempfile.TemporaryDirectory() as td:
     with open(path, "w") as f:
         f.write("null\n")
     msg = check_catalog_error(catalog_edit.edit_catalog, "set", scope="project", cwd=repo,
-        config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+        config_dir=cfg, field="routing.gate", value=0.2, meters=EMPTY_METERS, present=ALL_HARNESSES)
     record("10.13 Present null project is invalid, not an absent overlay",
         msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
 # 11. routing.meters: validators, default on, project override, no-op absence.

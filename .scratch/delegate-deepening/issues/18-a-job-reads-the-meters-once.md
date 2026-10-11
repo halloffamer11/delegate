@@ -48,7 +48,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decisions B.2 and B.5)
 
 **Blocked by:** 16 Every reader of the Meters sees a usage-limit hold, the dashboard included; 17 Every display shows one weekly figure and one Gate per Meter
 
-**Status:** landed 2026-10-11. `usage.read` reads CACHED, FRESH or FORCED, and probes in the usage.py child with `--cache PATH` under one 180 s bound, writing nothing to the Ledger; `delegate run`, dispatch, `rank.py`, `report.py limits` and `evals.ping_lane` read the Meters through it, so a run probes once before its relay with no `probed` flag, and rank ranks a Snapshot over a map of Readouts. test_usage 9a to 11d, test_dispatch 34 to 34d and test_rank 31 verify it. No box is left open; moving the dispatch reads into the relayed work and the probe counting onto `OfflineWorld` waits for this lane's builder at the rebase onto run-and-relay.
+**Status:** landed 2026-10-11 (e775d2b). `usage.read` reads CACHED, FRESH or FORCED, and probes in the usage.py child with `--cache PATH` under one 180 s bound, writing nothing to the Ledger; `delegate run`, dispatch, `rank.py`, `report.py limits` and `evals.ping_lane` read the Meters through it, so a run probes once before its relay with no `probed` flag, and rank ranks a Snapshot over a map of Readouts. test_usage 9a to 11d, test_dispatch 34 to 34d and test_rank 31 verify it. No box is left open; moving the dispatch reads into the relayed work and the probe counting onto `OfflineWorld` waits for this lane's builder at the rebase onto run-and-relay.
 
 - [x] test_dispatch 34d "run --no-probe --dry-run writes no cache and starts no probe" (the offline world with the logging agy stub, no cache) fails on the code before this ticket (rank's acquisition probes) and passes.
 - [x] test_dispatch 34c is rewritten on the logging agy stub: one run probes once before its relay; a dispatch right after it probes only after its relay; a dispatch over a reading an hour old probes before and after.
@@ -61,6 +61,10 @@ Spec: `.scratch/delegate-deepening/spec.md` (B. Meters; decisions B.2 and B.5)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+Commit: `e775d2b`. The review of candidate B followed in "delegate-deepening B: review
+fixes", the next commit on this branch. It made `catalog_edit` take only a Snapshot for
+`meters` and gave `read` and the probe child one age rule (`usage._young`).
 
 `usage.read(routing, freshness, path=..., max_age_min=...)` takes CACHED, FRESH and
 FORCED. CACHED reads the document as it is. FRESH probes when the reading is older
@@ -129,8 +133,8 @@ Deviations:
   fallback accepts.
 - test_catalog's `EMPTY_METERS` is now `usage.Snapshot.of({})`, and every rank call
   in test_rank, test_catalog, test_evals and test_dashboard that passed a document now
-  wraps it with `usage.Snapshot.of`. `catalog_edit` still accepts a plain document for
-  `meters`, as ticket 16 left it.
+  wraps it with `usage.Snapshot.of`. `catalog_edit` still accepted a plain document for
+  `meters`, as ticket 16 left it, until the review made it refuse one.
 - `references/routing.md` says a run reads the Meters fresh and probes after it
   finishes, and `references/architecture.md` describes the freshness reads and rank's
   Readout map. `CONTEXT.md` is unchanged: its Freshness and Meter snapshot entries
