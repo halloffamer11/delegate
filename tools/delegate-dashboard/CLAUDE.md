@@ -94,7 +94,9 @@ though the canonical ranking result puts its Pick first. Each row's `order_sourc
 effective catalog: `p` marks project Order and `g` marks global Order or fallback. A
 fallback position can be derived, not literally stored. `project_tiers` is
 `catalog.project_tier_changes()`, `{lane: {from, to}}`, and each row's `tier_source` is
-`project` or `global` from it. A project Tier drops the Lane's global Order, so such a
+`project` or `global` from it. Each row's `gated` is its Meter's Readout's, the Gate rank
+applies: the deck's Remaining colour and the aid's "under the Gate" read it, so with
+metering off neither draws a veto (ticket 17). A project Tier drops the Lane's global Order, so such a
 row shows `—` in Ord and sorts after the placed Lanes in its new Tier.
 
 Project policy, project Lanes and global catalog watches compare file bytes; the Meter

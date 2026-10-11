@@ -34,11 +34,15 @@ it read (`usage.hold`, `usage.release`); `Snapshot.of(document)` reads an in-mem
 document, which carries no hold. `Snapshot.readout(meter, cat)` joins one Meter with a
 catalog: Remaining, Pace, the Weekly figure, `gated` (the Gate predicate: unknown
 Remaining never vetoes, Remaining equal to Gate passes, and nothing is gated with
-`routing.meters` off), `week_dollars` and `held_until`. `rank_range` reads every Meter
+`routing.meters` off), `week_dollars` and `held_until`; `readout(meter, cat, spend=x)`
+is the same Meter with x more of its week spent (the Weekly figure falls by x, Pace and
+`gated` follow, and a held Meter stays at 0). `rank_range` reads every Meter
 fact through it, wrapping a plain document with `Snapshot.of` until ticket 18; the
-dashboard and `catalog_edit` hand it a snapshot (ticket 16). `usage.load_cached()` /
-`rank.load_cached_usage()` and `usage.acquire()` remain the legacy readers until
-ticket 18. One validity rule serves both (`rank.meter_observations()` re-exports the
+dashboard and `catalog_edit` hand it a snapshot (ticket 16). The statusline, the
+popup's Meter rows, `report.py limits` and the deck's Gate draw each Meter's Readout,
+so every display shows one Weekly figure and one Gate per Meter (ticket 17).
+`usage.load_cached()` / `rank.load_cached_usage()` and `usage.acquire()` remain the
+legacy readers until ticket 18. One validity rule serves both (`rank.meter_observations()` re-exports the
 legacy view): valid envelope and legacy map formats keep their behavior; any malformed
 observation makes the whole document unknown. Envelope observations require a finite
 timestamp; raw Window/reset fields are validated before display. Every Meter

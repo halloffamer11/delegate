@@ -499,6 +499,8 @@ class DashboardModel:
                     "meter": row["meter"],
                     "remaining": row["r"],
                     "pace": row["pace"],
+                    # the Gate rank applies to this Meter, so off with metering off
+                    "gated": meters.readout(row["meter"], effective).gated,
                     "eligible": row["eligible"],
                     "reason": row["reason"],
                     "order": row["order"],

@@ -323,6 +323,50 @@ def case_cache_path():
            (default, consult, delegate, explicit))
 
 
+def case_spend_takes_quota_points_off_the_weekly_figure():
+    """readout(spend=x): what one Meter would read with x more of its week
+    spent, and every other figure following from it (ticket 17)."""
+    def close(a, b):
+        return a is not None and b is not None and abs(a - b) < 1e-9
+
+    cat = {"routing": {"gate": 0.35, "margin": 0.2}, "meters": {}}
+    snap = usage.Snapshot.of({"probed_at": time.time(), "lanes": [
+        row("codex", 0.8, 0.5, pace=1.0, cycle_left=0.5),
+        row("tight", 0.2, 0.6, pace=1.2, cycle_left=0.5)]})
+    before, spent = snap.readout("codex", cat), snap.readout("codex", cat, spend=0.2)
+    record("8a. spend falls the Weekly figure and Remaining by x, Pace follows and the Gate is asked again",
+           not before.gated and close(spent.weekly, 0.3) and close(spent.remaining, 0.3)
+           and close(spent.pace, 0.6) and spent.gated
+           and spent.five_h == 0.8 and spent.week_left == 0.5,
+           spent)
+    tight = snap.readout("tight", cat, spend=0.1)
+    record("8b. spend touches the weekly Window only: a lower 5h Window still binds Remaining",
+           close(tight.weekly, 0.5) and close(tight.remaining, 0.2) and close(tight.pace, 1.0),
+           tight)
+    over = snap.readout("codex", cat, spend=0.7)
+    record("8c. spending past the Weekly figure leaves nothing, never less",
+           over.weekly == 0.0 and over.remaining == 0.0 and over.pace == 0.0 and over.gated, over)
+    record("8d. spend=0 returns the reading itself, and a Meter with no reading stays unknown",
+           snap.readout("codex", cat, spend=0) == before
+           and snap.readout("absent", cat, spend=0.3).remaining is None)
+    raised = []
+    for bad in (-0.1, 1.5, float("nan"), True):
+        try:
+            snap.readout("codex", cat, spend=bad)
+        except ValueError:
+            raised.append(bad)
+    record("8e. a spend outside 0..1 raises ValueError", len(raised) == 4, raised)
+    with tempfile.TemporaryDirectory() as td:
+        cache = write_doc(os.path.join(td, "usage.json"),
+                          [row("codex", 0.8, 0.5, pace=1.0, cycle_left=0.5)])
+        usage.hold("codex", "limit", path=cache)
+        held = usage.read(None, usage.CACHED, path=cache).readout("codex", cat, spend=0.2)
+    record("8f. a held Meter stays at 0 whatever is spent",
+           held.weekly == 0.0 and held.remaining == 0.0 and held.pace == 0.0
+           and held.held_until is not None and held.gated,
+           held)
+
+
 def main():
     case_a_hold_lives_beside_the_document_it_overlays()
     case_a_usage_limit_hold_ends_at_the_reset_a_new_reset_a_finished_run_or_a_day()
@@ -331,6 +375,7 @@ def main():
     case_readout_invariants()
     case_signature_follows_what_ranks()
     case_cache_path()
+    case_spend_takes_quota_points_off_the_weekly_figure()
     sys.exit(1 if failures else 0)
 
 

@@ -421,10 +421,21 @@ class Snapshot:
         """The Meters with a reading, in document order."""
         return tuple(self._rows)
 
-    def readout(self, meter, cat) -> Readout:
+    def readout(self, meter, cat, *, spend=0.0) -> Readout:
         """One Meter joined with `cat`'s Gate, metering switch, Model meter
         flag and plan price. An unknown or None Meter reads unknown; `cat`
-        None has no Gate."""
+        None has no Gate.
+
+        `spend` asks what the Meter would read with that fraction more of its
+        week spent: the Weekly figure falls by it, never below 0; Remaining is
+        the lower of the 5h Window and that; Pace is that over the share of the
+        week left (unknown when that share is); and the Gate is asked again. A
+        held Meter stays at 0, and spend=0 is the reading itself. A spend
+        outside 0..1 raises ValueError.
+        """
+        if (isinstance(spend, bool) or not isinstance(spend, (int, float))
+                or not 0 <= spend <= 1):
+            raise ValueError(f"spend must be a fraction from 0 to 1, not {spend!r}")
         cat = cat if isinstance(cat, dict) else None
         meter_def = ((cat or {}).get("meters") or {}).get(meter) if meter else None
         meter_def = meter_def if isinstance(meter_def, dict) else {}
@@ -442,6 +453,11 @@ class Snapshot:
         if held_until is not None:
             remaining = pace = weekly = 0.0
             note = f"{note}; {_held_note(held_until)}" if note else _held_note(held_until)
+        elif spend and weekly is not None:
+            weekly = max(0.0, weekly - spend)
+            five_h, week_left = row.get("remaining_5h"), row.get("cycle_left")
+            remaining = weekly if five_h is None else min(five_h, weekly)
+            pace = weekly / week_left if week_left else None
         routing = (cat or {}).get("routing")
         routing = routing if isinstance(routing, dict) else {}
         gate = routing.get("gate")

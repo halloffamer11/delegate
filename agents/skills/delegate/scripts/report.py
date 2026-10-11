@@ -46,12 +46,9 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
-CACHE = usage.get_cache_path()
 # Flag file: while it exists, `statusline` prints no rows.
 SWITCH = os.environ.get("DELEGATE_STATUSLINE_SWITCH") or os.path.expanduser("~/.cache/delegate/statusline.off")
 VERDICTS = ("clean", "findings", "partial", "failed")
-DAYS_PER_MONTH = 30.4375
-WEEK_DAYS = 7
 INPUT_KEYS = ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens")
 OUTPUT_KEYS = ("output_tokens", "outputTokens", "completion_tokens", "completionTokens")
 CACHE_READ_KEYS = ("cache_read_input_tokens", "cachedInputTokens", "cached_tokens", "cache_read_tokens")
@@ -125,26 +122,26 @@ def models_by_meter(catalog):
     return out
 
 
-def model_cell(lane_row, by_meter):
+def model_cell(reading, by_meter):
     """What runs on this meter. Claude meters are this session, not a lane."""
-    slugs = by_meter.get(lane_row["lane"])
+    slugs = by_meter.get(reading.meter)
     if slugs:
         return ", ".join(sorted(set(slugs)))
-    m = lane_row.get("group") or "general"
+    m = reading.group or "general"
     return "this session (all models)" if m == "general" else f"this session ({m})"
 
 
-def ignored(lane_row, by_meter):
+def ignored(reading, by_meter):
     """A meter no lane can spend, on a harness no orchestrator runs in-process, is
     ignored on purpose — agy's Claude/GPT group after Opus was dropped. A harness
     an orchestrator profile runs natively keeps its Meters: the session itself
     spends them. Derived, not listed: add a lane on that meter to the catalog and
     it returns to the table."""
-    return (not by_meter.get(lane_row["lane"])
-            and lane_row["harness"] not in orchestrators.native_harnesses())
+    return (not by_meter.get(reading.meter)
+            and reading.harness not in orchestrators.native_harnesses())
 
 
-def unprobed_meters(catalog, obs_map):
+def unprobed_meters(catalog, readings):
     """Catalog Meters a lane spends that got no probe row, though their
     harness's probe read a figure for another Meter.
 
@@ -153,11 +150,11 @@ def unprobed_meters(catalog, obs_map):
     Gate off without a word. A harness whose probe read nothing (absent, failed,
     or with no usage source, as Kiro's) says so in its own row instead.
     """
-    read = {L.get("harness") for L in obs_map.values()
-            if isinstance(L, dict) and L.get("r") is not None}
+    read = {r.harness for r in readings if r.remaining is not None}
+    named = {r.meter for r in readings}
     spent = {lane.get("meter") for lane in catalog["lanes"].values()}
     return sorted(name for name, meter in catalog["meters"].items()
-                  if name in spent and name not in obs_map and meter.get("harness") in read)
+                  if name in spent and name not in named and meter.get("harness") in read)
 
 
 def usage_doc(refresh=False, max_age_min=None, routing=None):
@@ -168,59 +165,61 @@ def usage_doc(refresh=False, max_age_min=None, routing=None):
     return usage.acquire(refresh=refresh, max_age_min=max_age_min, timeout=180)
 
 
+def meter_snapshot(refresh=False, max_age_min=None, routing=None):
+    """The Meter snapshot the limits page reads, with the holds beside it.
+
+    `usage_doc` acquires the reading, which probes and writes the cache when
+    it is stale, until ticket 18 reads FRESH in one call; the snapshot is then
+    the cache that acquisition left. One that found nothing valid reads as no
+    Meters, as before.
+    """
+    if not usage_doc(refresh, max_age_min, routing=routing):
+        return usage.Snapshot.of({})
+    return usage.read(None, usage.CACHED)
+
+
 def month_cell(price_month):
     if isinstance(price_month, int) or price_month == int(price_month):
         return f"${int(price_month)}"
     return f"${price_month}"
 
 
-def plan_row(lane_row, meters):
-    """One Plan consumption row. Unknown meters dash the last two columns."""
-    name = lane_row["lane"]
+def plan_row(reading, meters):
+    """One Plan consumption row: the share of the week used times the Meter's
+    plan price per week. Unknown meters dash the last two columns."""
+    name = reading.meter
     meter = meters.get(name)
-    used = None if lane_row.get("remaining_weekly") is None else 1 - lane_row["remaining_weekly"]
+    used = None if reading.weekly is None else 1 - reading.weekly
     if not meter:
         return [name, "—", "—", "—", "—"]
-    if used is None:
+    if used is None or reading.week_dollars is None:
         return [name, meter["plan"], month_cell(meter["price_month"]), "—", "—"]
-    dollars = meter["price_month"] * (WEEK_DAYS / DAYS_PER_MONTH) * used
-    return [name, meter["plan"], month_cell(meter["price_month"]), pct(used), money(dollars)]
+    return [name, meter["plan"], month_cell(meter["price_month"]), pct(used),
+            money(reading.week_dollars * used)]
 
 
 def cmd_limits(a):
     catalog = load_catalog_or_die(a.config_dir)
     routing = catalog.get("routing", {})
     metering = meters_enabled(routing)
-    doc = usage_doc(a.refresh, a.max_age_min, routing=routing)
+    meters = meter_snapshot(a.refresh, a.max_age_min, routing=routing)
     gate = routing["gate"]
-    obs_map = usage.observations(doc) or {}
     by_meter = models_by_meter(catalog)
-    lanes = sorted((dict(L, lane=name, harness=L.get("harness"))
-                    for name, L in obs_map.items()),
-                   key=lambda L: (L.get("remaining_weekly") is None,
-                                  -(L.get("remaining_weekly") or 0)))
-    skipped = [L["lane"] for L in lanes if ignored(L, by_meter)]
-    shown = [L for L in lanes
-             if (a.all or not ignored(L, by_meter))
-             and (not a.eligible or not metering or usage.eligible(obs_map.get(L["lane"]), gate))]
-    rows = [[L["lane"], model_cell(L, by_meter), pct(L.get("remaining_weekly")),
-             pct(L.get("remaining_5h")), when(L.get("reset_weekly")), when(L.get("reset_5h"))]
-            for L in shown]
-    stamp = doc.get("probed_at")
-    age = int((time.time() - stamp) / 60) if isinstance(stamp, (int, float)) else None
+    readings = sorted((meters.readout(name, catalog) for name in meters.names()),
+                      key=lambda r: (r.weekly is None, -(r.weekly or 0)))
+    skipped = [r.meter for r in readings if ignored(r, by_meter)]
+    # `gated` is the Gate rank applies, so it is off with metering off
+    shown = [r for r in readings
+             if (a.all or not ignored(r, by_meter)) and not (a.eligible and r.gated)]
+    rows = [[r.meter, model_cell(r, by_meter), pct(r.weekly), pct(r.five_h),
+             when(r.reset_weekly), when(r.reset_5h)]
+            for r in shown]
+    stamp = meters.taken_at
+    age = int((time.time() - stamp) / 60) if stamp is not None else None
     print("**Current limits:**\n")
     print(md_table(["Lane", "Model", "Weekly", "5h", "Weekly reset", "5h reset"], rows))
-    plan_rows = []
-    seen = set()
-    for L in lanes:
-        name = L["lane"]
-        if name in seen:
-            continue
-        seen.add(name)
-        if name in catalog["meters"]:
-            plan_rows.append(plan_row(L, catalog["meters"]))
-        elif a.all or not ignored(L, by_meter):
-            plan_rows.append(plan_row(L, catalog["meters"]))
+    plan_rows = [plan_row(r, catalog["meters"]) for r in readings
+                 if r.meter in catalog["meters"] or a.all or not ignored(r, by_meter)]
     if plan_rows:
         print("\n**Plan consumption this cycle:**\n")
         print(md_table(
@@ -228,15 +227,17 @@ def cmd_limits(a):
             plan_rows,
         ))
         print("\nPlan $ used this cycle is the weekly slice of the monthly fee times the share used.")
-    unknown = [L["lane"] for L in shown if L.get("remaining_weekly") is not None
-               and not L.get("reset_weekly")]
+    unknown = [r.meter for r in shown if r.weekly is not None and not r.reset_weekly]
     if unknown:
         print(f"\nWeekly reset unread for: {', '.join(unknown)}.")
     if skipped and not a.all:
         print(f"\nIgnored, no lane spends them: {', '.join(skipped)}.")
-    unprobed = unprobed_meters(catalog, obs_map)
+    unprobed = unprobed_meters(catalog, readings)
     if unprobed:
         print(f"\nNo probe row for: {', '.join(unprobed)}; the Gate never vetoes their lanes.")
+    held = [f"{r.meter} until {when(r.held_until)}" for r in readings if r.held_until is not None]
+    if held:
+        print(f"\nUsage-limit hold: {', '.join(held)}.")
     gate_pct = f"{int(round(gate * 100))}%"
     age_label = f"{age} min ago" if age is not None else "at an unknown time"
     if metering:
@@ -597,28 +598,22 @@ def cmd_statusline(a):
     c = get_colors(no_color)
     catalog = load_catalog_or_die(a.config_dir)
 
-    cache_path = usage.get_cache_path()
-    if not os.path.exists(cache_path):
-        return
-    usage_doc = usage.load_cached(cache_path)
-    obs_map = usage.observations(usage_doc)
-    if obs_map is None:
-        return
-    if not isinstance(usage_doc, dict) or not isinstance(usage_doc.get("lanes"), list):
+    # A missing, unreadable or malformed cache prints no rows at all.
+    meters = usage.read(None, usage.CACHED)
+    if meters.status != "ok":
         return
 
     now = time.time()
     present = installed_harnesses()
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
-    gate_threshold = routing["gate"]
     metering = meters_enabled(routing)
 
     won_by_meter = {}
     picks = {}
     for cls in classes:
         try:
-            rows = rank(cls, catalog, usage_doc, present)
+            rows = rank(cls, catalog, meters, present)
         except Exception:
             continue
         if rows and rows[0].get("pick"):
@@ -664,7 +659,6 @@ def cmd_statusline(a):
         except Exception:
             return
 
-    by_meter = usage.observations(usage_doc) or {}
     all_meters = catalog.get("meters", {})
     catalog_order = list(all_meters.keys())
 
@@ -683,32 +677,23 @@ def cmd_statusline(a):
     for m_key in sorted_meters:
         m_def = all_meters.get(m_key, {})
         lbl = get_meter_label(m_key, m_def, all_meters)
-        u_row = by_meter.get(m_key, {})
-        rem5 = u_row.get("remaining_5h")
-        reset5 = u_row.get("reset_5h")
-        remw = u_row.get("remaining_weekly")
-        resetw = u_row.get("reset_weekly")
-        model_remw = u_row.get("remaining_weekly_model")
-        # A model Meter has a weekly Window of its own and shares its harness's
-        # 5h Window, so its row leaves 5h blank. The catalog says so; a probe row
-        # with a per-model weekly figure says so too.
-        shares5 = bool(m_def.get("model_meter")) or model_remw is not None
-        if model_remw is not None:
-            remw = model_remw
-
-        is_gated = metering and not usage.eligible(obs_map.get(m_key, u_row), gate_threshold)
+        # One Readout per Meter: its Weekly figure (for a Model meter the lower
+        # of its own week and its harness's), its 5h Window and the Gate.
+        reading = meters.readout(m_key, catalog)
 
         won_tiers = won_by_meter.get(m_key, set())
         badge_str = format_badge(won_tiers, c)
         label_str = format_label(lbl, won_tiers, c)
 
-        if shares5:
+        if reading.shares_five_h:
+            # a Model meter's 5h Window is its harness's, on that row
             five_str = " " * 15
         else:
-            five_str = f"{c['DIM']}5h{c['R']} {gauge(rem5, reset5, now, gated=False, c=c)}"
+            five_str = f"{c['DIM']}5h{c['R']} {gauge(reading.five_h, reading.reset_5h, now, gated=False, c=c)}"
 
-        gate_char = f"{c['RED']}{c['BOLD']}✗{c['R']}" if is_gated else ""
-        wk_str = f"{c['DIM']}wk{c['R']} {gauge(remw, resetw, now, gated=is_gated, c=c)}{gate_char}"
+        gate_char = f"{c['RED']}{c['BOLD']}✗{c['R']}" if reading.gated else ""
+        wk_str = (f"{c['DIM']}wk{c['R']} "
+                  f"{gauge(reading.weekly, reading.reset_weekly, now, gated=reading.gated, c=c)}{gate_char}")
 
         line = f"{pad(badge_str, 3)}{pad(label_str, 7)}{pad(five_str, 17)}{pad(wk_str, 17)}"
 
@@ -730,22 +715,22 @@ def cmd_statusline(a):
         # draw, and with no CLI on PATH no Tier has a lane, so those keep the
         # rows above and the plain lane block.
         width = a.width or shutil.get_terminal_size((118, 24)).columns
-        out_lines = popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now)
+        out_lines = popup_lines(catalog, meters, present, picks, won_by_meter, c, width, now)
     elif a.popup:
-        out_lines += lane_lines(catalog, usage_doc, present, picks, c)
+        out_lines += lane_lines(catalog, meters, present, picks, c)
 
     for l in out_lines:
         print(l)
 
 
-def lane_lines(catalog, usage_doc, present, picks, c):
+def lane_lines(catalog, meters, present, picks, c):
     """The popup's lane block: each Tier leader, then the Classes that pick it.
 
     A Class Pick that is not its Tier's leader gets its own line under that
     Tier, so every Class appears once.
     """
     try:
-        previews = tier_leaders(catalog, usage_doc, present)
+        previews = tier_leaders(catalog, meters, present)
     except Exception:
         return []
     by_lane = {}
@@ -786,7 +771,7 @@ def lane_lines(catalog, usage_doc, present, picks, c):
 # hands over. Everything reads the cached Meters at the moment of display: no
 # usage history and no burn rate (ADR 0001), so a distance is in quota points at
 # today's readings, never a time.
-POPUP_LEGEND = ("Pace = weekly Remaining ÷ share of the week left: 1 on track, above 1 spend it"
+POPUP_LEGEND = ("Pace = weekly figure ÷ share of the week left: 1 on track, above 1 spend it"
                 " · ┊ = the Pace that Meter needs to lead the Tier")
 POPUP_NUM_HEAD = "Pace = left ÷ time  5h      resets"
 POPUP_NUM_W = 36
@@ -811,8 +796,10 @@ def clip(s, w):
     return "".join(out)
 
 
-def popup_meters(catalog, by_meter, won_by_meter, now):
-    """One entry per Meter a Lane spends, in the statusline's order."""
+def popup_meters(catalog, meters, won_by_meter):
+    """One entry per Meter a Lane spends, in the statusline's order, each
+    from its Readout: the Weekly figure over the share of the week left at the
+    reading is the Pace it prints."""
     used = {l.get("meter") for l in catalog.get("lanes", {}).values() if l.get("enabled", True)}
     all_meters = catalog.get("meters", {})
     order = list(all_meters)
@@ -820,17 +807,13 @@ def popup_meters(catalog, by_meter, won_by_meter, now):
     for key in order:
         if key not in used:
             continue
-        row = by_meter.get(key) or {}
-        weekly = row.get("remaining_weekly")
-        reset = row.get("reset_weekly")
-        left = row.get("cycle_left")
-        if left is None and reset:
-            left = min(1.0, max(usage.CYCLE_FLOOR, (reset - now) / (WEEK_DAYS * 86400)))
-        shares5 = bool(all_meters[key].get("model_meter")) or row.get("remaining_weekly_model") is not None
+        reading = meters.readout(key, catalog)
+        own_5h = not reading.shares_five_h   # a Model meter's 5h is its harness's
         out.append({"key": key, "label": get_meter_label(key, all_meters[key], all_meters),
-                    "weekly": weekly, "left": left, "pace": row.get("pace"), "reset": reset,
-                    "f5": None if shares5 else row.get("remaining_5h"),
-                    "reset5": None if shares5 else row.get("reset_5h"),
+                    "weekly": reading.weekly, "left": reading.week_left, "pace": reading.pace,
+                    "reset": reading.reset_weekly,
+                    "f5": reading.five_h if own_5h else None,
+                    "reset5": reading.reset_5h if own_5h else None,
                     "won": won_by_meter.get(key, set())})
     out.sort(key=lambda m: (0 if m["won"] else 1, min(m["won"] or {99}), order.index(m["key"])))
     return out
@@ -914,14 +897,13 @@ def when_short(t):
     return time.strftime("%a %H:%M", time.localtime(t)) if t else "—"
 
 
-def popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now):
+def popup_lines(catalog, snapshot, present, picks, won_by_meter, c, width, now):
     routing = catalog.get("routing", {})
     margin, gate = routing["margin"], routing["gate"]
-    by_meter = usage.observations(usage_doc) or {}
-    meters = popup_meters(catalog, by_meter, won_by_meter, now)
+    meters = popup_meters(catalog, snapshot, won_by_meter)
     by_key = {m["key"]: m for m in meters}
     try:
-        previews = tier_leaders(catalog, usage_doc, present)
+        previews = tier_leaders(catalog, snapshot, present)
     except Exception:
         previews = []
 
@@ -931,7 +913,7 @@ def popup_lines(catalog, usage_doc, present, picks, won_by_meter, c, width, now)
               if r["lane"] == p["leader"] and r["pace"] is not None]
     top, x = pace_axis([m["pace"] for m in meters] + steals, axis_w)
 
-    age = dur_short(now, usage_doc.get("probed_at") or now) or "0m"
+    age = dur_short(now, snapshot.taken_at or now) or "0m"
     lines = [f"{c['BOLD']}delegate usage{c['R']}  {c['DIM']}read {age} ago · Margin {margin:.2f} · "
              f"Gate {gate:.0%}{c['R']}",
              f"{c['DIM']}{POPUP_LEGEND}{c['R']}",

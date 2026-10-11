@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """test_report.py — report.py renders both tables and round-trips the run ledger.
 No probe, no network: limits reads a fixture usage doc through DELEGATE_CACHE."""
-import json, os, shutil, subprocess, sys, tempfile, time
+import json, os, re, shutil, subprocess, sys, tempfile, time
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +15,8 @@ os.chdir(_ISOLATED_CWD.name)
 SKILL = os.path.dirname(HERE)
 REPORT = os.path.abspath(os.path.join(SKILL, "scripts", "report.py"))
 SAMPLES = os.path.abspath(os.path.join(SKILL, "assets", "samples"))
+sys.path.insert(0, os.path.join(SKILL, "scripts"))
+import usage  # noqa: E402
 fails = []
 
 
@@ -148,6 +151,20 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out, _ = run(["limits", "--max-age-min", "600"] + cfg, {**env, "DELEGATE_CACHE": renamed_cache})
     check("a catalog Meter with no probe row is named, beside a harness that did read",
           "No probe row for: claude-fable; the Gate never vetoes their lanes." in out, out)
+
+    # A Meter its harness refused for a usage limit reads 0% until its hold
+    # ends, and the limits page names it and when that is (ticket 17). The
+    # hold lives beside the cache it overlays, so this cache has its own folder.
+    held_cache = os.path.join(tmp, "held", "usage.json")
+    os.makedirs(os.path.dirname(held_cache))
+    shutil.copy(cache, held_cache)
+    until = usage.hold("grok", "You've reached your free Grok Build usage limit", path=held_cache)
+    rc, out, err = run(["limits", "--max-age-min", "600"] + cfg, {**env, "DELEGATE_CACHE": held_cache})
+    grok_row = next((cells(l) for l in out.splitlines() if l.startswith("| grok ")), [])
+    stamp = datetime.fromtimestamp(until).strftime("%b %-d %H:%M")
+    check("status names a held Meter and when its hold ends",
+          rc == 0 and f"Usage-limit hold: grok until {stamp} (1d)." in out
+          and grok_row[2:3] == ["0%"], out + err)
 
     rc, out, _ = run(["runs"] + cfg, env)
     check("empty ledger says so", "No runs logged yet." in out, out)
@@ -316,7 +333,6 @@ with tempfile.TemporaryDirectory() as tmp:
     check("missing catalog does not print the limits table", "**Current limits:**" not in out, out)
 
     # statusline tests
-    from datetime import datetime
     sl_cache = os.path.join(tmp, "sl_usage.json")
     sl_now = time.time()
     with open(sl_cache, "w") as f:
@@ -373,7 +389,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("statusline fable leaves 5h blank", "fable                   wk" in sl_lines[2], sl_lines[2])
     check("statusline unbadged rows start with a placeholder, never a space",
           all(l.startswith("·  ") for l in sl_lines[2:]), out)
-    check("statusline fable shows remaining_weekly_model", "59%·4d" in sl_lines[2], sl_lines[2])
+    # A Model meter shows its Weekly figure: the lower of the model's own week
+    # (59%) and its harness's week for all models (46%), as every display does.
+    check("statusline fable shows its Weekly figure", "46%·4d" in sl_lines[2], sl_lines[2])
     check("statusline codex carries ✗ when gated", "8%·3d✗" in sl_lines[4], sl_lines[4])
     check("statusline running agent shows tier glyph on agy", sl_lines[0].endswith("①"), sl_lines[0])
     check("statusline stale start not in running", not any("③" in l.split("wk")[-1] for l in sl_lines), out)
@@ -463,7 +481,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("statusline --popup fits 118 columns and the popup's height",
           all(len(l) <= 118 for l in pp) and len(pp) <= 24, f"{len(pp)} lines, widest {max(map(len, pp))}")
     check("statusline --popup defines Pace before using it",
-          pp[1].startswith("Pace = weekly Remaining ÷ share of the week left"), out_pp)
+          pp[1].startswith("Pace = weekly figure ÷ share of the week left"), out_pp)
     agy_row = next((l for l in pp if l.startswith("①  agy")), "")
     check("statusline --popup writes each Meter's Pace as its calculation",
           "= 68% ÷ 71%" in agy_row and "0.95" in agy_row, agy_row)
@@ -476,6 +494,24 @@ with tempfile.TemporaryDirectory() as tmp:
           any("luna-low" in l and "needs 0.96 (+0.26)" in l for l in pp), out_pp)
     check("statusline --popup names every Class once",
           all(" ".join(pp).split().count(k) == 1 for k in ("scout", "mechanical", "impl")), out_pp)
+    # The statusline and the popup read one Readout per Meter, so the weekly
+    # cell and the popup's "= W ÷ L" numerator are one figure (ticket 17).
+    rc, out_ppsl, err_ppsl = run(["statusline", "--no-color", "--no-running"] + cfg,
+                                 dict(sl_env, DELEGATE_CACHE=pp_cache))
+    sl_weekly = {}
+    for l in out_ppsl.splitlines():
+        m = re.search(r"wk\s+\S+\s+(\d+)%", l)
+        if m and len(l.split()) > 1:
+            sl_weekly[l.split()[1]] = m.group(1)
+    pp_weekly = {}
+    for l in pp:
+        m = re.search(r"= (\d+)% ÷ (\d+)%", l)
+        if m and len(l.split()) > 1:
+            pp_weekly[l.split()[1]] = m.group(1)
+    check("statusline and popup print one weekly figure per Meter",
+          rc == 0 and len(pp_weekly) == 4 and sl_weekly.get("fable") == "46"
+          and all(sl_weekly.get(k) == v for k, v in pp_weekly.items()),
+          f"statusline {sl_weekly} popup {pp_weekly}\n{out_ppsl}{err_ppsl}")
     rc, out_np, _ = run(["statusline", "--no-color", "--popup"] + cfg,
                         dict(sw_env, PATH=os.path.join(tmp, "no-bin")))
     check("statusline --popup names a missing PATH, not four empty Tiers",
@@ -489,6 +525,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("statusline prints rows again after toggle", len([l for l in out_sw.splitlines() if l.strip()]) == 5, out_sw)
     rc, out_on, _ = run(["statusline", "on"] + cfg, sw_env)
     check("statusline on is idempotent", rc == 0 and out_on.strip() == "delegate rows on", out_on)
+    # The dotfiles statusline script, the Herdr popup and Hammerspoon run these
+    # three invocations, so each still exits 0 with output (ticket 17).
+    cli_env = dict(sl_env, DELEGATE_STATUSLINE_SWITCH=os.path.join(tmp, "sl_cli", "statusline.off"))
+    cli_runs = [run(args + cfg, cli_env)
+                for args in (["statusline"], ["statusline", "--popup"], ["statusline", "toggle"])]
+    check("the statusline CLI still exits 0 with output: statusline, --popup and toggle",
+          all(rc == 0 and out.strip() for rc, out, _ in cli_runs), repr(cli_runs))
 
     rc, out_badcat, err_badcat = run(["statusline", "--config-dir", missing], sl_env)
     check("statusline with missing catalog exits 1", rc == 1, err_badcat)
@@ -623,7 +666,6 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # The popup replays rank's choice: across Order a rival needs the leader's Pace
 # plus the Margin, and the handover point follows from it (ticket 40).
-sys.path.insert(0, os.path.join(SKILL, "scripts"))
 import report  # noqa: E402
 
 

@@ -457,14 +457,18 @@ def status_icon(row: dict[str, Any]) -> tuple[str, str]:
 
 
 def remaining_color(row: dict[str, Any], state: dict[str, Any]) -> str:
-    """Colour Remaining by what the Gate does with it, not by how large it is."""
+    """Colour Remaining by what the Gate does with it, not by how large it is.
+
+    The veto colour is the row's `gated`, the Gate rank applies, which the
+    model takes from the Meter's Readout: never with metering off.
+    """
     remaining = row.get("remaining")
     if remaining is None:
         return PAL["mute"]
+    if row.get("gated"):
+        return PAL["veto"]
     gate = ((state.get("policy") or {}).get("gate") or {}).get("value") or 0.0
     pace = row.get("pace")
-    if remaining < gate:
-        return PAL["veto"]
     if remaining < 2 * gate or (pace is not None and pace < 0.5):
         return PAL["watch"]
     return PAL["ok"]
@@ -905,6 +909,7 @@ def meter_rows(state):
                     "harness": str(row.get("harness") or ""),
                     "remaining": row.get("remaining"),
                     "pace": row.get("pace"),
+                    "gated": row.get("gated"),
                     "lanes": [],
                 }
             entry["lanes"].append(dict(row, _tier=tier.get("tier")))
@@ -938,13 +943,15 @@ def steal_thresholds(state):
 
 def meter_verdict(entry, state, thresholds):
     """What the Gate and the Margin do to this Meter, in one phrase each."""
-    gate = ((state.get("policy") or {}).get("gate") or {}).get("value") or 0.0
+    meters_on = ((state.get("policy") or {}).get("meters") or {}).get("value") is not False
     remaining = entry["remaining"]
     if remaining is None:
         rem_text, rem_color = "no Meter reading", PAL["mute"]
-    elif float(remaining) < float(gate):
-        # rank.py vetoes through usage.eligible: Remaining equal to Gate passes.
+    elif entry.get("gated"):
+        # the Gate rank applies, from the Meter's Readout
         rem_text, rem_color = "under the Gate", PAL["veto"]
+    elif not meters_on:
+        rem_text, rem_color = "Gate inactive", PAL["mute"]
     else:
         rem_text, rem_color = "over the Gate", PAL["ok"]
 

@@ -172,7 +172,7 @@ class DashboardModelTest(ProjectFixture):
         row = state["tiers"][1]["rows"][0]
         self.assertEqual(
             set(row),
-            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order", "order_source", "tier_source", "staged"},
+            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "gated", "eligible", "reason", "order", "order_source", "tier_source", "staged"},
         )
         self.assertEqual(state["usage"]["label"], "Global subscription usage")
 
@@ -917,6 +917,32 @@ class DashboardModelTest(ProjectFixture):
                 self.assertNotIn("vetoed:gate", terra["reason"])
                 self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
                 self.assertEqual(dashboard.state["tiers"][1]["leader"], previews[1]["leader"])
+
+    def test_meters_off_draws_no_meter_under_the_gate(self):
+        # Ticket 17: the deck draws the Gate rank applies, each row's `gated`
+        # from the Meter's Readout, so with metering off no Meter is drawn
+        # under the Gate or in the veto colour, whatever its Remaining.
+        self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.8)
+
+        def codex_a(state):
+            entry = next(e for e in deck.meter_rows(state) if e["meter"] == "codex-a")
+            return entry, deck.meter_verdict(entry, state, deck.steal_thresholds(state))
+
+        state = self.make_model().state
+        entry, verdict = codex_a(state)
+        self.assertEqual(verdict[0], "under the Gate")
+        self.assertEqual(deck.remaining_color(entry, state), deck.PAL["veto"])
+
+        routing = json.loads((self.config / "routing.json").read_text())
+        routing["meters"] = False
+        write_json(self.config / "routing.json", routing)
+        state = self.make_model().state
+        entry, verdict = codex_a(state)
+        self.assertEqual(entry["remaining"], 0.05)
+        self.assertNotIn("under the Gate", verdict[0])
+        self.assertNotEqual(deck.remaining_color(entry, state), deck.PAL["veto"])
+        terra = next(row for row in state["tiers"][1]["rows"] if row["lane"] == "terra-high@codex")
+        self.assertNotEqual(deck.remaining_color(terra, state), deck.PAL["veto"])
 
     def test_intervening_edit_mark_matches_catalog_message(self):
         source = inspect.getsource(catalog_edit)
