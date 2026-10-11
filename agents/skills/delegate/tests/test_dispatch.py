@@ -26,9 +26,6 @@ DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
 COURIER_MD = os.path.join(HERE, "..", "assets", "orchestrators", "claude", "courier.md")
-# Relay output copied from real runs, trimmed of paths and signatures. Each
-# directory is a run directory as the relay leaves it, before map_result.
-RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
 
 sys.path.insert(0, DELEGATE_DIR)
 import harnesses  # noqa: E402
@@ -296,131 +293,6 @@ def main():
         record("1. completed done block", ok1, f"rc={res1.returncode} stdout={res1.stdout} stderr={res1.stderr}")
 
         # -------------------------------------------------------------
-        # 2a. Completed with partial block
-        # -------------------------------------------------------------
-        partial_final = make_final("partial_final.json", json.dumps({
-            "status": "partial",
-            "deliverable": "partially done",
-            "evidence": [],
-            "open_questions": ["what about edge cases?"],
-            "changed_files": []
-        }))
-        b2a = make_brief("b2a.md", f"fake-relay: status=completed final={partial_final}\nBrief.")
-        res2a = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b2a, "--cwd", cwd])
-        run_dir2a = parse_run_dir_from_stdout(res2a.stdout)
-        ret2a = json.load(open(os.path.join(run_dir2a, "return.json"))) if run_dir2a else {}
-        ok2a = (res2a.returncode == 0 and ret2a.get("status") == "partial" and ret2a.get("deliverable") == "partially done")
-        record("2a. completed partial block", ok2a, f"rc={res2a.returncode}")
-
-        # -------------------------------------------------------------
-        # 2b. Completed with prose and no block -> partial with open question
-        # -------------------------------------------------------------
-        prose_lines = "\n".join([f"Line {i} of prose without json block" for i in range(70)])
-        prose_final = make_final("prose_final.txt", prose_lines)
-        b2b = make_brief("b2b.md", f"fake-relay: status=completed final={prose_final}\nBrief.")
-        res2b = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b2b, "--cwd", cwd])
-        run_dir2b = parse_run_dir_from_stdout(res2b.stdout)
-        ret2b = json.load(open(os.path.join(run_dir2b, "return.json"))) if run_dir2b else {}
-        ok2b = (
-            res2b.returncode == 0 and
-            ret2b.get("status") == "partial" and
-            len(ret2b.get("deliverable", "").splitlines()) == 60 and
-            "no return block in final message" in ret2b.get("open_questions", [])
-        )
-        record("2b. completed prose no block", ok2b, f"rc={res2b.returncode} oq={ret2b.get('open_questions')}")
-
-        # -------------------------------------------------------------
-        # 2c. Completed with empty final -> blocked, exit 1
-        # -------------------------------------------------------------
-        b2c = make_brief("b2c.md", "fake-relay: status=completed\nNo final file.")
-        res2c = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b2c, "--cwd", cwd])
-        run_dir2c = parse_run_dir_from_stdout(res2c.stdout)
-        ret2c = json.load(open(os.path.join(run_dir2c, "return.json"))) if run_dir2c else {}
-        disp2c = json.load(open(os.path.join(run_dir2c, "dispatch.json"))) if run_dir2c else {}
-        ok2c = (
-            res2c.returncode == 1 and
-            ret2c.get("status") == "blocked" and
-            disp2c.get("reason") == "empty final message" and
-            ret2c.get("deliverable") == "blocked: empty final message"
-        )
-        record("2c. completed empty final", ok2c, f"rc={res2c.returncode} ret={ret2c}")
-
-        # -------------------------------------------------------------
-        # 3. timeout with partial final.txt -> blocked, final.txt preserved
-        # -------------------------------------------------------------
-        part_txt = make_final("part_text.txt", "Partial progress text before timeout")
-        b3 = make_brief("b3.md", f"fake-relay: status=timeout final={part_txt} exit=1\nTimeout brief.")
-        res3 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b3, "--cwd", cwd])
-        run_dir3 = parse_run_dir_from_stdout(res3.stdout)
-        ret3 = json.load(open(os.path.join(run_dir3, "return.json"))) if run_dir3 else {}
-        final_txt_present = os.path.isfile(os.path.join(run_dir3, "final.txt")) if run_dir3 else False
-        ok3 = (
-            res3.returncode == 1 and
-            ret3.get("status") == "blocked" and
-            ret3.get("deliverable", "").startswith("blocked: timeout after 25m") and
-            final_txt_present
-        )
-        record("3. timeout with partial final.txt", ok3, f"rc={res3.returncode} deliv={ret3.get('deliverable')}")
-
-        # -------------------------------------------------------------
-        # 4. failed with error=boom, aborted, agy_unavailable
-        # -------------------------------------------------------------
-        b4_fail = make_brief("b4_fail.md", "fake-relay: status=failed error=boom exit=1\nBrief.")
-        res4_fail = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b4_fail, "--cwd", cwd])
-        run_dir4_fail = parse_run_dir_from_stdout(res4_fail.stdout)
-        ret4_fail = json.load(open(os.path.join(run_dir4_fail, "return.json"))) if run_dir4_fail else {}
-        ok4a = (res4_fail.returncode == 1 and ret4_fail.get("status") == "blocked" and ret4_fail.get("deliverable") == "blocked: boom")
-        record("4a. failed error=boom", ok4a, f"rc={res4_fail.returncode} ret={ret4_fail}")
-
-        b4_abort = make_brief("b4_abort.md", "fake-relay: status=aborted exit=1\nBrief.")
-        res4_abort = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b4_abort, "--cwd", cwd])
-        run_dir4_abort = parse_run_dir_from_stdout(res4_abort.stdout)
-        ret4_abort = json.load(open(os.path.join(run_dir4_abort, "return.json"))) if run_dir4_abort else {}
-        ok4b = (res4_abort.returncode == 1 and ret4_abort.get("status") == "blocked")
-        record("4b. aborted", ok4b, f"rc={res4_abort.returncode} ret={ret4_abort}")
-
-        b4_unavail = make_brief("b4_unavail.md", "fake-relay: status=agy_unavailable exit=127\nBrief.")
-        res4_unavail = run_dispatch(t_env, ["--lane", "flash-high@agy", "--class", "impl", "--brief", b4_unavail, "--cwd", cwd])
-        run_dir4_unavail = parse_run_dir_from_stdout(res4_unavail.stdout)
-        ret4_unavail = json.load(open(os.path.join(run_dir4_unavail, "return.json"))) if run_dir4_unavail else {}
-        disp4_unavail = json.load(open(os.path.join(run_dir4_unavail, "dispatch.json"))) if run_dir4_unavail else {}
-        ok4c = (
-            res4_unavail.returncode == 1 and
-            ret4_unavail.get("status") == "blocked" and
-            "unavailable" in disp4_unavail.get("reason", "")
-        )
-        record("4c. agy_unavailable", ok4c, f"rc={res4_unavail.returncode} reason={disp4_unavail.get('reason')}")
-
-        # -------------------------------------------------------------
-        # 5. agy empty reply: status failed, error "Antigravity returned no output"
-        # -------------------------------------------------------------
-        b5 = make_brief("b5.md", 'fake-relay: status=failed error="Antigravity returned no output" exit=1\nBrief.')
-        res5 = run_dispatch(t_env, ["--lane", "flash-high@agy", "--class", "impl", "--brief", b5, "--cwd", cwd])
-        run_dir5 = parse_run_dir_from_stdout(res5.stdout)
-        ret5 = json.load(open(os.path.join(run_dir5, "return.json"))) if run_dir5 else {}
-        ok5 = (
-            res5.returncode == 1 and
-            ret5.get("status") == "blocked" and
-            ret5.get("deliverable") == "blocked: Antigravity returned no output"
-        )
-        record("5. agy empty reply", ok5, f"rc={res5.returncode} ret={ret5}")
-
-        # -------------------------------------------------------------
-        # 6. status=none (no result file)
-        # -------------------------------------------------------------
-        b6 = make_brief("b6.md", "fake-relay: status=none exit=2\nBrief.")
-        res6 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b6, "--cwd", cwd])
-        run_dir6 = parse_run_dir_from_stdout(res6.stdout)
-        ret6 = json.load(open(os.path.join(run_dir6, "return.json"))) if run_dir6 else {}
-        disp6 = json.load(open(os.path.join(run_dir6, "dispatch.json"))) if run_dir6 else {}
-        ok6 = (
-            res6.returncode == 1 and
-            ret6.get("status") == "blocked" and
-            "no result" in disp6.get("reason", "")
-        )
-        record("6. status=none (no result file)", ok6, f"rc={res6.returncode} reason={disp6.get('reason')}")
-
-        # -------------------------------------------------------------
         # 7. Byte fidelity
         # -------------------------------------------------------------
         raw_brief_bytes = b"\tline with tab\n  trailing spaces   \n- dash bullet\nnon-ascii: \xe2\x98\x83 snowman\nfake-relay: status=completed\n"
@@ -601,8 +473,8 @@ def main():
 
         # -------------------------------------------------------------
         # 12d. node absent from PATH: ads.sh check refuses before the ledger
-        # records a start; and if node goes missing after the start, the run
-        # still finishes, with a blocked return.json that says why.
+        # records a start. A node that goes missing after the check is the Ads
+        # adapter's (test_relay a5): the Run still finishes, blocked, saying why.
         # -------------------------------------------------------------
         no_node_bin = os.path.join(tmpdir, "no_node_bin")
         os.makedirs(no_node_bin, exist_ok=True)
@@ -628,26 +500,6 @@ def main():
         )
         record("12d. ads.sh check reports a missing node before the ledger records a start", ok12d_check,
                f"rc={res12d.returncode} err={res12d.stderr}")
-
-        # 12e. node passes the check, then is gone when the relay starts: the
-        # relay work ends blocked and names node. In-process, with PATH lacking
-        # node; test_runs proves any blocked work still ends the Run.
-        dir12e = os.path.join(tmpdir, "run-12e")
-        os.makedirs(dir12e)
-        with open(os.path.join(dir12e, "prompt.md"), "w", encoding="utf-8") as f:
-            f.write("Brief 12e.\n")
-        path12e = os.environ.get("PATH", "")
-        os.environ["PATH"] = no_node_bin
-        try:
-            work12e = delegate.relay_work(harness="codex", model="gpt-5.6-terra", effort="high", timeout="25m",
-                                          child_cwd=cwd, write=None, ads_dir=t_env["ads_dir"], no_probe=True)
-            finish12e = work12e(runs.Run(dir12e))
-        except Exception as e:
-            finish12e = e
-        finally:
-            os.environ["PATH"] = path12e
-        record("12e. the relay work ends blocked naming node when node is gone after the check",
-               finish12e == runs.blocked("node is not on PATH; the relay needs Node.js"), repr(finish12e))
 
         # 12g. Inside a Seatbelt sandbox that refuses a nested one, a codex lane
         # is blocked before its relay runs and says why; a lane on a harness
@@ -723,20 +575,6 @@ def main():
                f"dispatch={disp12i} ledger={new12i} "
                f"result={dir12i and os.path.exists(os.path.join(dir12i, 'result.json'))}")
 
-
-        # -------------------------------------------------------------
-        # 13. readOnlyViolation true -> open_questions carries tripwire line
-        # -------------------------------------------------------------
-        b13 = make_brief("b13.md", f"fake-relay: status=completed final={done_final} violation=true\nBrief 13.")
-        res13 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b13, "--cwd", cwd])
-        run_dir13 = parse_run_dir_from_stdout(res13.stdout)
-        ret13 = json.load(open(os.path.join(run_dir13, "return.json"))) if run_dir13 else {}
-        ok13 = (
-            res13.returncode == 0 and
-            ret13.get("status") == "done" and
-            "read-only tripwire fired; review the diff" in ret13.get("open_questions", [])
-        )
-        record("13. readOnlyViolation tripwire", ok13, f"rc={res13.returncode} oq={ret13.get('open_questions')}")
 
         # -------------------------------------------------------------
         # 14. --model gpt-5.6-terra dispatches terra-high@codex
@@ -1039,66 +877,6 @@ def main():
                res27c.returncode == 2 and "harness 'grok' is not installed" in res27c.stderr
                and set(os.listdir(t_env["runs_dir"])) == runs_before27c,
                f"rc={res27c.returncode} err={res27c.stderr}")
-
-        # -------------------------------------------------------------
-        # 28. A tool cancelled at the permission gate is blocked, not partial
-        #     (ticket 14). Fixture: grok46-high@grok, 2026-09-09, read-only
-        #     under --permission-mode plan. The relay said completed and the
-        #     final message was one sentence of intent, so this used to come
-        #     back partial with "no return block in final message".
-        # -------------------------------------------------------------
-        def stage_run(fixture, name, keep_event=None, final_message=None):
-            run_dir = os.path.join(tmpdir, "map_result", name)
-            shutil.copytree(os.path.join(RUN_FIXTURES_DIR, fixture), run_dir)
-            if keep_event is not None:
-                events_path = os.path.join(run_dir, "events.jsonl")
-                with open(events_path, encoding="utf-8") as f:
-                    kept = [l for l in f if keep_event(json.loads(l))]
-                with open(events_path, "w", encoding="utf-8") as f:
-                    f.writelines(kept)
-            if final_message is not None:
-                result_path = os.path.join(run_dir, "result.json")
-                with open(result_path, encoding="utf-8") as f:
-                    res_doc = json.load(f)
-                res_doc["finalMessage"] = final_message
-                with open(result_path, "w", encoding="utf-8") as f:
-                    json.dump(res_doc, f)
-            return run_dir
-
-        gate_reason = "permission gate cancelled the run at run_terminal_command"
-
-        # map_result settles the relay's files into a Finish and writes nothing.
-        dir28a = stage_run("grok-gate-cancel", "28a")
-        files28a = sorted(os.listdir(dir28a))
-        out28a = delegate.map_result(dir28a, "40m", 0, None, "grok")
-        ok28a = (
-            isinstance(out28a, runs.Finish) and
-            out28a.returned["status"] == "blocked" and
-            out28a.reason == gate_reason and
-            out28a.returned["deliverable"] == f"blocked: {gate_reason}" and
-            out28a.relay_status == "completed" and out28a.relay_exit == 0 and
-            sorted(os.listdir(dir28a)) == files28a
-        )
-        record("28a. gate-cancelled tool call -> blocked naming the gate", ok28a, f"out={out28a}")
-
-        # The end event alone is not the gate: stopReason=cancelled with no
-        # cancelled tool call keeps the old reading.
-        dir28b = stage_run("grok-gate-cancel", "28b",
-                           keep_event=lambda ev: not (ev.get("type") == "tool_call_update" and ev.get("status") == "failed"))
-        out28b = delegate.map_result(dir28b, "40m", 0, None, "grok")
-        ok28b = (
-            isinstance(out28b, runs.Finish) and
-            out28b.returned["status"] == "partial" and
-            out28b.returned["open_questions"] == ["no return block in final message"]
-        )
-        record("28b. stopReason=cancelled without a cancelled tool stays partial", ok28b, f"out={out28b}")
-
-        # The gate is the better reason than an empty final message.
-        dir28c = stage_run("grok-gate-cancel", "28c", final_message="")
-        out28c = delegate.map_result(dir28c, "40m", 0, None, "grok")
-        ok28c = (isinstance(out28c, runs.Finish) and out28c.returned["status"] == "blocked" and
-                 out28c.reason == gate_reason)
-        record("28c. gate cancel with an empty final message names the gate", ok28c, f"out={out28c}")
 
         # -------------------------------------------------------------
         # Cases 29-31 need a claude lane inside the impl range. The sample keeps
@@ -1467,19 +1245,19 @@ def main():
         # 34c. one `run` acquires the Meters once before the relay: the rank's
         # acquisition serves the dispatch. `dispatch` alone still probes first.
         # Meters are on here (34b). Each usage.acquire call is logged with its
-        # refresh flag; the relay's stdout marks when the relay ran.
+        # refresh flag; the Ads adapter's launch marks when the relay ran.
         probe_log = os.path.join(tmpdir, "probes34c.log")
         count_probes = (
-            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate, usage\n"
+            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate, relays, usage\n"
             "def counted(*a, **k):\n"
             f"    open({probe_log!r}, 'a').write(('refresh' if k.get('refresh') else 'cached') + '\\n')\n"
             "    return {}\n"
             "usage.acquire = counted\n"
-            "real_relay = delegate.run_relay\n"
-            "def marked_relay(**kw):\n"
+            "real_launch = relays.Ads._launch\n"
+            "def marked_launch(self, job, run_dir):\n"
             f"    open({probe_log!r}, 'a').write('relay\\n')\n"
-            "    return real_relay(**kw)\n"
-            "delegate.run_relay = marked_relay\n"
+            "    return real_launch(self, job, run_dir)\n"
+            "relays.Ads._launch = marked_launch\n"
             "sys.exit(delegate.main())"
         )
 

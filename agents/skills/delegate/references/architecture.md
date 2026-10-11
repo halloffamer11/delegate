@@ -101,7 +101,8 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
 - `scripts/runs.py`: the Run module (ticket 24; delegate-deepening 01 to 04). `execute(request,
   prompt, work)` runs every Run from its start to its Outcome: the run directory, `prompt.md`,
   `dispatch.json` and the Ledger start, then the work, then `return.json`, the outcome, the
-  Usage-limit hold and the Ledger finish. Relayed work (`delegate.relay_work`) returns a `Finish`.
+  Usage-limit hold and the Ledger finish. Relayed work (`delegate.relay_work`) runs the relay through
+  `relays.Ads(ads_dir).run(job, run.path)`, which returns the `Finish`.
   A native Run ends as a hand-off: its work returns a `HandOff` (the agent and the spawn line), and
   the Run ends at once with status `native`, reason `handed to <agent>`, secs null, no
   `return.json` and the Meter left as it is; `report.py log --run` reads status `native` for it and
@@ -113,6 +114,17 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `dispatch.json` has not ended, within its Lane's timeout. It skips a Ledger line it cannot read
   and never raises, and `report.py statusline` counts its glyphs from it. Run directories under
   `~/.cache/delegate/runs/`, never reused.
+- `scripts/relays.py`: the Relay seam (delegate-deepening 05). `Relay.run(job, run_dir)` runs one
+  relayed `Job` and returns a `runs.Finish`; the module defines no outcome type of its own. The `Ads`
+  adapter alone knows node, the relay path, the argv (`--brief --cd --out-dir --model` plus
+  `Harness.run_args`) and env overrides, `relay.stdout` and `relay.stderr`, every `result.json` key,
+  the form of node's crash output (the `<Name>Error: ...` line, never the `Node.js v...` trailer)
+  and, through `Harness.blocked_reason`, `events.jsonl`. It returns a blocked `Finish` for every way
+  a relay fails (node missing at spawn, no `result.json`, one that does not parse or is not an
+  object) and catches only `OSError` and `ValueError`, so Ctrl-C and SIGTERM reach `runs.execute`.
+  Settling is the private pure `_settle(report, job)`: the status table in the module docstring,
+  the return-block scan, the caps and the read-only tripwire. `Scripted` is the in-process fake,
+  scripted with `Report`s, so `tests/test_relay.py` tests settling with no node.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is
@@ -368,8 +380,9 @@ down one Tier; Tier 1 requires Carry to switch off.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out
   of the relay's final message.
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in
-  for the relays. Each script first moves to a fresh temporary directory with no Git root above it,
-  so the invoking checkout's own `.delegate/routing.json` never reaches a test.
+  for the relays (its brief directive also crashes it with `crash=`, or replays a staged run
+  directory with `replay=`). Each script first moves to a fresh temporary directory with no Git
+  root above it, so the invoking checkout's own `.delegate/routing.json` never reaches a test.
 - `bin/delegate` at the repo root: the command the skill, council and the courier call (`delegate
   rank|run|dispatch|status|log|runs|cost|catalog|setup`). A user's harness constraint is `--harness
   <h>` on `rank` and `run`; it replaced the four `delegate-<harness>` wrapper skills.
@@ -386,8 +399,8 @@ kernel-enforced (Seatbelt/Landlock) and strictly stronger than the advisory plan
 tool auto-approval inside it (`--sandbox --dangerously-skip-permissions`), confining the run to its
 workspace. `--write` is no longer the workaround it was before 2026-09-10; do not reach for it to
 get agy's tools working. Note the ADS skill docs for agy still describe the old plan mode (ticket 14
-follow-up); the relay code is what runs. If a gate cancels a tool anyway, `map_result` returns
-`blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; the
+follow-up); the relay code is what runs. If a gate cancels a tool anyway, settling (`relays.py`)
+returns `blocked` with reason `permission gate cancelled the run at <tool>` rather than `partial`; the
 reason is the harness adapter's `blocked_reason`, which only grok's implements (fixture
 `tests/fixtures/dispatch/grok-gate-cancel/`).
 
@@ -406,8 +419,8 @@ unenforced, so delegate does not do it.
 ## Browser use per harness
 
 Browser use per harness, as proven on the Mac on 2026-09-12. **agy**: works, disposable browser,
-nothing to do. **codex**: works, through a home of delegate's own — `run_relay` sets `CODEX_HOME` to
-`~/.local/share/delegate/codex-home` when it exists and then drops `--ignore-user-config`, so the
+nothing to do. **codex**: works, through a home of delegate's own — the `Ads` adapter sets
+`CODEX_HOME` to `~/.local/share/delegate/codex-home` when it exists and then drops `--ignore-user-config`, so the
 worker reads one MCP server and nothing else in `~/.codex`; without that home a run keeps the old
 isolation and has no browser (`codex_home()`, ticket 03). **grok**: works on a write run only. Its
 built-in `read-only` sandbox kills every stdio MCP server on macOS, `context7` as well as

@@ -88,8 +88,40 @@ if (match) {
     for (let i = 0; i < 400 && !fs.existsSync(hMatch[1]); i++) Atomics.wait(tick, 0, 0, 50);
   }
 
-  const errMatch = directive.match(/\berror="([^"]+)"/) || directive.match(/\berror=([^\n\r]+?)(?=(\s+(?:status|final|exit|violation|hold)=|$))/);
+  const errMatch = directive.match(/\berror="([^"]+)"/) || directive.match(/\berror=([^\n\r]+?)(?=(\s+(?:status|final|exit|violation|hold|crash|replay)=|$))/);
   if (errMatch) errorText = errMatch[1].trim();
+
+  // crash=<message>: throw before result.json, as a relay that hits a bug
+  // does; node prints the error, its stack and its own version on stderr.
+  const cMatch = directive.match(/\bcrash=([^\n\r]+?)(?=(\s+(?:status|final|exit|violation|hold|error|replay)=|$))/);
+  if (cMatch) throw new Error(cMatch[1].trim());
+
+  // replay=<dir>: leave the relay files of a run directory, as a real relay
+  // left them, in --out-dir: result.json, events.jsonl and final.txt are
+  // copied, and its relay.stdout and relay.stderr are written to this
+  // process's own. Exits with exit=<n>, else the exitCode result.json holds,
+  // else 0.
+  const rMatch = directive.match(/\breplay=(\S+)/);
+  if (rMatch) {
+    const from = rMatch[1];
+    for (const name of ["result.json", "events.jsonl", "final.txt"]) {
+      const src = path.join(from, name);
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(outDir, name));
+    }
+    for (const [name, fd] of [["relay.stdout", 1], ["relay.stderr", 2]]) {
+      const src = path.join(from, name);
+      if (fs.existsSync(src)) fs.writeSync(fd, fs.readFileSync(src));
+    }
+    let replayed = null;
+    try {
+      replayed = JSON.parse(fs.readFileSync(path.join(from, "result.json"), "utf8"));
+    } catch {
+      replayed = null;
+    }
+    const code = exitCode !== null ? exitCode
+      : (replayed && Number.isInteger(replayed.exitCode) ? replayed.exitCode : 0);
+    process.exit(code);
+  }
 }
 
 if (status === "none") {

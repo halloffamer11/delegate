@@ -11,21 +11,11 @@ Run: `runs.execute` runs every Run from its start to its Outcome
 (dispatch.json, prompt.md, return.json, the Ledger, the Meter hold and the
 finish line); runs.py is the Ledger's one writer. Dispatch supplies only the
 work: `relay_work`, or for a native Lane a `runs.HandOff` to the
-orchestrator's agent, which ends the Run at once as native. The relay adds
-relay.stdout, relay.stderr, result.json, brief.txt, final.txt and
-events.jsonl.
-
-Status mapping:
-  completed:
-    - with return block (status in done, partial, blocked) -> block status
-    - without block, a tool cancelled at the permission gate
-      (events.jsonl)                                       -> blocked (reason: permission gate cancelled the run at <tool>)
-    - without block and non-empty finalMessage             -> partial (open_question added)
-    - with empty finalMessage                              -> blocked (reason: empty final message)
-  timeout                                                  -> blocked (reason: timeout after <timeout>)
-  failed / aborted / *_unavailable                         -> blocked (reason: error / stderrTail / relay status)
-  missing result.json                                      -> blocked (reason: relay wrote no result)
-  readOnlyViolation on read-only run                       -> appends tripwire notice to open_questions
+orchestrator's agent, which ends the Run at once as native. The relayed work
+runs the relay through `relays.Ads(ads_dir).run(job, run.path)`: relays.py
+runs it and settles what it said into the `runs.Finish` the Run records (its
+docstring holds the status table). The relay adds relay.stdout,
+relay.stderr, result.json, brief.txt, final.txt and events.jsonl.
 
 CLI:
   python3 delegate.py dispatch (--lane <name> | --model <slug>) [--class <c>] --brief <path> --cwd <dir>
@@ -45,7 +35,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -56,56 +45,13 @@ import harnesses
 import model_queue
 import orchestrators
 import rank
+import relays
 import runs
 import usage
 
 # No orchestrator is assumed. A Lane runs in-process only when the orchestrator
 # profile for this run says its harness can (orchestrators.py); otherwise, and
 # for every unknown orchestrator, it is relayed.
-
-
-def find_return_block(text, max_candidates=200):
-    """Last JSON object in text that parses and carries a status of done, partial,
-    or blocked. Scans from the end; bounded so a brace-heavy final message cannot
-    turn the scan quadratic."""
-    if not text:
-        return None
-    r_indices = [i for i, c in enumerate(text) if c == "}"][-max_candidates:]
-    for end_idx in reversed(r_indices):
-        # 1. Balanced depth scan from end_idx backwards
-        depth = 0
-        candidate_start = None
-        for i in range(end_idx, -1, -1):
-            if text[i] == "}":
-                depth += 1
-            elif text[i] == "{":
-                depth -= 1
-                if depth == 0:
-                    candidate_start = i
-                    break
-        if candidate_start is not None:
-            candidate = text[candidate_start:end_idx + 1]
-            try:
-                obj = json.loads(candidate)
-                if isinstance(obj, dict) and obj.get("status") in ("done", "partial", "blocked"):
-                    return obj
-            except Exception:
-                pass
-
-        # 2. Check candidate starts before end_idx in reverse
-        c_starts = [i for i, c in enumerate(text[:end_idx]) if c == "{"][-max_candidates:]
-        for start_idx in reversed(c_starts):
-            candidate = text[start_idx:end_idx + 1]
-            if "\"status\"" not in candidate and "'status'" not in candidate:
-                continue
-            try:
-                obj = json.loads(candidate)
-                if isinstance(obj, dict) and obj.get("status") in ("done", "partial", "blocked"):
-                    return obj
-            except Exception:
-                continue
-
-    return None
 
 
 def _lane_model_listing(lanes, harness=None):
@@ -353,165 +299,10 @@ def probe_meters(no_probe, routing=None):
     usage.acquire(refresh=True, timeout=180)
 
 
-def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_cwd, write_dir, run_dir):
-    adapter = harnesses.get(harness)
-    relay_script = os.path.join(ads_dir, "skills", adapter.relay, "scripts", "relay.mjs")
-    cmd = [
-        "node",
-        relay_script,
-        "--brief", prompt_path,
-        "--cd", child_cwd,
-        "--out-dir", run_dir,
-        "--model", model,
-    ]
-    args, env_extra = adapter.run_args(effort, timeout_str, write_dir)
-    cmd.extend(args)
-    env = None
-    if env_extra:
-        env = dict(os.environ)
-        env.update(env_extra)
-
-    stdout_path = os.path.join(run_dir, "relay.stdout")
-    stderr_path = os.path.join(run_dir, "relay.stderr")
-
-    t0 = time.time()
-    with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
-        proc = subprocess.run(cmd, stdout=out_f, stderr=err_f, env=env)
-    secs = int(time.time() - t0)
-    relay_exit = proc.returncode
-
-    return relay_exit, secs
-
-
-def map_result(run_dir, lane_timeout, relay_exit, write_dir, harness, secs=None):
-    """The relay's files in `run_dir` settled into a `runs.Finish` (the status
-    mapping above). Writes nothing: the Run records it."""
-    result_path = os.path.join(run_dir, "result.json")
-    stderr_path = os.path.join(run_dir, "relay.stderr")
-
-    status = "blocked"
-    reason = None
-    deliverable = ""
-    evidence = []
-    open_questions = []
-    changed_files = []
-    relay_status = None
-    session_id = None
-    usage = None
-    touched_files = None
-    read_only_violation = None
-
-    if not os.path.isfile(result_path):
-        last_stderr_line = ""
-        if os.path.isfile(stderr_path):
-            with open(stderr_path, "r", encoding="utf-8", errors="replace") as f:
-                lines = [l.strip() for l in f if l.strip()]
-                if lines:
-                    last_stderr_line = lines[-1]
-        reason = f"relay wrote no result (exit {relay_exit}): {last_stderr_line}".rstrip()
-        deliverable = f"blocked: {reason}"
-    else:
-        try:
-            with open(result_path, "r", encoding="utf-8", errors="replace") as f:
-                res_doc = json.load(f)
-        except Exception as e:
-            res_doc = {"status": "failed", "error": f"corrupt result.json: {e}"}
-
-        relay_status = res_doc.get("status")
-        session_id = res_doc.get("threadId") or res_doc.get("sessionId") or res_doc.get("conversationId")
-        usage = res_doc.get("usage")
-        touched_files = res_doc.get("touchedFiles")
-        read_only_violation = res_doc.get("readOnlyViolation")
-        final_message = res_doc.get("finalMessage") or ""
-
-        if relay_status == "completed":
-            block = find_return_block(final_message)
-            # a harness whose events say why the run stopped short has a
-            # reason a completed relay status hides (`Harness.blocked_reason`)
-            stopped = harnesses.get(harness).blocked_reason(run_dir) if block is None else None
-            if block is not None:
-                status = block.get("status")
-                deliv = block.get("deliverable", "")
-                deliverable = deliv if isinstance(deliv, str) else str(deliv)
-
-                ev = block.get("evidence", [])
-                if isinstance(ev, list):
-                    for item in ev[:12]:
-                        if isinstance(item, dict) and "file" in item and "line" in item and "claim" in item:
-                            try:
-                                evidence.append({
-                                    "file": str(item["file"]),
-                                    "line": int(item["line"]),
-                                    "claim": str(item["claim"])[:200],
-                                })
-                            except Exception:
-                                pass
-
-                oq = block.get("open_questions", [])
-                if isinstance(oq, list):
-                    for q in oq[:5]:
-                        if q is not None:
-                            open_questions.append(str(q)[:200])
-
-                cf = block.get("changed_files", [])
-                if isinstance(cf, list):
-                    for item in cf:
-                        if item is not None:
-                            changed_files.append(str(item))
-
-                if status == "blocked":
-                    reason = deliverable
-            elif stopped is not None:
-                # The relay says completed, but the worker did not finish. As
-                # on timeout, the final message stays in final.txt.
-                status = "blocked"
-                reason = stopped
-                deliverable = f"blocked: {reason}"
-            elif final_message.strip():
-                status = "partial"
-                deliverable = "\n".join(final_message.splitlines()[:60])
-                open_questions = ["no return block in final message"]
-            else:
-                status = "blocked"
-                reason = "empty final message"
-                deliverable = f"blocked: {reason}"
-
-        elif relay_status == "timeout":
-            status = "blocked"
-            reason = f"timeout after {lane_timeout}"
-            deliverable = f"blocked: {reason}"
-
-        elif relay_status in ("failed", "aborted") or (isinstance(relay_status, str) and relay_status.endswith("_unavailable")):
-            status = "blocked"
-            if res_doc.get("error"):
-                reason = str(res_doc["error"])
-            elif res_doc.get("stderrTail"):
-                st = res_doc["stderrTail"]
-                reason = "\n".join(st) if isinstance(st, list) else str(st)
-            else:
-                reason = f"relay status {relay_status}"
-            deliverable = f"blocked: {reason}"
-        else:
-            status = "blocked"
-            reason = f"relay status {relay_status}"
-            deliverable = f"blocked: {reason}"
-
-        if not write_dir and read_only_violation is True:
-            open_questions.append("read-only tripwire fired; review the diff")
-
-    return runs.Finish(
-        {"status": status, "deliverable": deliverable, "evidence": evidence,
-         "open_questions": open_questions, "changed_files": changed_files},
-        relay_status=relay_status, relay_exit=relay_exit, secs=secs, reason=reason,
-        session_id=session_id, usage=usage, touched_files=touched_files,
-        read_only_violation=read_only_violation,
-    )
-
-
 def relay_work(harness, model, effort, timeout, child_cwd, write, ads_dir, no_probe=False,
                routing=None, probed=False):
-    """The work of a relayed Run, for `runs.execute`: preflight, probe, run the
-    relay, probe, and settle the relay's files into a `runs.Finish`.
+    """The work of a relayed Run, for `runs.execute`: preflight, probe, run
+    the relay through `relays.Ads`, which returns the `runs.Finish`, and probe.
 
     ``probed`` means the caller acquired the Meters just now to rank, so the
     before-probe would only repeat it (and `claude -p /usage` can spend the
@@ -524,19 +315,11 @@ def relay_work(harness, model, effort, timeout, child_cwd, write, ads_dir, no_pr
             return runs.blocked(reason)
         if not probed:
             probe_meters(no_probe, routing)
-        try:
-            relay_exit, secs = run_relay(
-                ads_dir=ads_dir, harness=harness, model=model, effort=effort, timeout_str=timeout,
-                prompt_path=run.prompt_path, child_cwd=child_cwd, write_dir=write, run_dir=run.path,
-            )
-        except FileNotFoundError as e:
-            # node passed the ads.sh check, then was gone when the relay started
-            if e.filename != "node":
-                raise
-            return runs.blocked("node is not on PATH; the relay needs Node.js")
+        job = relays.Job(harness=harness, model=model, effort=effort, timeout=timeout,
+                         prompt=run.prompt_path, cwd=child_cwd, write=write)
+        finish = relays.Ads(ads_dir).run(job, run.path)
         probe_meters(no_probe, routing)
-        return map_result(run_dir=run.path, lane_timeout=timeout, relay_exit=relay_exit,
-                          write_dir=write, harness=harness, secs=secs)
+        return finish
     return work
 
 

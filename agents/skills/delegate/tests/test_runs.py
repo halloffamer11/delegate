@@ -2,9 +2,10 @@
 """test_runs.py — the Run module (runs.py): a started Run always finishes.
 
 Every case drives `runs.execute` in-process against a temp runs root, a temp
-$DELEGATE_LEDGER and a temp $DELEGATE_CACHE. The work is a plain function.
-Case 13 reads the scripts' source: only runs.py touches the Ledger and a Run's
-records.
+$DELEGATE_LEDGER and a temp $DELEGATE_CACHE. The work is a plain function, or
+in case 3b a relay adapter's `run`. Cases 3b and 13 read the scripts' source:
+no relay adapter catches what ends a Run, and only runs.py touches the Ledger
+and a Run's records.
 """
 import ast
 import contextlib
@@ -21,6 +22,7 @@ SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 _ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
 os.chdir(_ISOLATED_CWD.name)
 sys.path.insert(0, SCRIPTS)
+import relays  # noqa: E402
 import runs  # noqa: E402
 import usage  # noqa: E402
 
@@ -205,6 +207,65 @@ def case_sigterm_during_work_ends_the_run_blocked_as_terminated():
                # the previous handler comes back
                and restored,
                f"took={took:.1f} restored={restored} ended={vars(ended)} read={read} ledger={lines}")
+
+
+class _SignalledRelay(relays.Scripted):
+    """A relay adapter whose `run` gets SIGTERM after it settled, as a relay
+    does when `claude -p` ends its background job at the end of a turn."""
+
+    def run(self, job, run_dir):
+        finish = super().run(job, run_dir)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(5)
+        return finish
+
+
+def broad_handlers(source, name="relays.py"):
+    """Every `except` in source that is bare or names Exception or
+    BaseException, as "<name>:<line>"."""
+    found = []
+    for node in ast.walk(ast.parse(source, name)):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        caught = node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
+        if any(c is None or (isinstance(c, ast.Name) and c.id in ("Exception", "BaseException"))
+               for c in caught):
+            found.append(f"{name}:{node.lineno}")
+    return found
+
+
+def case_sigterm_inside_a_relay_adapters_run_ends_the_run_terminated():
+    with world() as w:
+        relay = _SignalledRelay(relays.Report(status="completed", exit=0, final_message=json.dumps(RETURNED)))
+
+        def work(run):
+            job = relays.Job(harness="codex", model="gpt-6-sol", effort="high", timeout="30m",
+                             prompt=run.prompt_path, cwd="/w")
+            return relay.run(job, run.path)
+
+        before = signal.getsignal(signal.SIGTERM)
+        t0 = time.monotonic()
+        ended = runs.execute(request(), b"p", work, w.root)
+        took = time.monotonic() - t0
+        read = runs.Run(ended.run).read()
+        lines = w.lines()
+        with open(os.path.join(SCRIPTS, "relays.py"), encoding="utf-8") as f:
+            broad = broad_handlers(f.read())
+        # the scan is live: it finds each broad form in a planted adapter
+        planted = broad_handlers("try:\n    pass\nexcept Exception:\n    pass\n"
+                                 "try:\n    pass\nexcept (OSError, BaseException):\n    pass\n"
+                                 "try:\n    pass\nexcept:\n    pass\n", "planted.py")
+        record("3b. SIGTERM inside a relay adapter's run ends the Run terminated; no adapter catches it",
+               len(relay.jobs) == 1 and took < 4
+               and ended.status == "blocked" and ended.exit_code == 1
+               and read["dispatch"]["reason"] == "dispatch terminated (SIGTERM)"
+               and read["return"]["deliverable"] == "blocked: dispatch terminated (SIGTERM)"
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and signal.getsignal(signal.SIGTERM) == before
+               # Ads catches only OSError and ValueError, so termination passes through
+               and broad == [] and planted == ["planted.py:3", "planted.py:7", "planted.py:11"],
+               f"took={took:.1f} jobs={relay.jobs} ended={vars(ended)} read={read} ledger={lines} "
+               f"broad={broad} planted={planted}")
 
 
 def case_a_return_json_that_cannot_be_written_still_ends_the_run():
@@ -667,6 +728,7 @@ def main():
     case_a_run_that_returns()
     case_work_that_raises_ends_the_run_blocked()
     case_sigterm_during_work_ends_the_run_blocked_as_terminated()
+    case_sigterm_inside_a_relay_adapters_run_ends_the_run_terminated()
     case_a_return_json_that_cannot_be_written_still_ends_the_run()
     case_a_ledger_that_cannot_be_written_never_stops_a_run_ending()
     case_a_usage_limit_refusal_holds_the_lanes_meter()
