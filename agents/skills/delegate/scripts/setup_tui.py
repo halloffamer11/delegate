@@ -917,10 +917,11 @@ class Wizard:
             if changed:
                 rows.append({"cells": ["file", "", path], "marked": False,
                              "dimmed": False, "tag": ""})
-                resolved = os.path.realpath(path)
-                if resolved != os.path.abspath(path):
-                    rows.append({"cells": ["target", "", resolved], "marked": False,
-                                 "dimmed": False, "tag": ""})
+                # Only a link at the document itself is written through (D.1);
+                # a linked directory above a plain file is not.
+                if os.path.islink(path):
+                    rows.append({"cells": ["target", "", os.path.realpath(path)],
+                                 "marked": False, "dimmed": False, "tag": ""})
         if not rows:
             rows.append({"cells": ["No changes", "", "Nothing will be written"],
                          "marked": False, "dimmed": False, "tag": ""})

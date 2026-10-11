@@ -3216,4 +3216,41 @@ try:
 except Exception as e:
     record("81 the confirm page lists each carried Lane with the Order y writes", False, repr(e))
 
+# 82: a target row names where a link at a catalog document points. A plain
+# file reached through a linked directory has no link of its own (macOS temp
+# dirs sit under /var, a link to /private/var), so its page shows the file row
+# alone.
+def confirm_files(routing_path):
+    w = Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING), data(), DISCOVERED,
+               os.path.join(os.path.dirname(routing_path), "lanes.json"), routing_path,
+               "", focus="routing")
+    w.cursor = len(catalog.CLASSES) * 2 + 2
+    w.handle("space")
+    w.handle("enter")
+    return [(row["cells"][0], row["cells"][2]) for row in w.view()["rows"]
+            if row["cells"][0] in ("file", "target")]
+
+
+try:
+    with tempfile.TemporaryDirectory() as td:
+        real = os.path.join(td, "real")
+        os.mkdir(real)
+        os.symlink(real, os.path.join(td, "linked"))
+        plain = os.path.join(td, "linked", "routing.json")
+        with open(plain, "w") as fh:
+            json.dump(ROUTING, fh)
+        record("82 a plain file under a linked directory shows no target row",
+               confirm_files(plain) == [("file", plain)], confirm_files(plain))
+        kept = os.path.join(td, "kept.json")
+        with open(kept, "w") as fh:
+            json.dump(ROUTING, fh)
+        link = os.path.join(real, "link", "routing.json")
+        os.mkdir(os.path.dirname(link))
+        os.symlink(kept, link)
+        record("82 a linked document shows the file it writes through",
+               confirm_files(link) == [("file", link), ("target", os.path.realpath(kept))],
+               confirm_files(link))
+except Exception as e:
+    record("82 the confirm page target row", False, repr(e))
+
 sys.exit(1 if fails else 0)
