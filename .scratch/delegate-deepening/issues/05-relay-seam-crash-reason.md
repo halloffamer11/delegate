@@ -54,7 +54,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decisions G.5 and G.
 
 **Blocked by:** 01 A started Run always finishes (`runs.Finish`, `runs.execute`); 04 Only the Run module writes the Ledger (lane order: all of C before G)
 
-**Status:** landed 2026-10-11. `scripts/relays.py` holds the Relay seam (`Job`, `Report`, `Relay.run`, the `Ads` adapter, the `Scripted` fake and the private pure `_settle`), and the relayed work in `delegate.py` runs the relay through `relays.Ads(ads_dir).run(job, run.path)`; test_relay s1 to s11 (settling through Scripted) and a1 to a5 (Ads under node), and test_runs 3b, verify it. No box is open.
+**Status:** landed 2026-10-11 (ac5cbab). `scripts/relays.py` holds the Relay seam (`Job`, `Report`, `Relay.run`, the `Ads` adapter, the `Scripted` fake and the private pure `_settle`), and the relayed work in `delegate.py` runs the relay through `relays.Ads(ads_dir).run(job, run.path)`; test_relay s1 to s11 (settling through Scripted) and a1 to a5 (Ads under node), and test_runs 3b, verify it. No box is open.
 
 - [x] `relays.Ads(...).run` and `relays.Scripted(...).run` each return a `runs.Finish`; `relays.py` defines no outcome type; `delegate.py` no longer defines `run_relay`, `map_result` or `find_return_block`.
 - [x] Every settling row is tested through `Scripted` in `tests/test_relay.py` with no subprocess and no node: done, partial, prose, empty, timeout, failed, aborted, unavailable, nothing reported, stopped short, and the tripwire.
@@ -67,6 +67,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decisions G.5 and G.
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `ac5cbab` (delegate-deepening 05: A relay that crashes before writing its result says why), then the review fixes in "delegate-deepening G: review fixes".
 
 **What shipped.**
 - `scripts/relays.py`: `Job`, `Report`, `Relay.run` (`_settle(self._launch(job, run_dir), job)`),
@@ -129,9 +131,19 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decisions G.5 and G.
 - Inside settling, the return-block scan catches `ValueError` and `RecursionError` (a deeply
   nested final message), and the evidence conversion catches `TypeError`, `ValueError` and
   `OverflowError`; `map_result` caught `Exception` in both places. The broad-handler scan covers
-  all of `relays.py`. A `result.json` nested too deep to parse raises `RecursionError`, which `Ads`
-  does not catch (it catches only `OSError` and `ValueError`), so that Run ends "dispatch failed:
-  RecursionError: ...".
+  all of `relays.py`.
 - `replay=<dir>` copies `result.json`, `events.jsonl` and `final.txt`, and writes the staged
   `relay.stdout` and `relay.stderr` to its own streams, because dispatch holds those two files
   open. It exits with `exit=<n>` when given, else the staged result's `exitCode`, else 0.
+
+**Review fixes.**
+- The G review found that a `result.json` nested too deep to parse raised `RecursionError` out
+  of `Ads`. That Run ended "dispatch failed: RecursionError: ..." and lost the relay's exit, the
+  shape of live bug 2, though the spec lists a `result.json` that does not parse among the
+  failures `Ads` returns a Finish for. `Ads` now catches `RecursionError` at that read as well, and
+  the Run is blocked with `corrupt result.json: ...` and keeps the exit. `RecursionError` is not
+  termination, so Ctrl-C and SIGTERM still pass through, and test_runs 3b's scan still finds no
+  broad handler. test_relay a2 gained a `result.json` nested 100000 deep, which was red before the
+  fix.
+- s10 now checks its settled Finish against the record contracts as well, so every test_relay
+  case that settles a Finish does.

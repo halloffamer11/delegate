@@ -25,7 +25,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decision G.4)
 
 **Blocked by:** 05 A relay that crashes before writing its result says why; 06 The offline eval and the dispatch tests share one world that the host's Seatbelt never reaches
 
-**Status:** landed 2026-10-11. `relays.Ads.check` runs `ads.sh check` on the adapter's resolved directory (the argument, else `$ADS_DIR`, else `relays.DEFAULT_DIR`), `Scripted.check` answers its `ready`, and `delegate.resolve` asks the relay's check in place of its own subprocess; `dispatch` and `run` take `relay=None`. test_relay s12, a6 (argv and env per harness), a7 (check) and a8 (the default directory), and test_dispatch 9 (the Job through `dispatch(relay=Scripted(...))`), verify it. No box is open.
+**Status:** landed 2026-10-11 (72598af). `relays.Ads.check` runs `ads.sh check` on the adapter's resolved directory (the argument, else `$ADS_DIR`, else `relays.DEFAULT_DIR`), `Scripted.check` answers its `ready`, and `delegate.resolve` asks the relay's check in place of its own subprocess; `dispatch` and `run` take `relay=None`. test_relay s12, a6 (argv and env per harness), a7 (check) and a8 (the default directory), and test_dispatch 9 (the Job through `dispatch(relay=Scripted(...))`), verify it. No box is open.
 
 - [x] `delegate.py` runs no `sh ads.sh` and names no ADS directory.
 - [x] `relays.Ads.check` returns None on the pinned world, and one line naming the cause for a wrong pin, a missing node and a missing relay script.
@@ -36,6 +36,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decision G.4)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `72598af` (delegate-deepening 07: Only the ADS adapter knows node, the pin and the relay argv).
 
 **What shipped.**
 - `scripts/relays.py`: `Relay.check()`, `relays.DEFAULT_DIR` and `Scripted(*script, ready=None)`.

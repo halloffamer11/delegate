@@ -134,7 +134,8 @@ class OfflineWorld:
     python3. `env` puts that bin directory first on PATH and points every
     delegate path at the world, so nothing on the host reaches a Run: not its
     CLIs, its catalog, its Ledger, its Meters, its codex home, its Seatbelt or
-    its orchestrator. A test replaces one CLI with `stub`.
+    its orchestrator. A test replaces one CLI with `stub`, or hides one with
+    `path_without`.
     """
 
     def __init__(self, root):
@@ -207,6 +208,19 @@ class OfflineWorld:
             f.write("#!/bin/sh\n" + body)
         os.chmod(path, 0o755)
         return path
+
+    def path_without(self, name):
+        """A PATH on which `name` is not found, for a case whose CLI (node,
+        say) is gone: a directory of links to everything else in the bin
+        directory, and nothing after it. A link follows a later `stub` of its
+        name."""
+        bare = os.path.join(self.root, f"bin-without-{name}")
+        if not os.path.isdir(bare):
+            os.makedirs(bare)
+            for entry in os.listdir(self.bin_dir):
+                if entry != name:
+                    os.symlink(os.path.join(self.bin_dir, entry), os.path.join(bare, entry))
+        return bare
 
 
 def _pinned_ads_commit():

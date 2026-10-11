@@ -242,7 +242,7 @@ def case_scripted_runs_its_script_in_order(run_dir):
         except BaseException as e:  # what the script raises, and the exhausted script
             raised.append(type(e).__name__)
     record("s10. Scripted settles each Report in turn, raises what it was scripted to, then fails the test",
-           finished.returned["status"] == "partial"
+           not problems(finished) and finished.returned["status"] == "partial"
            and raised == ["KeyboardInterrupt", "AssertionError"]
            and fake.jobs == [(j, run_dir)] * 3,
            f"finished={finished} raised={raised} jobs={fake.jobs}")
@@ -266,11 +266,10 @@ class AdsWorld:
 
     def __init__(self):
         self.root = tempfile.mkdtemp(prefix="delegate-relay-")
-        world = evals.OfflineWorld(self.root)
-        self.ads_dir = world.ads_dir
-        self.env = world.env
-        self.bin_dir = world.bin_dir
-        self.codex_home = world.codex_home
+        self.world = evals.OfflineWorld(self.root)
+        self.ads_dir = self.world.ads_dir
+        self.env = self.world.env
+        self.codex_home = self.world.codex_home
         self.cwd = os.path.join(self.root, "work")
         self.dir = os.path.join(self.root, "relay-cases")
         os.makedirs(self.cwd)
@@ -287,16 +286,6 @@ class AdsWorld:
         relay = relays.Ads(self.ads_dir, env=self.env if env is None else env)
         the_job = job(lane, prompt=prompt, cwd=write or self.cwd, write=write, effort=effort)
         return relay.run(the_job, run_dir), run_dir
-
-    def no_node_path(self):
-        """A PATH with everything the world's bin directory holds but node."""
-        no_node = os.path.join(self.dir, "no-node-path")
-        if not os.path.isdir(no_node):
-            os.makedirs(no_node)
-            for name in os.listdir(self.bin_dir):
-                if name != "node":
-                    os.symlink(os.path.join(self.bin_dir, name), os.path.join(no_node, name))
-        return no_node
 
     def stage(self, name, fixture=None, result=None, keep_event=None, final_message=None):
         """A run directory as a relay left it: a fixture's copy, or one holding
@@ -353,13 +342,21 @@ def case_ads_a_result_json_that_is_not_an_object(w):
                       f"replay={w.stage('not-an-object', result='[]')} exit=0")
     broken, _ = w.run("not-json", "terra-high@codex",
                       f"replay={w.stage('not-json', result='{not json')} exit=3")
+    # nested deeper than Python's json parses: RecursionError, not ValueError
+    try:
+        deep, _ = w.run("too-deep", "terra-high@codex",
+                        f"replay={w.stage('too-deep', result='[' * 100000 + ']' * 100000)} exit=4")
+    except Exception as e:  # the case fails, and says what Ads raised
+        deep = e
     record("a2. Ads: a result.json that is not an object is blocked and keeps the relay's exit",
            not problems(listed) and listed.returned["status"] == "blocked"
            and listed.relay_exit == 0 and listed.reason.startswith("corrupt result.json: ")
            and "AttributeError" not in listed.reason
            and not problems(broken) and broken.relay_exit == 3
-           and broken.reason.startswith("corrupt result.json: "),
-           f"listed={listed} broken={broken}")
+           and broken.reason.startswith("corrupt result.json: ")
+           and not problems(deep) and deep.relay_exit == 4
+           and deep.reason.startswith("corrupt result.json: "),
+           f"listed={listed} broken={broken} deep={deep!r}")
 
 
 def case_ads_replays_the_grok_gate_cancel_fixture(w):
@@ -416,11 +413,9 @@ def case_ads_reads_every_result_key(w):
 
 
 def case_ads_node_missing_at_spawn(w):
-    no_node = os.path.join(w.dir, "no-node-bin")
-    os.makedirs(no_node)
     try:
         finish, run_dir = w.run("no-node", "terra-high@codex", "status=completed",
-                                env=dict(w.env, PATH=no_node))
+                                env=dict(w.env, PATH=w.world.path_without("node")))
     except Exception as e:  # the case fails, and says what Ads raised
         finish, run_dir = e, None
     reason = "node is not on PATH; the relay needs Node.js"
@@ -526,7 +521,7 @@ def case_ads_argv_and_env_per_harness(w):
 def case_ads_check(w):
     pinned = relays.Ads(w.ads_dir, env=w.env).check()
     wrong_pin = relays.Ads(w.ads_dir, env=dict(w.env, ADS_FAKE_GIT_SHA="0" * 40)).check()
-    no_node = relays.Ads(w.ads_dir, env=dict(w.env, PATH=w.no_node_path())).check()
+    no_node = relays.Ads(w.ads_dir, env=dict(w.env, PATH=w.world.path_without("node"))).check()
     # A tree that lost one relay script. The env's ADS_DIR still names the
     # whole tree, so the check must run on the directory Ads was given.
     torn = os.path.join(w.root, "torn-ads")

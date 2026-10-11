@@ -26,7 +26,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decision G.2)
 
 **Blocked by:** 05 A relay that crashes before writing its result says why
 
-**Status:** landed 2026-10-11. `Ads` normalizes the relay's usage record into Token counts
+**Status:** landed 2026-10-11 (1f6802f). `Ads` normalizes the relay's usage record into Token counts
 `{in, out, cache_read, cache_write}` (None when it reported neither input nor output);
 `Report.tokens`, `runs.Finish.tokens` and the `DISPATCH_FIELDS` entry `tokens` replace `usage`
 in its place, and `report.compute_cost(tokens, lane, catalog)` reads only those four keys.
@@ -43,6 +43,8 @@ end) and test_report's dollar and unmeasured cases verify it. No box is open.
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `1f6802f` (delegate-deepening 08: The report prices a Run from Token counts, not relay key spellings).
 
 **What shipped.**
 - `scripts/relays.py`: `_TOKEN_SPELLINGS` maps each Token count to the usage spellings the report

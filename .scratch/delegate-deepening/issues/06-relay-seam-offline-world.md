@@ -33,7 +33,7 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decision G.3)
 
 **Blocked by:** 05 A relay that crashes before writing its result says why
 
-**Status:** landed 2026-10-11. `evals.OfflineWorld(root)` is the one offline world: the offline evals' `Sandbox`, test_dispatch and test_relay's Ads cases build on it, and its `sandbox-exec` that nests keeps the host's Seatbelt out. test_evals "eval 1 offline: the host's Seatbelt never reaches the offline world", "the offline world: no host orchestrator, marker or Ledger reaches its env, and a stub replaces a link" and "eval 3: Runs are equivalent by the Run's own files, with no relay file named" verify it, with test_dispatch's 50 cases unchanged. No box is open.
+**Status:** landed 2026-10-11 (c14e16e). `evals.OfflineWorld(root)` is the one offline world: the offline evals' `Sandbox`, test_dispatch and test_relay's Ads cases build on it, and its `sandbox-exec` that nests keeps the host's Seatbelt out. test_evals "eval 1 offline: the host's Seatbelt never reaches the offline world", "the offline world: no host orchestrator, marker or Ledger reaches its env, and a stub replaces a link" and "eval 3: Runs are equivalent by the Run's own files, with no relay file named" verify it, with test_dispatch's 50 cases unchanged. No box is open.
 
 - [x] `evals.py`, `tests/test_dispatch.py` and `tests/test_relay.py` build the fake ADS tree, the pin answer, the CLI stubs and the env through `evals.OfflineWorld`, and `test_dispatch.py` has no `setup_env` world and no `pinned_ads_commit` of its own.
 - [x] `evals.OfflineWorld` exposes `world.stub(name, body)`, and `evals.py` keeps no second stub writer.
@@ -43,6 +43,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decision G.3)
 - [x] `make test` passes on Python 3.9 and 3.13.
 
 ## Landed, 2026-10-11
+
+**Commits.** `c14e16e` (delegate-deepening 06: The offline eval and the dispatch tests share one world that the host's Seatbelt never reaches), then the review fixes in "delegate-deepening G: review fixes".
 
 **What shipped.**
 - `scripts/evals.py`: `OfflineWorld(root)`. Under a root its caller owns, it holds the sample
@@ -101,3 +103,8 @@ Spec: `.scratch/delegate-deepening/spec.md` (G. Relay seam; decision G.3)
 - test_dispatch's `run_dispatch` and `run_run` share `run_delegate(world, command, args, ...,
   config_dir=)`, which replaces the copied `t_env` dicts cases 27a and 31f used for their own
   catalogs.
+
+**Review fixes.** The G review found that test_dispatch and test_relay each built their own PATH
+without node, a directory of links to the world's bin directory: a second copy of part of the
+world, as the spec's problem names. `world.path_without(name)` now builds that PATH once, and
+test_dispatch 9, 12d and 29c and test_relay a5 and a7 use it.

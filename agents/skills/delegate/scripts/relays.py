@@ -23,8 +23,9 @@ Two adapters:
 Ads returns a Finish for every way a relay can fail: node missing at spawn,
 no result.json, a result.json that does not parse or is not an object, an
 unreadable relay.stderr or events.jsonl. It catches only OSError and
-ValueError, so KeyboardInterrupt and the Run's SIGTERM termination pass
-through to `runs.execute`, which ends the Run with why.
+ValueError, and RecursionError from a result.json nested too deep to parse,
+so KeyboardInterrupt and the Run's SIGTERM termination pass through to
+`runs.execute`, which ends the Run with why.
 
 Settling (the private `_settle(report, job)`) is pure, and reads only the
 Job's timeout and write:
@@ -178,7 +179,8 @@ def _read(adapter, run_dir, exit_code, secs):
     try:
         with open(result_path, "r", encoding="utf-8", errors="replace") as f:
             doc = json.load(f)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
+        # RecursionError: nested deeper than the json module parses
         return Report(status="failed", error=f"corrupt result.json: {e}", exit=exit_code, secs=secs)
     if not isinstance(doc, dict):
         why = f"corrupt result.json: a JSON {type(doc).__name__}, not an object"

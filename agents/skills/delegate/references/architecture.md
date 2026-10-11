@@ -115,29 +115,30 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   `dispatch.json` has not ended, within its Lane's timeout. It skips a Ledger line it cannot read
   and never raises, and `report.py statusline` counts its glyphs from it. Run directories under
   `~/.cache/delegate/runs/`, never reused.
-- `scripts/relays.py`: the Relay seam (delegate-deepening 05, 07 and 08). `Relay.check()` says in one line
-  why relays cannot run here, or None; `delegate.resolve` asks it for a relayed Lane before a Run
-  starts, and a refusal exits 2 with nothing started. `Relay.run(job, run_dir)` runs one
-  relayed `Job` and returns a `runs.Finish`; the module defines no outcome type of its own. The `Ads`
-  adapter alone knows the ADS directory (the argument, else `$ADS_DIR`, else `relays.DEFAULT_DIR`,
-  which a test holds equal to `ads.sh`'s default), `ads.sh check` (run with `ADS_DIR` set to that
-  directory), node, the relay path, the argv (`--brief --cd --out-dir --model` plus
-  `Harness.run_args`) and env overrides, `relay.stdout` and `relay.stderr`, every `result.json` key
-  (each usage spelling it normalizes into Token counts `{in, out, cache_read, cache_write}`, keyed
-  like a Lane's price record, or None when the relay reported neither input nor output; the raw
-  record stays in `result.json`), the form of node's crash output (the `<Name>Error: ...` line,
-  never the `Node.js v...` trailer)
-  and, through `Harness.blocked_reason`, `events.jsonl`. It returns a blocked `Finish` for every way
-  a relay fails (node missing at spawn, no `result.json`, one that does not parse or is not an
-  object) and catches only `OSError` and `ValueError`, so Ctrl-C and SIGTERM reach `runs.execute`.
-  Settling is the private pure `_settle(report, job)`: the status table in the module docstring,
-  the return-block scan, the caps and the read-only tripwire. `Scripted` is the in-process fake,
-  scripted with `Report`s (its check answers `ready`), so `tests/test_relay.py` tests settling with no
-  node, and `dispatch(relay=Scripted(...))` runs in-process. Its `Ads` cases,
-  `tests/test_dispatch.py` and `evals.py --offline` share one `evals.OfflineWorld` (delegate-deepening
-  06): the sample catalog, the fake relay in a fake ADS tree, a `git` that answers the pin, stub CLIs,
-  a `sandbox-exec` that nests and an env that keeps the host's CLIs, Ledger, Meters, codex home and
-  orchestrator out; `world.stub(name, body)` replaces one CLI.
+- `scripts/relays.py`: the Relay seam (delegate-deepening 05, 07 and 08). `Relay.check()` says in
+  one line why relays cannot run here, or None; `delegate.resolve` asks it for a relayed Lane before
+  a Run starts, and a refusal exits 2 with nothing started. `Relay.run(job, run_dir)` runs one
+  relayed `Job` and returns a `runs.Finish`; the module defines no outcome type of its own. The
+  `Ads` adapter alone knows the ADS directory (the argument, else `$ADS_DIR`, else
+  `relays.DEFAULT_DIR`, which a test holds equal to `ads.sh`'s default), `ads.sh check` (run with
+  `ADS_DIR` set to that directory), node, the relay path, the argv (`--brief --cd --out-dir --model`
+  plus `Harness.run_args`) and env overrides, `relay.stdout` and `relay.stderr`, every `result.json`
+  key (each usage spelling it normalizes into Token counts `{in, out, cache_read, cache_write}`,
+  keyed like a Lane's price record, or None when the relay reported neither input nor output; the
+  raw record stays in `result.json`), the form of node's crash output (the `<Name>Error: ...` line,
+  never the `Node.js v...` trailer) and, through `Harness.blocked_reason`, `events.jsonl`. It
+  returns a blocked `Finish` for every way a relay fails (node missing at spawn, no `result.json`,
+  one that does not parse or is not an object) and catches only `OSError` and `ValueError` (and
+  `RecursionError` from a `result.json` nested too deep to parse), so Ctrl-C and SIGTERM reach
+  `runs.execute`. Settling is the private pure `_settle(report, job)`: the status table in the
+  module docstring, the return-block scan, the caps and the read-only tripwire. `Scripted` is the
+  in-process fake, scripted with `Report`s (its check answers `ready`), so `tests/test_relay.py`
+  tests settling with no node, and `dispatch(relay=Scripted(...))` runs in-process. Its `Ads` cases,
+  `tests/test_dispatch.py` and `evals.py --offline` share one `evals.OfflineWorld`
+  (delegate-deepening 06): the sample catalog, the fake relay in a fake ADS tree, a `git` that
+  answers the pin, stub CLIs, a `sandbox-exec` that nests and an env that keeps the host's CLIs,
+  Ledger, Meters, codex home and orchestrator out; `world.stub(name, body)` replaces one CLI and
+  `world.path_without(name)` hides one.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork
   of amElnagdy) at commit `b6ec937700174947234f4f46e4d793d78270545b` (branch
   `claude/delegate-any-harness-next-v75vlw`), in `~/.local/share/delegate/ads`. `ads.sh install` is

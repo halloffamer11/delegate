@@ -239,11 +239,7 @@ def main():
 
         # A PATH with everything the world's bin directory holds but node, and
         # the Ledger's lines.
-        no_node_bin = os.path.join(tmpdir, "no_node_bin")
-        os.makedirs(no_node_bin, exist_ok=True)
-        for name in os.listdir(world.bin_dir):
-            if name != "node":
-                os.symlink(os.path.join(world.bin_dir, name), os.path.join(no_node_bin, name))
+        no_node_bin = world.path_without("node")
         no_node_env = {"PATH": no_node_bin}
         ledger_path = world.ledger_path
 
