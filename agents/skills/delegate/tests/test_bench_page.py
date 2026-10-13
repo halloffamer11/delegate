@@ -237,7 +237,9 @@ try:
            and all(inside_details(i) for i in tables)
            and not inside_details(compare)
            and not re.search(r"<details[^>]*\bopen\b", page)
-           and page.find('id="plots"') < compare < page.find("<details"),
+           # the comparison opens the Numbers tab, above the collapsed evidence
+           # (benchmark-views ticket 01)
+           and page.find('id="plots"') < compare < page.find('<section class="evidence">'),
            f"kinds={kinds} tables={len(tables)}")
 except Exception as e:
     record("every table is collapsed until asked for, under the plots", False, repr(e))
@@ -1533,7 +1535,8 @@ try:
                                 "tierView": True, "focusTier": None},
                repr(out["after"]))
         record("36.3 what it clears is cleared in the browser too, so a reload draws nothing",
-               out["stored"] == {"version": 2, "tiers": {}, "lines": {}, "manual": {}, "tierView": True}
+               out["stored"] == {"version": 2, "tiers": {}, "lines": {}, "manual": {}, "tierView": True,
+                                 "view": None}
                and out["reloaded"] == {"tiers": {}, "manual": {}, "lines": {}, "tierView": True},
                repr((out["stored"], out["reloaded"])))
 except Exception as e:
@@ -1718,6 +1721,144 @@ except Exception as e:
 # The script names the Python it mirrors in its comments (`carry.beats`), so a
 # reader can check one against the other. A citation that names a module the
 # function does not live in sends that reader to the wrong file.
+# --- benchmark-views ticket 01: flat views, the Frontier tab, tiers per view ------
+
+VIEW_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        **{f"opus55-{e}@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": e,
+                                  "tier": 3, "meter": "claude-general"}
+           for e in ("medium", "high")},
+        "opus55-high@kiro": {"harness": "kiro", "model": "claude-opus-5-5", "effort": "high",
+                             "tier": 3, "meter": "kiro-credits"},
+    },
+}
+VIEW_ROWS = [{"source": "aa", "model": "Claude Opus 5.5", "effort": e, "benchmark": b,
+              "score": sc, "cost_usd": c, "uncertain": False}
+             for e, sc, c in (("medium", 0.6, 1.0), ("high", 0.7, 2.0), ("max", 0.8, 4.0))
+             for b in ("Terminal-Bench 2.1", "Terminal-Bench 2.0", "GDPval")] + \
+            [{"source": "aa", "model": "Some Other Model", "effort": "high", "benchmark": "GDPval",
+              "score": 0.5, "cost_usd": 1.0, "uncertain": False}]
+
+try:
+    views = bench_page.load_views()
+    ids = [v["id"] for v in views]
+    named = " ".join(str(v["boards"]) for v in views).lower()
+    record("V1 views.json defines five or six flat views, Overall first, and names no model",
+           5 <= len(views) <= 6 and ids[0] == "overall" and len(set(ids)) == len(ids)
+           and all(v["why"] and v["boards"] for v in views)
+           and not any(w in named for w in ("opus", "sonnet", "gpt", "gemini", "grok", "fable")),
+           repr(ids))
+    record("V2 a missing views file is no views, never a crash",
+           bench_page.load_views(os.path.join(_ISOLATED_CWD.name, "nope.json")) == [])
+except Exception as e:
+    record("V1 views.json defines five or six flat views", False, repr(e))
+
+try:
+    boards = [{"id": "b0", "source": "aa", "benchmark": "Terminal-Bench 2.0"},
+              {"id": "b1", "source": "aa", "benchmark": "Terminal-Bench 2.1"},
+              {"id": "b2", "source": "aa", "benchmark": "Terminal-Bench-Hard"},
+              {"id": "b3", "source": "tbench", "benchmark": "Terminal-Bench 4.0"}]
+    view = {"id": "c", "boards": [("aa", "Terminal-Bench"), ("tbench", "Terminal-Bench")]}
+    record("V3 a view names a board by its unversioned name, newest version first, in its sources' order",
+           bench_page.view_boards(view, boards) == ["b1", "b0", "b3"],
+           repr(bench_page.view_boards(view, boards)))
+except Exception as e:
+    record("V3 view boards", False, repr(e))
+
+try:
+    data = bench_page.plot_data(VIEW_ROWS, VIEW_LANES)
+    cov = data["coverage"]
+    coding = next(v for v in cov["views"] if v["id"] == "coding-agent")
+    rows = {r["id"]: r for r in cov["rows"]}
+    claude, kiro = rows.get("claude-opus-5-5@claude"), rows.get("claude-opus-5-5@kiro")
+    record("V4 the coding view draws the newest Terminal-Bench, and a view with no board says none",
+           coding["benchmark"] == "Terminal-Bench 2.1"
+           and next(v for v in cov["views"] if v["id"] == "repo-coding")["board"] is None,
+           repr([(v["id"], v["benchmark"]) for v in cov["views"]]))
+    record("V5 a model on two harnesses is two rows with the same measurements and their own lanes",
+           claude and kiro and claude["ours"] and kiro["ours"]
+           and claude["cells"]["coding-agent"]["efforts"].keys() == {"medium", "high", "max"}
+           and claude["cells"] == kiro["cells"]
+           and [l["effort"] for l in claude["lanes"]] == ["medium", "high"]
+           and [l["name"] for l in kiro["lanes"]] == ["opus55-high@kiro"],
+           repr(cov["rows"]))
+    other = [r for r in cov["rows"] if not r["ours"]]
+    record("V6 a model the catalog does not run is listed after the catalog's, with no lanes",
+           [r["name"] for r in other] == ["Some Other Model"] and cov["rows"][-1] is other[-1]
+           and other[0]["cells"]["knowledge-work"]["efforts"]["high"]["score"] == 0.5,
+           repr(other))
+    page = bench_page.render(None, VIEW_LANES, VIEW_ROWS)
+    tabs = re.findall(r'class="tab" role="tab" href="#view-([\w-]+)"', page)
+    record("V7 the page's tabs are one flat row: Frontier, each view, then All boards, Prices, Numbers",
+           tabs == ["frontier"] + [v["id"] for v in bench_page.load_views()] + ["boards", "prices", "numbers"]
+           and page.count('<nav class="tabs"') == 1
+           and all(f'id="view-{t}"' in page for t in tabs if t != "prices"),
+           repr(tabs))
+except Exception as e:
+    record("V4-V7 coverage and tabs", False, repr(e))
+
+VIEWS_JS = r"""
+const P = require(process.argv[1]);
+const c = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const out = {};
+const lanes = c.lanes.map((l, rank) => Object.assign({ rank }, l));
+out.held = P.heldTiers(lanes, c.tiers);
+const vt = P.viewTiers(c.views, c.boards, lanes, c.tiers);
+out.rows = vt.rows.map((r) => [r.name, r.tier, c.views.map((v) => r.cells[v.id] && r.cells[v.id].tier), r.net]);
+const cols = P.viewColumns(c.views[1], vt.cuts[c.views[1].id], vt.held);
+out.columns = cols.columns.map((col) => [col.tier, col.lanes.map((l) => [l.name, l.best, l.cheapest])]);
+out.missing = cols.missing;
+const cell = P.coverageCell({ efforts: { high: { score: 2, cost: 1 }, max: { score: 3, cost: 2 } } },
+                            [{ effort: "high", carried: true }, { effort: "max", carried: false }]);
+out.cell = [[...cell.measured].sort(), [...cell.runs], cell.mine.effort, cell.best.effort];
+process.stdout.write(JSON.stringify(out));
+"""
+
+try:
+    if not NODE:
+        record("V8 tiers per view and the net, under node", True, "(node not on PATH; skipped)")
+    else:
+        def lp(name, score, cost):
+            return {"plotted": True, "score": score, "cost": cost, "effort": "high", "lanes": [{"name": name}]}
+        lanes = [{"name": n, "group": n[0], "effort": "high", "meter": "m", "carried": n != "u@x", "tier": t}
+                 for n, t in (("a@x", 4), ("b@x", 3), ("c@x", 2), ("d@x", 1), ("u@x", 2))]
+        case = {
+            "lanes": lanes,
+            # b is placed on the page at 4 over its catalog 3; d is off on the page
+            "tiers": {"b@x": 4, "d@x": "off"},
+            "views": [{"id": "o", "kind": "composite", "board": "bo"},
+                      {"id": "k", "kind": "coding", "board": "bk"},
+                      {"id": "w", "kind": "knowledge", "board": "bw"},
+                      {"id": "n", "kind": "knowledge", "board": None}],
+            "boards": [
+                {"id": "bo", "points": [lp("a@x", 9, 1), lp("b@x", 8, 1), lp("c@x", 1, 1)]},
+                # coding reverses a and c, and does not measure b
+                {"id": "bk", "points": [lp("c@x", 9, 3), lp("a@x", 1, 2)]},
+                {"id": "bw", "points": [lp("a@x", 9, 1), lp("c@x", 8, 1), lp("b@x", 7, 1)]},
+            ],
+        }
+        run = subprocess.run([NODE, "-e", VIEWS_JS, bench_page.SCRIPT_PATH], input=json.dumps(case),
+                             capture_output=True, text=True, timeout=30)
+        out = json.loads(run.stdout) if run.returncode == 0 else {"error": run.stderr}
+        record("V8 a lane holds the page's tier, else the catalog's; off and uncarried hold none",
+               out.get("held") == {"a@x": 4, "b@x": 4, "c@x": 2}, repr(out))
+        # held counts: two on 4, one on 2. Overall ranks a b c -> 4 4 2. Coding ranks c a
+        # of 2 measured: ends 4->round(2*2/3)=1, so c 4, a 2. Knowledge a c b -> 4 4 2.
+        record("V9 each view cuts in the held proportions, and net is the lower middle of the views, composite left out",
+               # listed by net, then held tier, then catalog order
+               out.get("rows") == [["c@x", 2, [2, 4, 4, None], 4], ["a@x", 4, [4, 2, 4, None], 2],
+                                   ["b@x", 4, [4, None, 2, None], 2]],
+               repr(out.get("rows")))
+        record("V10 a view's tiers list its best first and name the lanes it did not measure",
+               out.get("columns") == [[4, [["c@x", True, False]]], [3, []], [2, [["a@x", True, False]]], [1, []]]
+               and out.get("missing") == ["b@x"], repr(out))
+        record("V11 a coverage cell rings only the efforts a carried lane runs",
+               out.get("cell") == [["high", "max"], ["high"], "high", "max"], repr(out.get("cell")))
+except Exception as e:
+    record("V8 tiers per view, under node", False, repr(e))
+
+
 try:
     import ast
     with open(bench_page.SCRIPT_PATH, encoding="utf-8") as f:

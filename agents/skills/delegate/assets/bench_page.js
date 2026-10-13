@@ -369,26 +369,8 @@
     const names = new Set(placed.map((l) => l.name));
     const given = {};
     for (const b of boards) {
-      const best = new Map();
-      for (const p of b.points) {
-        if (!p.plotted) continue;
-        for (const l of p.lanes) {
-          if (names.has(l.name) && (!best.has(l.name) || p.score > best.get(l.name))) best.set(l.name, p.score);
-        }
-      }
-      const ranked = [...best.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
-      const ends = [];
-      let cum = 0;
-      for (const t of TIERS) {
-        cum += counts[t] || 0;
-        ends.push([t, Math.round(ranked.length * cum / placed.length)]);
-      }
       const mine = given[b.id] = {};
-      let tieStart = 0;
-      ranked.forEach(([name, score], i) => {
-        if (i > 0 && score !== ranked[i - 1][1]) tieStart = i;
-        mine[name] = (ends.find(([, end]) => tieStart < end) || ends[ends.length - 1])[0];
-      });
+      for (const [name, c] of cutBoard(b, names, counts, placed.length)) mine[name] = c.tier;
     }
     const row = (l) => {
       const tier = tiers[l.name];
@@ -403,6 +385,115 @@
     return { counts,
              columns: boards.map((b) => ({ id: b.id, benchmark: b.benchmark, source: b.source, composite: !!b.composite })),
              groups: groups.map((g) => ({ tier: g.tier, count: g.count, rows: g.meters.flatMap((m) => m.lanes.map(row)) })) };
+  }
+
+  // One board's cut, shared by the sensitivity table and the views: the lanes
+  // in `names` the board measured, each at its best plotted point, ranked by
+  // score and cut in the proportions `counts` gives out of `total`, tier 4
+  // first. Lanes that tie on score take the better tier. A Map, best first,
+  // of lane -> { tier, score, cost }.
+  function cutBoard(board, names, counts, total) {
+    const best = new Map();
+    for (const p of board ? board.points : []) {
+      if (!p.plotted) continue;
+      for (const l of p.lanes) {
+        if (!names.has(l.name)) continue;
+        const was = best.get(l.name);
+        if (!was || p.score > was.score || (p.score === was.score && p.cost < was.cost)) {
+          best.set(l.name, { score: p.score, cost: p.cost, effort: p.effort });
+        }
+      }
+    }
+    const ranked = [...best.entries()].sort((x, y) => y[1].score - x[1].score || x[1].cost - y[1].cost
+                                                     || (x[0] < y[0] ? -1 : 1));
+    const ends = [];
+    let cum = 0;
+    for (const t of TIERS) {
+      cum += counts[t] || 0;
+      ends.push([t, total ? Math.round(ranked.length * cum / total) : 0]);
+    }
+    const out = new Map();
+    let tieStart = 0;
+    ranked.forEach(([name, at], i) => {
+      if (i > 0 && at.score !== ranked[i - 1][1].score) tieStart = i;
+      const tier = (ends.find(([, end]) => tieStart < end) || ends[ends.length - 1])[0];
+      out.set(name, Object.assign({ tier }, at));
+    });
+    return out;
+  }
+
+  // --- the flat views (benchmark-views ticket 01) ----------------------------------
+
+  // The tier each lane holds for the views: the one drawn on this page, else
+  // the catalog's own. A lane off on this page holds none, and so does a lane
+  // with neither.
+  function heldTiers(lanes, tiers) {
+    const out = {};
+    for (const l of placeable(lanes)) {
+      const t = (tiers || {})[l.name];
+      if (t === OFF) continue;
+      if (TIERS.includes(t)) out[l.name] = t;
+      else if (l.carried && TIERS.includes(l.tier)) out[l.name] = l.tier;
+    }
+    return out;
+  }
+
+  // The tier each view alone would give each held lane, in the proportions the
+  // held tiers make, and the net: the median of the views that measured the
+  // lane, the lower one when two sit in the middle, so a lane is never netted
+  // up on a split. A composite view is shown and never counted in the net.
+  function viewTiers(views, boards, lanes, tiers) {
+    const held = heldTiers(lanes, tiers);
+    const names = new Set(Object.keys(held));
+    const counts = {};
+    for (const n of names) counts[held[n]] = (counts[held[n]] || 0) + 1;
+    const byId = new Map(boards.map((b) => [b.id, b]));
+    const cuts = {};
+    for (const v of views) cuts[v.id] = v.board ? cutBoard(byId.get(v.board), names, counts, names.size) : new Map();
+    const rows = placeable(lanes).filter((l) => names.has(l.name)).map((l) => {
+      const cells = {};
+      const counted = [];
+      for (const v of views) {
+        const c = cuts[v.id].get(l.name) || null;
+        cells[v.id] = c;
+        if (c && v.kind !== "composite") counted.push(c.tier);
+      }
+      counted.sort((a, b) => a - b);
+      const net = counted.length ? counted[Math.floor((counted.length - 1) / 2)] : null;
+      return { name: l.name, harness: l.harness, meter: l.meter, effort: l.effort, rank: l.rank || 0,
+               tier: held[l.name], cells, net, measured: counted.length };
+    });
+    rows.sort((a, b) => ((b.net || 0) - (a.net || 0)) || (b.tier - a.tier) || (a.rank - b.rank));
+    return { held, counts, cuts, rows };
+  }
+
+  // One view's board as four tiers: the lanes its cut gives each, best first,
+  // and the held lanes it did not measure.
+  function viewColumns(view, cut, held) {
+    const columns = TIERS.map((tier) => ({ tier, lanes: [] }));
+    for (const [name, c] of cut) {
+      columns[TIERS.indexOf(c.tier)].lanes.push(Object.assign({ name, held: held[name] }, c));
+    }
+    for (const col of columns) {
+      const costs = col.lanes.map((l) => l.cost).filter(Number.isFinite);
+      const cheapest = costs.length ? Math.min(...costs) : null;
+      col.lanes.forEach((l, i) => { l.best = i === 0; l.cheapest = col.lanes.length > 1 && l.cost === cheapest; });
+    }
+    const missing = Object.keys(held).filter((n) => !cut.has(n)).sort();
+    return { columns, missing };
+  }
+
+  // Which efforts a coverage cell measured, and which of them a row's lanes run.
+  function coverageCell(cell, lanes) {
+    const runs = new Set((lanes || []).filter((l) => l.carried).map((l) => l.effort));
+    const measured = Object.keys((cell && cell.efforts) || {});
+    let best = null, mine = null;
+    for (const e of measured) {
+      const at = cell.efforts[e];
+      if (!best || at.score > best.score) best = Object.assign({ effort: e }, at);
+      if (runs.has(e) && (!mine || at.score > mine.score)) mine = Object.assign({ effort: e }, at);
+    }
+    return { measured: new Set(measured), runs, best, mine };
   }
 
   // The zoom that shows one tier: its band between the tier lines when there
@@ -1522,6 +1613,199 @@
     return { draw };
   }
 
+  // --- the tabs, the Frontier tab and each view's tiers ---------------------------
+
+  const PIPS = ["low", "medium", "high", "xhigh", "max"];
+
+  function fmtTierScore(c, board) {
+    return board ? fmtScore(c.score, board.unit, scoreDecimals(board)) : String(c.score);
+  }
+
+  // The Frontier tab: the coverage matrix, then the tier each view alone gives.
+  function drawFrontier(data, page, host) {
+    const cov = data.coverage;
+    const byId = new Map(data.boards.map((b) => [b.id, b]));
+    host.textContent = "";
+    el("h3", {}, "Which model is measured where", host);
+    el("p", { class: "aside" }, "Each cell is one view's board. The five pips are low, medium, high, xhigh "
+      + "and max: filled is measured, ringed is an effort a carried lane on that harness runs. The figure is the "
+      + "best score at an effort you run, else the board's best for the model in grey.", host);
+    const scroll = el("div", { class: "scroll" }, null, host);
+    const t = el("table", { class: "coverage" }, null, scroll);
+    const hr = el("tr", {}, null, el("thead", {}, null, t));
+    el("th", {}, "Model on harness", hr);
+    el("th", {}, "Your efforts", hr);
+    for (const v of cov.views) {
+      const th = el("th", { class: "cell" + (v.kind === "composite" ? " composite" : "") }, v.title, hr);
+      el("span", { class: "sub" }, v.benchmark ? `${v.benchmark}, ${v.source}` : "no board", th);
+    }
+    el("th", { class: "cell" }, "Views", hr);
+    const tb = el("tbody", {}, null, t);
+    const others = cov.rows.filter((r) => !r.ours);
+    const drawRow = (r, extra) => {
+      const tr = el("tr", { class: (r.ours ? "ours" : "other") + (extra || "") }, null, tb);
+      const name = el("td", { class: "lane" }, null, tr);
+      if (r.harness) {
+        el("span", { class: "swatch", style: `background:${harnessColour(r.harness)}` }, null, name);
+        name.appendChild(document.createTextNode(`${r.name} `));
+        el("span", { class: "sub inline" }, `on ${r.harness}`, name);
+      } else {
+        name.appendChild(document.createTextNode(r.name));
+      }
+      const efforts = r.lanes.map((l) => l.effort + (l.carried ? "" : "°")).join(" ");
+      el("td", { class: "efforts mono", title: "° = in the catalog, not carried" }, efforts || "—", tr);
+      let count = 0, mineCount = 0;
+      for (const v of cov.views) {
+        const c = coverageCell(r.cells[v.id], r.lanes);
+        const td = el("td", { class: "cell cov" + (v.kind === "composite" ? " composite" : "") }, null, tr);
+        if (!c.measured.size) {
+          el("span", { class: "quiet" }, "—", td);
+          continue;
+        }
+        if (v.kind !== "composite") { count++; if (c.mine) mineCount++; }
+        const pips = el("span", { class: "pips", title: `measured: ${[...c.measured].join(", ")}` }, null, td);
+        for (const e of PIPS) {
+          const cls = "pip" + (c.measured.has(e) ? " on" : "") + (c.runs.has(e) ? " runs" : "");
+          el("span", { class: cls, title: e }, null, pips);
+        }
+        const at = c.mine || c.best;
+        el("span", { class: "fig" + (c.mine ? "" : " quiet") },
+           `${fmtTierScore(at, byId.get(v.board))} ${at.effort}`, td);
+      }
+      const counted = cov.views.filter((v) => v.kind !== "composite").length;
+      el("td", { class: "cell", title: "views measured / at an effort you run" },
+         r.ours ? `${count}/${counted} · ${mineCount}` : `${count}/${counted}`, tr);
+    };
+    cov.rows.filter((r) => r.ours).forEach((r) => drawRow(r));
+    if (others.length) {
+      const tr = el("tr", { class: "more" }, null, tb);
+      const td = el("td", { colspan: String(cov.views.length + 3) }, null, tr);
+      const button = el("button", { type: "button", class: "quiet-button" },
+                        page.showOthers ? `Hide the ${others.length} models your catalog does not run`
+                                        : `Show the ${others.length} models your catalog does not run, best overall first`, td);
+      button.addEventListener("click", () => { page.showOthers = !page.showOthers; drawFrontier(data, page, host); });
+      if (page.showOthers) others.forEach((r) => drawRow(r));
+    }
+
+    // the classification: each view alone, and the net
+    const vt = viewTiers(cov.views, data.boards, data.lanes, page.tiers);
+    el("h3", {}, "The tier each view alone would give", host);
+    const shares = TIERS.map((tier) => `${vt.counts[tier] || 0} on tier ${tier}`).join(", ");
+    el("p", { class: "aside" }, "Each view ranks your tiered lanes it measured and cuts them in the proportions "
+      + `your tiers make (${shares}; drawn on this page, else the catalog's). A marked cell differs from your `
+      + "tier. Net is the middle of the views that measured the lane, the lower one on a split; Overall is a "
+      + "composite, shown and never counted.", host);
+    const s2 = el("div", { class: "scroll" }, null, host);
+    const t2 = el("table", { class: "sens views" }, null, s2);
+    const h2 = el("tr", {}, null, el("thead", {}, null, t2));
+    el("th", { class: "lane" }, "Lane", h2);
+    el("th", { class: "cell" }, "Yours", h2);
+    for (const v of cov.views) el("th", { class: "cell" + (v.kind === "composite" ? " composite" : "") }, v.title, h2);
+    el("th", { class: "cell" }, "Net", h2);
+    const b2 = el("tbody", {}, null, t2);
+    for (const r of vt.rows) {
+      const tr = el("tr", { "data-lane": r.name }, null, b2);
+      const td = el("td", { class: "lane" }, null, tr);
+      el("span", { class: "swatch", style: `background:${meterColour(r.meter)}` }, null, td);
+      td.appendChild(document.createTextNode(r.name));
+      el("td", { class: "mine" }, String(r.tier), tr);
+      for (const v of cov.views) {
+        const c = r.cells[v.id];
+        const comp = v.kind === "composite" ? " composite" : "";
+        if (!c) { el("td", { class: "cell none" + comp }, "—", tr); continue; }
+        const differs = c.tier !== r.tier;
+        const cell = el("td", { class: "cell" + (differs ? " diff" : "") + comp,
+                                title: `${v.title}: ${fmtTierScore(c, byId.get(v.board))} at ${c.effort}` }, null, tr);
+        el("span", {}, String(c.tier), cell);
+      }
+      el("td", { class: "mine" + (r.net !== null && r.net !== r.tier ? " net-diff" : "") },
+         r.net === null ? "—" : String(r.net), tr);
+      tr.addEventListener("mouseenter", () => page.highlight(r.name));
+      tr.addEventListener("mouseleave", () => page.highlight(null));
+    }
+    if (!vt.rows.length) el("p", { class: "aside" }, "No carried lane has a tier yet, so there is nothing to cut.", host);
+  }
+
+  // One view's body: its four tiers on its board, then its plot.
+  function drawView(view, data, page, host) {
+    const byId = new Map(data.boards.map((b) => [b.id, b]));
+    const board = view.board ? byId.get(view.board) : null;
+    let tiersHost = host.querySelector(".view-tiers");
+    if (!tiersHost) tiersHost = el("div", { class: "view-tiers" }, null, host);
+    tiersHost.textContent = "";
+    if (!board) {
+      el("p", { class: "missing" }, "None of this view's boards has rows on this page, so it has nothing to rank.", tiersHost);
+      return;
+    }
+    const vt = viewTiers([view], data.boards, data.lanes, page.tiers);
+    const { columns, missing } = viewColumns(view, vt.cuts[view.id], vt.held);
+    el("p", { class: "meta" }, `Board: ${board.benchmark}, ${board.source}, ${board.basis}, observed ${board.when}. `
+      + "Your tiered lanes, ranked on this board at their own effort and cut in the proportions of your tiers. "
+      + "The top of each tier is its best lane here.", tiersHost);
+    const grid = el("div", { class: "tier-grid" }, null, tiersHost);
+    for (const col of columns) {
+      const box = el("div", { class: "tier-col" }, null, grid);
+      const h = el("h3", {}, `Tier ${col.tier}`, box);
+      el("span", { class: "n" }, `${col.lanes.length}`, h);
+      if (!col.lanes.length) el("p", { class: "empty" }, "No lane", box);
+      const ol = el("ol", {}, null, box);
+      for (const l of col.lanes) {
+        const li = el("li", { class: (l.best ? "best" : "") + (l.held !== col.tier ? " moved" : ""), "data-lane": l.name }, null, ol);
+        const lane = data.lanes.find((x) => x.name === l.name) || {};
+        el("span", { class: "swatch", style: `background:${meterColour(lane.meter)}` }, null, li);
+        el("span", { class: "nm" }, l.name, li);
+        el("span", { class: "fig" }, fmtScore(l.score, board.unit, scoreDecimals(board)), li);
+        el("span", { class: "cost" }, fmtMoney(l.cost) + (l.cheapest ? " · cheapest in tier" : ""), li);
+        if (l.held !== col.tier) el("span", { class: "was", title: "your tier" }, `yours ${l.held}`, li);
+        li.addEventListener("mouseenter", () => page.highlight(l.name));
+        li.addEventListener("mouseleave", () => page.highlight(null));
+      }
+    }
+    if (missing.length) el("p", { class: "aside" }, `Not measured here at the effort they run: ${missing.join(", ")}.`, tiersHost);
+  }
+
+  function makeTabs(data, page, onShow) {
+    const tabs = [...document.querySelectorAll("nav.tabs .tab")];
+    const sections = [...document.querySelectorAll("[data-view]")].filter((n) => !n.classList.contains("tab"));
+    const known = new Set(tabs.map((t) => t.dataset.view));
+    const aside = document.getElementById("tiers");
+    const viewIds = new Set(data.coverage.views.map((v) => v.id).concat(["boards"]));
+    function show(id, push) {
+      if (!known.has(id)) id = "frontier";
+      page.view = id;
+      for (const t of tabs) {
+        const on = t.dataset.view === id;
+        t.setAttribute("aria-selected", String(on));
+        t.tabIndex = on ? 0 : -1;
+      }
+      for (const n of sections) n.hidden = n.dataset.view !== id;
+      // the board grid holds the frontier, the views and the workbench
+      const grid = document.querySelector(".board");
+      if (grid) {
+        grid.hidden = !(id === "frontier" || viewIds.has(id));
+        grid.classList.toggle("solo", id === "frontier");
+      }
+      if (aside) aside.classList.toggle("tucked", !viewIds.has(id));
+
+      if (push && history.replaceState) history.replaceState(null, "", `#tab=${id}`);
+      page.saveView(id);
+      onShow(id);
+    }
+    for (const t of tabs) {
+      t.addEventListener("click", (e) => { e.preventDefault(); show(t.dataset.view, true); });
+      t.addEventListener("keydown", (e) => {
+        const i = tabs.indexOf(t);
+        const to = e.key === "ArrowRight" ? tabs[(i + 1) % tabs.length] : e.key === "ArrowLeft" ? tabs[(i + tabs.length - 1) % tabs.length] : null;
+        if (to) { e.preventDefault(); to.focus(); show(to.dataset.view, true); }
+      });
+    }
+    const fromHash = (location.hash || "").replace(/^#(tab=|view-)/, "");
+    show(known.has(fromHash) ? fromHash : (page.savedView && known.has(page.savedView) ? page.savedView : "frontier"), false);
+    // the hash names a tab, not a place to scroll to
+    if (fromHash) setTimeout(() => window.scrollTo(0, 0), 0);
+    return { show };
+  }
+
   // --- the page's own state, kept in this browser -----------------------------------
 
   function makeStore(data) {
@@ -1546,10 +1830,13 @@
       if (data.boards.some((b) => boardKey(b) === key) && Array.isArray(xs) && xs.length === 3
           && xs.every(Number.isFinite) && xs[0] < xs[1] && xs[1] < xs[2]) lines[key] = xs.slice();
     }
-    const page = { tiers, lines, manual, hovered: null, tierView: !!saved.tierView, focusTier: null, selected: null, storage: "ok" };
+    const page = { tiers, lines, manual, hovered: null, tierView: !!saved.tierView, focusTier: null, selected: null,
+                   storage: "ok", savedView: typeof saved.view === "string" ? saved.view : null, view: null };
+    page.saveView = (id) => { page.savedView = id; page.save(); };
     page.save = () => {
       try {
-        localStorage.setItem(key, JSON.stringify({ version: 2, tiers, lines, manual, tierView: page.tierView }));
+        localStorage.setItem(key, JSON.stringify({ version: 2, tiers, lines, manual, tierView: page.tierView,
+                                                   view: page.savedView }));
         page.storage = "ok";
       } catch (_err) {
         page.storage = "unavailable";
@@ -1730,9 +2017,20 @@
     };
     page.boardChanged = () => { if (tierPanel) tierPanel.draw(); };
 
+    const views = (data.coverage && data.coverage.views) || [];
+    const frontierHost = document.getElementById("frontier");
+    const viewPanels = new Map();
+    const drawViews = () => {
+      if (frontierHost) drawFrontier(data, page, frontierHost);
+      for (const v of views) {
+        const body = document.querySelector(`[data-view-body="${v.id}"]`);
+        if (body) drawView(v, data, page, body);
+      }
+    };
     page.redraw = (onlySource) => {
       every((p) => { if (!onlySource || p.source() === onlySource) p.draw(); });
       if (tierPanel && !onlySource) tierPanel.draw();
+      if (!onlySource) drawViews();
     };
     page.setTiers = (changes) => {
       for (const [names, tier] of changes) {
@@ -1785,6 +2083,20 @@
     };
     for (const id of data.defaults) add(id);
     if (tierPanel) tierPanel.draw();
+    drawViews();
+    // a view's plot is made the first time its tab shows, so it is laid out
+    // at its real size; the view's board is picked, and the drop-down still
+    // reaches every board
+    makeTabs(data, page, (id) => {
+      const v = views.find((x) => x.id === id);
+      if (v && v.board && !viewPanels.has(id)) {
+        const body = document.querySelector(`[data-view-body="${id}"]`);
+        const host = el("div", { class: "view-plot" }, null, body);
+        viewPanels.set(id, makePanel(data, host, count++, v.board, remove, every, page));
+        panels.push(viewPanels.get(id));
+      }
+      every((p) => { if (p.root.offsetParent !== null) p.draw(); });
+    });
     const more = document.getElementById("add-plot");
     if (more) {
       more.hidden = false;
@@ -1821,6 +2133,7 @@
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
                        tierLinesText, focusDomain, applyBands, makeStore, boardKey, pointOff, carriedNames,
                        placeable, beatenByLane, panelGroups, sensitivity, meterColour, setShades,
+                       cutBoard, heldTiers, viewTiers, viewColumns, coverageCell, PIPS,
                        priceValues, drawPrices, fmtPrice, OFF, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

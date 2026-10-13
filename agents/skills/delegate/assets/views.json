@@ -1,0 +1,48 @@
+{
+  "version": "delegate-views.v1",
+  "note": "The benchmark page's flat views (benchmark-views ticket 01): one tab per view, each a kind of job the user picks a Lane for, drawn from one board. `boards` lists [source, benchmark] in preference order; the first board the page has rows for is the view's board, and a benchmark name also matches a versioned one (`Terminal-Bench` matches `Terminal-Bench 2.1`), so a new version of a board needs no edit here. `kind` groups the views on the Frontier tab: composite is shown and never counted in the net tier. `why` is curated, says what decision the view helps with, and is not the source's claim; the source's own words are in boards.json. No model, harness or effort is named here: which Lanes a view lists is the catalog's, found at runtime.",
+  "views": [
+    {
+      "id": "overall",
+      "title": "Overall",
+      "kind": "composite",
+      "boards": [["aa", "Artificial Analysis Intelligence Index"]],
+      "why": "The top-level picture: one composite across agents, coding, scientific reasoning and general knowledge. Good for a first cut, never the whole answer."
+    },
+    {
+      "id": "coding-agent",
+      "title": "Coding agent",
+      "kind": "coding",
+      "boards": [["aa", "Terminal-Bench"], ["tbench", "Terminal-Bench"]],
+      "why": "An agent working in a terminal: building, debugging and operating code end to end. The closest board to a delegated coding job, measured at every effort."
+    },
+    {
+      "id": "repo-coding",
+      "title": "Whole-repo coding",
+      "kind": "coding",
+      "boards": [["swerb", "SWE Refactor Bench"]],
+      "why": "Moving a whole repository to a new stack: long-horizon edits across many files, checked by the repository's own tests."
+    },
+    {
+      "id": "knowledge-work",
+      "title": "Knowledge work",
+      "kind": "knowledge",
+      "boards": [["aa", "GDPval"]],
+      "why": "Professional deliverables (documents, spreadsheets, analyses) graded against what an expert in the occupation would produce."
+    },
+    {
+      "id": "facts",
+      "title": "Factual reliability",
+      "kind": "knowledge",
+      "boards": [["aa", "Omniscience"]],
+      "why": "Whether a model knows the answer or says it does not, with a penalty for confident wrong guesses. Research and review jobs lean on this."
+    },
+    {
+      "id": "automation",
+      "title": "Automation",
+      "kind": "automation",
+      "boards": [["aa", "AutomationBench"]],
+      "why": "Multi-step business workflows driven through REST APIs. Evidence for tool-calling jobs, not for clicking through a browser."
+    }
+  ]
+}

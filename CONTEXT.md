@@ -158,6 +158,14 @@ _Avoid_: snapshot (alone), bench data, the cache (when you mean the rows), prove
 The benchmark rows that belong to one lane: published for the lane's Model and measured at the lane's effort. The carry rule compares them with the rows of the same Model at the other efforts the lane's Harness runs. A row at an effort that Harness does not run belongs to that Model as context and is no lane's evidence there.
 _Avoid_: lane rows, matched rows, attributed rows (in prose), scores (when you mean the rows)
 
+**View**:
+One tab of the benchmark page that ranks Lanes for one kind of job from one board, such as a coding agent or knowledge work. `assets/views.json` names each View's boards; the Lanes come from the catalog. A View's tier is a display aid: it is the tier that board alone would give each Lane, and nothing writes it.
+_Avoid_: domain (until per-domain Tiers exist), category, nested view
+
+**Net tier**:
+The middle of the tiers a Lane's Views give it, the lower one on a split, leaving out the composite. It is a display aid beside the Tier the Lane holds.
+_Avoid_: overall tier, average tier
+
 ## Delegate: usage
 
 **Meter**:

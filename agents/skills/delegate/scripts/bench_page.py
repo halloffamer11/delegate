@@ -54,6 +54,7 @@ ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"
 SOURCES_PATH = bench.SOURCES_PATH
 BOARDS_PATH = bench.BOARDS_PATH
 SCRIPT_PATH = os.path.join(ASSETS, "bench_page.js")
+VIEWS_PATH = os.path.join(ASSETS, "views.json")
 
 # Said in place of a description for a board `assets/boards.json` does not
 # cover. A description is quoted from the source's own methodology page, never
@@ -609,7 +610,129 @@ def _plot_data(items, lanes_doc, proposals, bench=None):
             "meters": meter_shades(lanes_doc),
             "efforts": sorted(efforts, key=_effort_key),
             "lanes": _lane_list(lanes_doc, bench, items, proposals),
+            "coverage": coverage(load_views(), boards, items, lanes_doc, bench),
             "catalogKey": catalog_key(lanes_doc)}
+
+
+# --- the flat views (benchmark-views ticket 01) ------------------------------------
+
+# The tabs every page has around the views: the coverage matrix first, then
+# one tab per view, then the workbench of free plots, the prices and the
+# numbers. One level, never nested.
+FRONTIER_TAB = ("frontier", "Frontier")
+FIXED_TABS = (("boards", "All boards"), ("prices", "Prices"), ("numbers", "Numbers"))
+
+
+def load_views(path=None):
+    """The views `assets/views.json` defines, in its order. A missing or
+    unreadable file is no views, and the page falls back to its plots."""
+    try:
+        with open(path or VIEWS_PATH, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return []
+    views = []
+    for v in doc.get("views") or ():
+        if not isinstance(v, dict) or not isinstance(v.get("id"), str):
+            continue
+        pairs = [tuple(b) for b in v.get("boards") or () if isinstance(b, list) and len(b) == 2]
+        views.append({"id": v["id"], "title": v.get("title") or v["id"], "kind": v.get("kind") or "",
+                      "why": v.get("why") or "", "boards": pairs})
+    return views
+
+
+def _names_board(benchmark, wanted):
+    """`Terminal-Bench` names `Terminal-Bench 2.1`: a new version of a board
+    needs no edit to the views."""
+    return benchmark == wanted or benchmark.startswith(wanted + " ")
+
+
+def _version_key(benchmark):
+    return [int(x) if x.isdigit() else x for x in benchmark.replace("-", " ").replace(".", " ").split()]
+
+
+def view_boards(view, boards):
+    """The ids of the boards a view draws from, best first: each
+    [source, benchmark] in the view's order, the newest version first."""
+    out = []
+    for source, wanted in view["boards"]:
+        found = [b for b in boards if b["source"] == source and _names_board(b["benchmark"], wanted)]
+        found.sort(key=lambda b: _version_key(b["benchmark"]), reverse=True)
+        out += [b["id"] for b in found if b["id"] not in out]
+    return out
+
+
+def coverage(views, boards, items, lanes_doc, bench=None):
+    """The Frontier tab: one row per model and harness the catalog runs, then
+    one per model it does not, with each view's measured efforts.
+
+    Model and harness are one factor (a benchmark scores a model, and a
+    harness runs some of its efforts), and effort is the second: a cell lists
+    every effort the view's board measured for the model, and the row says
+    which of them the harness's Lanes run. A model on two harnesses is two
+    rows with the same measurements and different Lanes, so Kiro or agy
+    running a model Claude Code also runs reads as its own choice."""
+    lanes = _lanes(lanes_doc)
+    by_id = {b["id"]: b for b in boards}
+    primary = {v["id"]: (view_boards(v, boards) or [None])[0] for v in views}
+    # the model each Lane's rows are printed under
+    model_of = {}
+    for item in items:
+        for name in item["_model_lanes"] + item["_lanes"]:
+            model_of.setdefault(name, _model_key(item))
+    measured = defaultdict(dict)  # (model, board id) -> {effort: {score, cost}}
+    board_id = {(b["source"], b["benchmark"]): b["id"] for b in boards}
+    for item in items:
+        bid = board_id.get((item.get("source") or "?", item.get("benchmark") or "?"))
+        if bid is None or item["_score"] is None:
+            continue
+        cell = measured[(_model_key(item), bid)]
+        effort = item.get("effort") or "?"
+        if effort not in cell or item["_score"] > cell[effort]["score"]:
+            cell[effort] = {"score": item["_score"], "cost": item["_cost"]}
+
+    def cells(model):
+        out = {}
+        for v in views:
+            bid = primary[v["id"]]
+            got = measured.get((model, bid)) if model and bid else None
+            out[v["id"]] = {"board": bid, "efforts": got or {}}
+        return out
+
+    def best_overall(model):
+        scores = [e["score"] for v in views if v["kind"] == "composite"
+                  for e in measured.get((model, primary[v["id"]]), {}).values()]
+        return max(scores, default=None)
+
+    rows, seen = [], {}
+    for name in lane_order({"lanes": lanes}, bench):
+        lane = lanes[name]
+        key = (model_identity(lane), lane.get("harness"))
+        if key not in seen:
+            model = model_of.get(name)
+            seen[key] = {"id": f"{key[0]}@{key[1]}", "model": model,
+                         "name": _short_model(model, model) if model else (lane.get("model") or key[0]),
+                         "harness": lane.get("harness"), "ours": True, "lanes": []}
+            rows.append(seen[key])
+        row = seen[key]
+        row["model"] = row["model"] or model_of.get(name)
+        row["lanes"].append({"name": name, "effort": lane.get("effort"), "carried": _carried(lane),
+                             "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
+                             "meter": lane.get("meter")})
+    ours = {row["model"] for row in rows if row["model"]}
+    for row in rows:
+        row["cells"] = cells(row["model"])
+        row["lanes"].sort(key=lambda l: _effort_key(l.get("effort")))
+    others = sorted({_model_key(i) for i in items if _model_key(i) not in ours},
+                    key=lambda m: (-(best_overall(m) if best_overall(m) is not None else -1), m))
+    for model in others:
+        rows.append({"id": model, "model": model, "name": _short_model(model, None), "harness": None,
+                     "ours": False, "lanes": [], "cells": cells(model)})
+    return {"views": [dict(v, boards=view_boards(v, boards), board=primary[v["id"]],
+                           benchmark=(by_id[primary[v["id"]]]["benchmark"] if primary[v["id"]] else None),
+                           source=(by_id[primary[v["id"]]]["source"] if primary[v["id"]] else None))
+                      for v in views],
+            "efforts": list(EFFORT_ORDER), "rows": rows}
 
 
 def _json_for_script(data):
@@ -627,32 +750,65 @@ def _script():
     return text
 
 
+def _tabs(views):
+    """The flat row of tabs. Each is a link to its section, so with the script
+    off the row is a table of contents and every section shows."""
+    tabs = [FRONTIER_TAB] + [(v["id"], v["title"]) for v in views] + list(FIXED_TABS)
+    links = "".join(f'<a class="tab" role="tab" href="#view-{_esc(i)}" data-view="{_esc(i)}">{_esc(t)}</a>'
+                    for i, t in tabs)
+    return [f'<nav class="tabs" role="tablist" aria-label="Views">{links}</nav>']
+
+
+def _view_shell(view):
+    """One view's section: its title and why it is a view, from views.json;
+    the script fills in the tiers on its board and its plot."""
+    return [f'<section class="view" id="view-{_esc(view["id"])}" data-view="{_esc(view["id"])}">',
+            f'<h2>{_esc(view["title"])}</h2>',
+            f'<p class="lede">{_esc(view["why"])}</p>',
+            f'<div class="view-body" data-view-body="{_esc(view["id"])}"></div>',
+            "</section>"]
+
+
 def _plots_section(effort_rows, items, lanes_doc, proposals, bench=None):
-    out = ['<section class="plots">', "<h2>Score against cost</h2>"]
     if effort_rows is None:
-        return out + [_missing("Per-effort"), "</section>"]
+        return ['<section class="plots">', "<h2>Score against cost</h2>", _missing("Per-effort"), "</section>"], None
     data = _plot_data(items, lanes_doc, proposals, bench)
     if not data["boards"]:
-        return out + ["<p>No per-effort rows.</p>", "</section>"]
-    out += ['<p class="lede">Up is better and left is cheaper. The amber line is the best score '
+        return ['<section class="plots">', "<h2>Score against cost</h2>",
+                "<p>No per-effort rows.</p>", "</section>"], None
+    views = data["coverage"]["views"]
+    out = _tabs(views)
+    out += ['<div class="board">',
+            '<div class="plot-column">',
+            '<section class="view" id="view-frontier" data-view="frontier">',
+            "<h2>Frontier</h2>",
+            '<p class="lede">Which model has been measured on which view, and at which efforts. '
+            "A row is a model on a harness: the benchmark scores the model, and the harness decides "
+            "which of its efforts you can run. Under it, the tier each view alone would give each "
+            "carried lane, and the net of the views that measured it.</p>",
+            '<div id="frontier"></div>',
+            "</section>"]
+    for view in views:
+        out += _view_shell(view)
+    out += ['<section class="view plots" id="view-boards" data-view="boards">',
+            "<h2>Score against cost</h2>",
+            '<p class="lede">Up is better and left is cheaper. The amber line is the best score '
             "the money buys, and everything in the shade under it is beaten by a point on the "
             "line. Colour is the meter, the quota a lane spends. Each plot is one benchmark from "
             "one source, because a dollar on one board is not a dollar on another. Drag a tier "
             "line to move it; click a dot and press 1 to 4 to give its lane a tier, or o to turn "
             "it off.</p>",
-            '<div class="board">',
-            '<div class="plot-column">',
             '<div id="plots"></div>',
             '<button id="add-plot" type="button" class="add" hidden>Add a plot</button>',
             '<section id="sensitivity" class="sensitivity" aria-label="Tiers each board alone would give" hidden></section>',
+            "</section>",
             "</div>",
             '<aside id="tiers" class="tiers" aria-label="Tiers drawn on this page" hidden></aside>',
             "</div>",
             '<noscript><p class="missing">The plots need JavaScript. Every number is in the '
             "tables under “The numbers”.</p></noscript>",
-            f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>',
-            "</section>"]
-    return out + _comparison_section(data)
+            f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>']
+    return out, data
 
 
 def _price_section(lanes_doc):
@@ -1415,6 +1571,51 @@ td.model { border-right: 1px solid var(--grid); }
 .rows tr.weak td { border-left: 3px solid var(--flag-ink); }
 .rows tr.nolane td { color: var(--ink-2); }
 .notes { font-size: 12.5px; padding-left: 1.2rem; }
+/* the flat tabs and the views (benchmark-views ticket 01) */
+nav.tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 1.2rem 0 0; padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--rule); position: sticky; top: 0; z-index: 4; background: var(--page); padding-top: 0.4rem; }
+nav.tabs .tab { padding: 0.3rem 0.75rem; border-radius: 999px; text-decoration: none; color: var(--ink-2);
+  border: 1px solid transparent; font-weight: 550; }
+nav.tabs .tab:hover { border-color: var(--rule); color: var(--ink); }
+nav.tabs .tab[aria-selected="true"] { background: var(--ink); color: var(--surface); }
+.view[hidden], .board[hidden] { display: none; }
+.view > h2:first-child { margin-top: 1.1rem; }
+.tiers.tucked { display: none; }
+.board.solo { grid-template-columns: minmax(0, 1fr); }
+table.coverage { font-size: 12.5px; }
+table.coverage th.cell, table.coverage td.cell { text-align: center; }
+table.coverage thead th { white-space: normal; vertical-align: bottom; min-width: 6.5rem; }
+table.coverage td.efforts { white-space: normal; max-width: 11rem; }
+table.coverage th.composite, table.coverage td.composite { background: var(--head); }
+table.coverage td.lane { white-space: nowrap; }
+table.coverage td.lane .swatch { margin-right: 0.4rem; vertical-align: 0; }
+table.coverage .sub.inline { display: inline; }
+table.coverage td.efforts { font-size: 11.5px; color: var(--ink-2); }
+table.coverage tr.other td { color: var(--ink-2); }
+table.coverage td.cov .fig { display: block; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.pips { display: inline-flex; gap: 3px; }
+.pip { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--rule); background: transparent; }
+.pip.on { background: var(--ink-2); border-color: var(--ink-2); }
+.pip.runs { box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--accent); }
+table.sens td.mine.net-diff { color: var(--frontier-ink); }
+.tier-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; margin-top: 0.7rem; }
+.tier-col { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 0.5rem 0.65rem 0.6rem; min-width: 0; }
+.tier-col h3 { display: flex; align-items: baseline; gap: 0.4rem; margin: 0 0 0.3rem; font-size: 13.5px; }
+.tier-col h3 .n { font-weight: 400; color: var(--muted); }
+.tier-col .empty { color: var(--muted); font-size: 12.5px; }
+.tier-col ol { list-style: none; margin: 0; padding: 0; }
+.tier-col li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0 0.4rem; align-items: center;
+  padding: 0.15rem 0; border-top: 1px solid var(--grid); font-size: 12.5px; }
+.tier-col li:first-child { border-top: 0; }
+.tier-col li .nm { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tier-col li .fig { font-variant-numeric: tabular-nums; font-weight: 600; }
+.tier-col li .cost, .tier-col li .was { grid-column: 2 / 4; font-size: 11.5px; color: var(--muted); }
+.tier-col li .was { color: var(--frontier-ink); }
+.tier-col li.best .nm { font-weight: 700; }
+.tier-col li:hover { background: var(--head); }
+.view-plot .plot { margin-top: 0.9rem; }
+@media (max-width: 62rem) { .tier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 40rem) { .tier-grid { grid-template-columns: minmax(0, 1fr); } }
 footer { margin-top: 3rem; color: var(--muted); font-size: 12.5px; }
 @media (max-width: 62rem) { .plot-body, .board { grid-template-columns: minmax(0, 1fr); }
   .tiers { position: static; max-height: none; } }
@@ -1449,15 +1650,22 @@ def render(bench, lanes_doc, effort_rows=None, epoch_rows=None):
         "<main>",
     ]
     chunks.extend(_header(lanes_doc, effort_rows, prescreen))
-    chunks.extend(_plots_section(effort_rows, items, lanes_doc, proposals, bench))
-    chunks.extend(_price_section(lanes_doc))
+    plots, data = _plots_section(effort_rows, items, lanes_doc, proposals, bench)
+    chunks.extend(plots)
+    prices = _price_section(lanes_doc)
+    if prices:
+        prices[0] = '<section class="view prices" id="view-prices" data-view="prices">'
+    chunks.extend(prices)
+    chunks += ['<div class="view" id="view-numbers" data-view="numbers">']
+    if data:
+        chunks.extend(_comparison_section(data))
     chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
                "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
     chunks.extend(_boards_block(items))
     chunks.extend(_rows_block(items, lanes_doc, epoch_rows))
     chunks.extend(_catalog_block(lanes_doc, proposals))
     chunks.extend(_scores_block(bench, lanes_doc))
-    chunks.append("</section>")
+    chunks += ["</section>", "</div>"]
     chunks.append("<footer>Epoch AI data is CC-BY 4.0. Artificial Analysis data requires "
                   "attribution. Terminal-Bench scores an agent-model pair, never a model "
                   "alone. Costs are never comparable across sources.</footer>")
