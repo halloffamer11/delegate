@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark plots</title>
+<style>
+:root {
+  --bg: #fbfaf7; --panel: #ffffff; --fg: #1c1b19; --muted: #6b6860; --faint: #a8a49a; --line: #e6e2d9; --soft: #f2efe8;
+  --h-claude: #c2410c; --h-codex: #1d4ed8; --h-agy: #be185d; --h-grok: #334155; --h-kiro: #15803d;
+  --up: #15803d; --down: #b45309;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161513; --panel: #1e1d1a; --fg: #ecebe6; --muted: #a29e94; --faint: #6a675f; --line: #34322d; --soft: #26241f;
+    --h-claude: #fb923c; --h-codex: #60a5fa; --h-agy: #f472b6; --h-grok: #cbd5e1; --h-kiro: #4ade80;
+    --up: #4ade80; --down: #fbbf24;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161513; --panel: #1e1d1a; --fg: #ecebe6; --muted: #a29e94; --faint: #6a675f; --line: #34322d; --soft: #26241f;
+  --h-claude: #fb923c; --h-codex: #60a5fa; --h-agy: #f472b6; --h-grok: #cbd5e1; --h-kiro: #4ade80;
+  --up: #4ade80; --down: #fbbf24;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1320px; margin: 0 auto; padding: 20px 16px 60px; }
+h1 { font-size: 20px; margin: 0 0 2px; font-weight: 650; letter-spacing: -.01em; }
+h2 { font-size: 15px; margin: 0; font-weight: 650; }
+p { margin: 0; }
+.sub { color: var(--muted); font-size: 13px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+button { font: inherit; color: inherit; }
+.ideas { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding: 2px 0 2px 12px; margin: 0 0 18px; }
+.ideas summary { cursor: pointer; color: var(--fg); font-weight: 600; }
+.ideas ul { margin: 6px 0 0; padding-left: 18px; }
+.tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); font-weight: 600; }
+.tab small { color: var(--faint); margin-left: 4px; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 14px 0 10px; }
+.bar .lab { color: var(--muted); font-size: 12px; }
+.hz { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 2px 10px 2px 8px; cursor: pointer; font-size: 12.5px; }
+.hz i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); display: inline-block; }
+.hz[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 1px 7px 1px 5px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+.chip svg { flex: none; }
+.chip small { color: var(--muted); }
+.chip[aria-pressed="true"] { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px 8px; min-width: 0; }
+.card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.card header .sub { font-size: 12px; text-align: right; }
+.plot svg { display: block; width: 100%; height: auto; margin-top: 4px; }
+svg text { fill: var(--muted); font-size: 10px; }
+.ax line { stroke: var(--line); }
+.ax .zero { stroke: var(--faint); }
+.fr { fill: none; stroke: var(--faint); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.cmp { fill: var(--faint); opacity: .55; }
+.s .ln { fill: none; stroke: var(--c); stroke-width: 1.6; opacity: .8; }
+.s .mk { stroke: var(--c); stroke-width: 1.5; }
+.s .mk.run { fill: var(--c); }
+.s .mk.off, .s .mk.none { fill: var(--panel); }
+.s .mk.none { stroke-width: 1; opacity: .75; }
+.s .mk.ring { fill: none; stroke-width: 1.8; }
+.s .lb { fill: var(--c); font-size: 10.5px; font-weight: 600; }
+.s .ld { stroke: var(--c); stroke-width: .6; opacity: .35; }
+.s .ef { display: none; fill: var(--fg); font-size: 9.5px; }
+.focus .s, .focus .cmp, .focus .fr { opacity: .13; }
+.focus .s.on { opacity: 1; }
+.focus .s.on .ef { display: block; }
+.focus .s.on .ln { stroke-width: 2.4; }
+.hit { cursor: pointer; }
+.sec { margin: 22px 0 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.rr { display: grid; grid-template-columns: minmax(150px, 220px) 1fr 44px 58px 92px; gap: 10px; align-items: center; padding: 4px 12px; border-top: 1px solid var(--soft); cursor: pointer; }
+.rr.hd { cursor: default; color: var(--muted); font-size: 12px; border-top: 0; padding-top: 8px; }
+.rr.th { cursor: default; background: var(--soft); border-top: 1px solid var(--line); font-size: 12.5px; grid-template-columns: 1fr; padding: 5px 12px; }
+.rr.th b { margin-right: 6px; }
+.rr.th .best { color: var(--muted); }
+.rr.on { background: color-mix(in srgb, var(--c) 9%, transparent); }
+.focusr .rr:not(.on):not(.hd):not(.th) { opacity: .4; }
+.rr .who { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.who svg { flex: none; }
+.rr .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rr .who .e { color: var(--muted); }
+.rr .num { text-align: right; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.rr .num small { color: var(--muted); }
+.track { position: relative; height: 18px; }
+.track .ax { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); }
+.track .wk { position: absolute; top: 8px; height: 2px; background: var(--c); opacity: .45; border-radius: 1px; }
+.track .tk { position: absolute; top: 5px; width: 1.5px; height: 8px; background: var(--c); opacity: .6; }
+.track .dt { position: absolute; top: 3px; width: 12px; height: 12px; margin-left: -6px; }
+.scale { position: relative; height: 14px; font-size: 10px; color: var(--muted); }
+.scale span { position: absolute; transform: translateX(-50%); }
+.thin .dt { opacity: .9; }
+.tier { font-variant-numeric: tabular-nums; font-size: 12.5px; text-align: right; white-space: nowrap; }
+.tier .u { color: var(--up); } .tier .d { color: var(--down); }
+.none-row { color: var(--muted); font-size: 12.5px; padding: 6px 12px; border-top: 1px solid var(--soft); }
+.mc { background: var(--panel); border: 1px solid var(--c); border-radius: 10px; padding: 12px; margin: 0 0 12px; }
+.mc header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mc .x { background: none; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0 8px; }
+.mc .er { display: grid; grid-template-columns: 64px 1fr 150px; gap: 10px; align-items: center; padding: 2px 0; font-size: 12.5px; }
+.mc .er .vals { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.mc .er.fav .el { font-weight: 700; }
+.mc .note { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+details.how { margin-top: 18px; color: var(--muted); font-size: 13px; }
+details.how summary { cursor: pointer; color: var(--fg); font-weight: 600; }
+details.how dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0 0; }
+details.how dt { color: var(--fg); }
+details.how dd { margin: 0; }
+#tip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg); font-size: 12px; padding: 5px 8px; border-radius: 6px; white-space: pre; z-index: 9; display: none; max-width: 320px; }
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; }
+  .rr { grid-template-columns: minmax(110px, 140px) 1fr 52px; gap: 8px; padding: 4px 8px; }
+  .rr .n, .rr .c { display: none; }
+  .rr .who small { display: none; }
+  .rr.hd .tier { font-size: 0; } .rr.hd .tier::after { content: "tier"; font-size: 12px; }
+  .mc .er { grid-template-columns: 52px 1fr; }
+  .mc .er .vals { display: none; }
+}
+</style>
+</head>
+<body>
+<main>
+<details class="ideas">
+<summary>Prototype 3 (Claude): plots first, one calm ranking per classification</summary>
+<ul>
+<li><b>The benchmark plots are the page.</b> Each classification tab shows one score-against-cost plot per benchmark. Each model on a harness is one line that joins its efforts from low to max, so the shape of the line is the price of more effort.</li>
+<li><b>Colour is the harness, shape is the model.</b> Claude orange, Codex blue, Agy pink, Grok slate, Kiro green. Within a harness each model has its own marker shape, and its name sits at the end of its line.</li>
+<li><b>Fill says what you run.</b> Filled: a lane you carry. Hollow: a lane in the catalog you do not carry. Small hollow: measured, no lane at that effort. Grey dots are models you have no lane for; the dashed step is the frontier over every row.</li>
+<li><b>One selection across the page.</b> Select a model (chip, dot or ranking row) and it lights up in every plot with effort labels, its ranking rows stay bright, and a model card opens.</li>
+<li><b>One consolidated ranking.</b> A dot and whisker per carried lane: the dot is the mean percentile across the benchmarks that measured it, the ticks are each benchmark, the whisker is the spread. Rows are cut into tiers in the proportions held now, with the best and best-per-dollar lane named in each tier header.</li>
+<li><b>Model card.</b> The same dot and whisker for every effort the boards measured, with the effort the classification favours (lowest within 5 points of the best).</li>
+<li><b>Less on screen.</b> No effort stacks or matrices; rules sit in one collapsed section at the end.</li>
+</ul>
+</details>
+<h1>Benchmark plots</h1>
+<p class="sub">Pick the lane for each kind of work. Sample data; nothing here writes to the catalog.</p>
+<nav class="tabs" role="tablist" id="tabs"></nav>
+<div class="bar" id="bar"></div>
+<div id="card"></div>
+<div class="grid" id="plots"></div>
+<div class="sec"><h2 id="rank-title">Ranking</h2><span class="sub" id="rank-sub"></span></div>
+<div class="rank" id="rank"></div>
+<details class="how">
+<summary>How to read this page</summary>
+<dl>
+<dt>Line</dt><dd>One model on one harness, its efforts joined from low to max. A second harness for the same model shows only the efforts it has lanes for.</dd>
+<dt>Marker</dt><dd>Filled: you carry this lane. Hollow: the lane is in the catalog, not carried. Small hollow: the board measured this effort and you have no lane for it.</dd>
+<dt>Grey dot</dt><dd>A model you have no lane for, kept for context.</dd>
+<dt>Frontier</dt><dd>The dashed step: the best score at or below each cost, over every row on the board.</dd>
+<dt>Percentile</dt><dd>The share of rows on the board that the score beats (ties count half).</dd>
+<dt>Classification score</dt><dd>The mean percentile across the classification's benchmarks that measured the lane at its effort. The ticks are each benchmark and the whisker is the spread. A hollow dot and ~ mean fewer than half the benchmarks measured it.</dd>
+<dt>Tier here</dt><dd>The measured lanes cut in the proportions the tiers hold now; equal scores share the better tier. ▲ or ▼ is the distance from the tier the lane holds now.</dd>
+<dt>Relative cost</dt><dd>The boards use different cost bases, so cost is the lane's cost over the board's median row cost, as a geometric mean across benchmarks.</dd>
+<dt>Favoured effort</dt><dd>For a model, the lowest effort whose classification score is within 5 points of its best effort.</dd>
+</dl>
+</details>
+</main>
+<div id="tip"></div>
+<script type="application/json" id="data">__SAMPLE_DATA_JSON__</script>
+<script>
+"use strict";
+// The one grouping to edit: a board matches by source and the start of its name; the newest version wins.
+const CLASSES = [
+  { id: "coding", title: "Coding", boards: [["aa", "Terminal-Bench"], ["tbench", "Terminal-Bench"], ["swerb", "SWE Refactor Bench"]] },
+  { id: "knowledge", title: "Knowledge work", boards: [["aa", "GDPval"], ["aa", "Omniscience"], ["aa", "AA-LCR"], ["aa", "GPQA Diamond"]] },
+  { id: "automation", title: "Automation", boards: [["aa", "AutomationBench"], ["aa", "IFBench"]] },
+  { id: "overall", title: "Overall", reference: true, boards: [["aa", "Artificial Analysis Intelligence Index"]] },
+];
+const MARGIN = 5;
+const SHAPES = ["circle", "square", "diamond", "triangle", "down"];
+
+const D = JSON.parse(document.getElementById("data").textContent);
+const EFF = D.efforts, ei = e => EFF.indexOf(e);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const S = { tab: "coding", focus: null, hide: new Set(), others: true };
+
+// ---- identity: a series is a model on a harness ----
+const LANE = new Map(D.lanes.map(l => [l.name, l]));
+const byModel = new Map();
+// A model is the catalog's group; a board row reaches it through its lanes, or through another row of the same printed model.
+const gid = l => l.group || l.model;
+for (const l of D.lanes) {
+  if (!gid(l)) continue;
+  const m = byModel.get(gid(l)) || byModel.set(gid(l), new Map()).get(gid(l));
+  (m.get(l.harness) || m.set(l.harness, []).get(l.harness)).push(l);
+}
+const SERIES = new Map();
+for (const [model, hs] of byModel) {
+  const order = [...hs.keys()].sort((a, b) => (hs.get(b).length - hs.get(a).length) || ((a === "kiro") - (b === "kiro")) || D.harnesses.indexOf(a) - D.harnesses.indexOf(b));
+  order.forEach((h, i) => {
+    const lanes = hs.get(h), l0 = lanes[0];
+    const short = l0.name.split("@")[0].replace(new RegExp("-" + l0.effort + "$"), "");
+    SERIES.set(model + "@" + h, { id: model + "@" + h, model, harness: h, primary: i === 0, short, lanes: new Map(lanes.map(l => [l.effort, l])) });
+  });
+}
+for (const h of D.harnesses) {
+  const models = [...new Set([...SERIES.values()].filter(s => s.harness === h).map(s => s.model))].sort();
+  for (const s of SERIES.values()) if (s.harness === h) s.shape = SHAPES[models.indexOf(s.model) % SHAPES.length];
+}
+const serList = () => [...SERIES.values()].filter(s => !S.hide.has(s.harness)).sort((a, b) => D.harnesses.indexOf(a.harness) - D.harnesses.indexOf(b.harness) || a.short.localeCompare(b.short));
+const label = s => s.short + (s.primary ? "" : " @" + s.harness);
+
+function shape(kind, x, y, r, cls, extra) {
+  const a = `class="${cls}" ${extra || ""}`;
+  if (kind === "square") { const q = r * .88; return `<rect ${a} x="${x - q}" y="${y - q}" width="${2 * q}" height="${2 * q}" rx="1"/>`; }
+  if (kind === "diamond") { const q = r * 1.2; return `<path ${a} d="M${x},${y - q}L${x + q},${y}L${x},${y + q}L${x - q},${y}Z"/>`; }
+  if (kind === "triangle") return `<path ${a} d="M${x},${y - r * 1.15}L${x + r * 1.05},${y + r * .8}L${x - r * 1.05},${y + r * .8}Z"/>`;
+  if (kind === "down") return `<path ${a} d="M${x},${y + r * 1.15}L${x + r * 1.05},${y - r * .8}L${x - r * 1.05},${y - r * .8}Z"/>`;
+  return `<circle ${a} cx="${x}" cy="${y}" r="${r}"/>`;
+}
+const glyph = (s, filled = true) => `<svg width="12" height="12" viewBox="0 0 12 12" style="--c:var(--h-${s.harness})"><g class="s">${shape(s.shape, 6, 6, 4.2, "mk " + (filled ? "run" : "off"))}</g></svg>`;
+
+// ---- boards and classifications ----
+const ver = b => (b.benchmark.match(/\d+(\.\d+)*/) || ["0"])[0].split(".").map(Number);
+const newer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0; };
+for (const C of CLASSES) {
+  C.list = [];
+  for (const [src, name] of C.boards) {
+    const hit = D.boards.filter(b => b.source === src && b.benchmark.startsWith(name)).sort(newer)[0];
+    if (hit && !C.list.includes(hit)) C.list.push(hit);
+  }
+}
+const PM = new Map();
+for (const b of D.boards) for (const p of b.points) for (const n of p.lanes) if (LANE.has(n)) PM.set(p.model, gid(LANE.get(n)));
+const groupOf = p => p.ours ? PM.get(p.model) || (byModel.has(p.model) ? p.model : null) : null;
+for (const b of D.boards) {
+  const sc = b.points.map(p => p.score).sort((x, y) => x - y), n = sc.length;
+  b.pct = s => { let lo = 0, eq = 0; for (const v of sc) { if (v < s) lo++; else if (v === s) eq++; } return n > 1 ? 100 * (lo + (eq - 1) / 2) / (n - 1) : 50; };
+  const cs = b.points.map(p => p.cost).filter(c => c > 0).sort((x, y) => x - y);
+  b.med = cs.length ? cs[Math.floor((cs.length - 1) / 2)] : null;
+  b.frac = b.unit !== "%" && sc.every(v => Math.abs(v) <= 1.5);
+  b.at = new Map();
+  for (const p of b.points) if (groupOf(p)) b.at.set(groupOf(p) + "|" + p.effort, p);
+}
+const fScore = (b, v) => b.frac ? (100 * v).toFixed(1) + "%" : v.toFixed(1) + (b.unit === "%" ? "%" : "");
+const fCost = c => c == null ? "no cost" : "$" + (c < .1 ? c.toFixed(3) : c < 10 ? c.toFixed(2) : c.toFixed(0));
+const fX = x => x == null ? "–" : (x < 1 ? x.toFixed(2) : x.toFixed(1)) + "×";
+function statusOf(s, effort) { const l = s.lanes.get(effort); return !l ? "none" : l.carried ? "run" : "off"; }
+const SAY = { run: "you carry this lane", off: "in the catalog, not carried", none: "measured; no lane at this effort" };
+
+// ---- one plot per benchmark ----
+const W = 600, H = 340, L = 44, R = 84, T = 10, B = 34;
+function niceTicks(lo, hi, n = 5) {
+  const step0 = (hi - lo) / n, p = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(k => k * p).find(k => k >= step0);
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10)); return out;
+}
+function logTicks(lo, hi) {
+  const out = [];
+  for (let k = Math.floor(Math.log10(lo)); k <= Math.ceil(Math.log10(hi)); k++) for (const m of [1, 2, 5]) { const v = m * Math.pow(10, k); if (v >= lo && v <= hi) out.push(v); }
+  return out.length > 7 ? out.filter(v => /^1/.test(String(v).replace(/^0\.0*/, ""))) : out;
+}
+function plot(b) {
+  const pts = b.points.filter(p => p.cost > 0);
+  if (!pts.length) return `<p class="sub">No costed rows on this board.</p>`;
+  const cs = pts.map(p => p.cost), ss = pts.map(p => p.score);
+  const x0 = Math.min(...cs) / 1.35, x1 = Math.max(...cs) * 1.35;
+  const pad = (Math.max(...ss) - Math.min(...ss)) * .08 || 1;
+  const y0 = Math.min(...ss) - pad, y1 = Math.max(...ss) + pad;
+  const X = c => L + (Math.log(c) - Math.log(x0)) / (Math.log(x1) - Math.log(x0)) * (W - L - R);
+  const Y = v => T + (y1 - v) / (y1 - y0) * (H - T - B);
+  let g = `<g class="ax">`;
+  for (const v of niceTicks(y0, y1)) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"${v === 0 ? ` class="zero"` : ""}/><text x="${L - 5}" y="${Y(v) + 3}" text-anchor="end">${b.frac ? Math.round(v * 100) : v}</text>`;
+  for (const v of logTicks(x0, x1)) g += `<line x1="${X(v)}" x2="${X(v)}" y1="${T}" y2="${H - B}" opacity=".6"/><text x="${X(v)}" y="${H - B + 13}" text-anchor="middle">$${+v.toPrecision(2)}</text>`;
+  g += `<text x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">${esc(b.basis || "cost")}, log scale →</text>`;
+  g += `<text x="10" y="${(T + H - B) / 2}" transform="rotate(-90 10 ${(T + H - B) / 2})" text-anchor="middle">score${b.frac || b.unit === "%" ? " %" : ""} ↑</text></g>`;
+  // frontier: best score at or below each cost
+  const fr = []; let best = -Infinity;
+  for (const p of pts.slice().sort((a, c) => a.cost - c.cost || c.score - a.score)) if (p.score > best) { fr.push(p); best = p.score; }
+  let d = `M${X(fr[0].cost)},${Y(fr[0].score)}`; for (const p of fr.slice(1)) d += `H${X(p.cost)}V${Y(p.score)}`; d += `H${W - R}`;
+  g += `<path class="fr" d="${d}"/>`;
+  // context rows
+  if (S.others) for (const p of pts) if (!groupOf(p))
+    g += `<circle class="cmp hit" cx="${X(p.cost)}" cy="${Y(p.score)}" r="2.6" data-tip="${esc((p.published || p.model) + " · " + p.effort + "\n" + fScore(b, p.score) + " · " + fCost(p.cost) + " · p" + Math.round(b.pct(p.score)) + "\nno lane for this model")}"/>`;
+  // our series
+  const labels = [], groups = [];
+  for (const s of serList()) {
+    const own = EFF.map(e => b.at.get(s.model + "|" + e)).filter(p => p && p.cost > 0 && (s.primary || s.lanes.has(p.effort)));
+    if (!own.length) continue;
+    const st = own.map(p => statusOf(s, p.effort));
+    let h = `<g class="s${S.focus === s.model ? " on" : ""}" data-m="${esc(s.model)}" style="--c:var(--h-${s.harness})">`;
+    if (own.length > 1) h += `<path class="ln" d="M${own.map(p => X(p.cost) + "," + Y(p.score)).join("L")}"/>`;
+    own.forEach((p, i) => {
+      const x = X(p.cost), y = Y(p.score), k = st[i], r = k === "none" ? 2.6 : s.primary ? 4.2 : 7;
+      const tip = `${label(s)} on ${s.harness} · ${p.effort}\n${fScore(b, p.score)} · ${fCost(p.cost)} · p${Math.round(b.pct(p.score))}\n${SAY[k]}`;
+      h += shape(s.shape, x, y, r, `mk ${s.primary ? k : "ring"} hit`, `data-tip="${esc(tip)}" data-m="${esc(s.model)}"`);
+      h += `<text class="ef" x="${x + 7}" y="${y - 6}">${esc(p.effort)}</text>`;
+    });
+    const last = own[own.length - 1];
+    labels.push({ s, x: X(last.cost), y: Y(last.score), gi: groups.length });
+    groups.push(h);
+  }
+  labels.sort((a, c) => a.y - c.y);
+  const gap = 10.5; for (let i = 0; i < labels.length; i++) labels[i].ly = Math.max(labels[i].y, i ? labels[i - 1].ly + gap : T + 4);
+  const over = labels.length ? labels[labels.length - 1].ly - (H - B) : 0;
+  if (over > 0) { for (let i = labels.length - 1; i >= 0; i--) { labels[i].ly = Math.min(labels[i].ly, (i === labels.length - 1 ? H - B : labels[i + 1].ly - gap)); } }
+  labels.forEach((l, i) => { groups[l.gi] += `<line class="ld" x1="${l.x + 5}" y1="${l.y}" x2="${W - R + 4}" y2="${l.ly - 3}"/><text class="lb" x="${W - R + 6}" y="${l.ly}">${esc(label(l.s))}</text>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(b.benchmark)} score against cost">${g}${groups.map(x => x + "</g>").join("")}</svg>`;
+}
+
+// ---- consolidated ranking ----
+function scoreAt(C, model, effort) {
+  const per = C.list.map(b => { const p = b.at.get(model + "|" + effort); return p ? { b, p, pct: b.pct(p.score), rc: b.med && p.cost > 0 ? p.cost / b.med : null } : null; });
+  const got = per.filter(Boolean);
+  if (!got.length) return { per, n: 0 };
+  const ps = got.map(x => x.pct), rcs = got.map(x => x.rc).filter(v => v != null);
+  return { per, n: got.length, mean: ps.reduce((a, c) => a + c, 0) / ps.length, lo: Math.min(...ps), hi: Math.max(...ps), rc: rcs.length ? Math.exp(rcs.reduce((a, c) => a + Math.log(c), 0) / rcs.length) : null };
+}
+function favoured(C, s) {
+  const cand = EFF.map(e => Object.assign({ e }, scoreAt(C, s.model, e))).filter(x => x.n);
+  if (!cand.length) return { cand, fav: null };
+  const top = Math.max(...cand.map(x => x.mean));
+  return { cand, fav: cand.find(x => x.mean >= top - MARGIN).e };
+}
+function rankRows(C) {
+  const rows = [];
+  for (const s of serList()) for (const l of s.lanes.values()) if (l.carried) rows.push(Object.assign({ s, l }, scoreAt(C, s.model, l.effort)));
+  const N = C.list.length, got = rows.filter(r => r.n).sort((a, c) => c.mean - a.mean || (a.rc || 9) - (c.rc || 9));
+  const counts = {}; for (const r of got) counts[r.l.tier] = (counts[r.l.tier] || 0) + 1;
+  const plan = [4, 3, 2, 1].flatMap(t => Array(counts[t] || 0).fill(t));
+  got.forEach((r, i) => { r.tier = i && got[i - 1].mean === r.mean ? got[i - 1].tier : plan[i]; r.thin = N > 1 && (r.n < N / 2 || r.n === 1); r.value = r.rc ? r.mean / r.rc : null; });
+  return { N, got, none: rows.filter(r => !r.n) };
+}
+function dot(s, cls, left) { return `<svg class="dt ${cls || ""}" style="left:${left}%;--c:var(--h-${s.harness})" viewBox="0 0 12 12"><g class="s">${shape(s.shape, 6, 6, 4.4, "mk " + (cls === "thin" ? "off" : "run"))}</g></svg>`; }
+function track(s, x, thin) {
+  let h = `<div class="track" style="--c:var(--h-${s.harness})">${[25, 50, 75].map(v => `<span class="ax" style="left:${v}%"></span>`).join("")}`;
+  if (x.n > 1) h += `<span class="wk" style="left:${x.lo}%;width:${Math.max(x.hi - x.lo, .5)}%"></span>`;
+  x.per.forEach(q => { if (q) h += `<span class="tk hit" style="left:${q.pct}%" data-tip="${esc(q.b.benchmark + " (" + q.b.source + ")\n" + fScore(q.b, q.p.score) + " · " + fCost(q.p.cost) + " · p" + Math.round(q.pct))}"></span>`; });
+  return h + dot(s, thin ? "thin" : "", x.mean) + `</div>`;
+}
+const scale = `<div class="scale">${[0, 25, 50, 75, 100].map(v => `<span style="left:${v}%">${v}</span>`).join("")}</div>`;
+const chipHTML = (s, extra) => `<span class="who">${glyph(s)}<b>${esc(s.short)}</b><small class="sub">@${esc(s.harness)}</small>${extra || ""}</span>`;
+function rankHTML(C) {
+  const { N, got, none } = rankRows(C);
+  let h = `<div class="rr hd"><span>Lane</span>${scale}<span class="num n">boards</span><span class="num c">rel. cost</span><span class="tier">tier now→here</span></div>`;
+  for (const t of [4, 3, 2, 1]) {
+    const g = got.filter(r => r.tier === t); if (!g.length) continue;
+    const sure = g.some(r => !r.thin) ? g.filter(r => !r.thin) : g, top = sure[0], val = sure.filter(r => r.value != null).sort((a, c) => c.value - a.value)[0];
+    h += `<div class="rr th"><span><b>Tier ${t}</b><span class="best">${g.length} lane${g.length > 1 ? "s" : ""} · best ${esc(top.s.short)} ${esc(top.l.effort)}${val && val !== top ? ` · best per dollar ${esc(val.s.short)} ${esc(val.l.effort)}` : val ? " (also best per dollar)" : ""}</span></span></div>`;
+    for (const r of g) {
+      const mv = r.tier - r.l.tier, fav = favoured(C, r.s).fav === r.l.effort;
+      h += `<div class="rr${S.focus === r.s.model ? " on" : ""}${r.thin ? " thin" : ""} hit" data-m="${esc(r.s.model)}" style="--c:var(--h-${r.s.harness})">${chipHTML(r.s, ` <span class="e">${esc(r.l.effort)}${fav ? " ★" : ""}</span>`)}${track(r.s, r, r.thin)}<span class="num n">${r.thin ? "~" : ""}${r.n}/${N}</span><span class="num c">${fX(r.rc)}</span><span class="tier">${r.l.tier}→${r.tier}${mv > 0 ? ` <span class="u">▲${mv}</span>` : mv < 0 ? ` <span class="d">▼${-mv}</span>` : ""}</span></div>`;
+    }
+  }
+  if (none.length) h += `<div class="none-row">Not measured on these boards: ${none.map(r => esc(r.l.name)).join(", ")}.</div>`;
+  return h;
+}
+
+// ---- model card ----
+function cardHTML(C) {
+  if (!S.focus) return "";
+  const ss = [...SERIES.values()].filter(s => s.model === S.focus);
+  const s0 = ss.find(s => s.primary) || ss[0], F = favoured(C, s0);
+  let h = `<section class="mc" style="--c:var(--h-${s0.harness})"><header><span>${ss.map(s => chipHTML(s)).join(" ")} <span class="sub mono">${esc(s0.model)}</span></span><button class="x" data-clear>Close</button></header>`;
+  if (!F.cand.length) return h + `<p class="note">No ${esc(C.title)} benchmark measured this model.</p></section>`;
+  h += scale.replace('class="scale"', 'class="scale" style="margin-left:74px;margin-right:160px"');
+  for (const x of F.cand.slice().reverse()) {
+    const runs = ss.filter(s => s.lanes.get(x.e) && s.lanes.get(x.e).carried).map(s => s.harness);
+    h += `<div class="er${x.e === F.fav ? " fav" : ""}"><span class="el">${esc(x.e)}${x.e === F.fav ? " ★" : ""}</span>${track(s0, x, false)}<span class="vals">${x.n}/${C.list.length} boards · ${fX(x.rc)} cost${runs.length ? " · ▶ " + runs.join(", ") : ""}</span></div>`;
+  }
+  const run = ss.flatMap(s => [...s.lanes.values()].filter(l => l.carried).map(l => l.effort));
+  const note = !F.fav ? "" : run.includes(F.fav) ? `You carry the favoured effort.` : `You do not carry ${esc(F.fav)}; you run ${run.length ? esc([...new Set(run)].join(", ")) : "no effort of this model"}.`;
+  return h + `<p class="note">${esc(C.title)} favours <b>${esc(F.fav)}</b>: the lowest effort within ${MARGIN} points of this model's best. ${note}</p></section>`;
+}
+
+// ---- page ----
+function draw() {
+  const C = CLASSES.find(c => c.id === S.tab);
+  document.getElementById("tabs").innerHTML = CLASSES.map(c => `<button class="tab" role="tab" data-tab="${c.id}" aria-selected="${c.id === S.tab}">${esc(c.title)}<small>${c.reference ? "reference" : c.list.length + " benchmark" + (c.list.length > 1 ? "s" : "")}</small></button>`).join("");
+  const ss = serList();
+  document.getElementById("bar").innerHTML = `<span class="lab">Harness</span>${D.harnesses.map(h => `<button class="hz" data-h="${h}" aria-pressed="${!S.hide.has(h)}" style="--c:var(--h-${h})"><i></i>${h}</button>`).join("")}<button class="hz" data-others aria-pressed="${S.others}" style="--c:var(--faint)"><i></i>models without a lane</button><span class="lab">Model</span><span class="chips">${ss.map(s => `<button class="chip" data-m="${esc(s.model)}" aria-pressed="${S.focus === s.model}" style="--c:var(--h-${s.harness})">${glyph(s)}${esc(s.short)}<small>@${esc(s.harness)}</small></button>`).join("")}</span>`;
+  document.getElementById("card").innerHTML = cardHTML(C);
+  document.getElementById("plots").innerHTML = C.list.map(b => `<article class="card plot${S.focus ? " focus" : ""}"><header><h2>${esc(b.benchmark)}</h2><span class="sub">${esc(b.source)} · ${b.points.length} rows · ${esc(b.when || "")}</span></header>${plot(b)}</article>`).join("");
+  document.getElementById("rank-title").textContent = `${C.title}: one ranking across ${C.list.length} benchmark${C.list.length > 1 ? "s" : ""}`;
+  document.getElementById("rank-sub").textContent = C.reference ? "Reference only: a composite, not counted in a net tier." : "Dot: mean percentile. Ticks: each benchmark. ★ favoured effort.";
+  const rk = document.getElementById("rank"); rk.innerHTML = rankHTML(C); rk.classList.toggle("focusr", !!S.focus);
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab],[data-h],[data-others],[data-m],[data-clear]");
+  if (!t) return;
+  if (t.dataset.tab) { S.tab = t.dataset.tab; history.replaceState(null, "", "#" + S.tab); }
+  else if (t.dataset.h) S.hide.has(t.dataset.h) ? S.hide.delete(t.dataset.h) : S.hide.add(t.dataset.h);
+  else if ("others" in t.dataset) S.others = !S.others;
+  else if ("clear" in t.dataset) S.focus = null;
+  else if (t.dataset.m) S.focus = S.focus === t.dataset.m ? null : t.dataset.m;
+  draw();
+});
+const tip = document.getElementById("tip");
+document.addEventListener("mousemove", e => {
+  const t = e.target.closest && e.target.closest("[data-tip]");
+  if (!t) { tip.style.display = "none"; return; }
+  tip.textContent = t.dataset.tip; tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
+});
+const h0 = location.hash.slice(1).split("&"); if (CLASSES.some(c => c.id === h0[0])) S.tab = h0[0];
+const fm = h0.find(x => x.startsWith("m=")); if (fm) S.focus = decodeURIComponent(fm.slice(2));
+draw();
+</script>
+</body>
+</html>
