@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build claude-v3.html: the plots-first prototype, on sample data.
+"""Build claude-vN.html (default v4) from claude-vN.src.html, on sample data.
 
 Run from the repo root:
-  python3 .scratch/delegate-benchmark-views/prototypes/build_claude_v3.py
+  python3 .scratch/delegate-benchmark-views/prototypes/build_claude.py [v3|v4]
 It runs render_sample.py into a temporary folder, keeps the fields the prototype
-draws, and pastes them into claude-v3.src.html.
+draws, and pastes them into the source page.
 """
 import json
 import os
@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+V = sys.argv[1] if len(sys.argv) > 1 else "v4"
 
 with tempfile.TemporaryDirectory() as tmp:
     subprocess.run([sys.executable, os.path.join(HERE, "render_sample.py"), tmp], check=True,
@@ -33,9 +34,9 @@ slim = {
     } for b in data["boards"]],
     "lanes": [{k: l.get(k) for k in LANE} for l in data["lanes"]],
 }
-with open(os.path.join(HERE, "claude-v3.src.html"), encoding="utf-8") as f:
+with open(os.path.join(HERE, f"claude-{V}.src.html"), encoding="utf-8") as f:
     page = f.read()
 blob = json.dumps(slim, separators=(",", ":")).replace("</", "<\\/")
-with open(os.path.join(HERE, "claude-v3.html"), "w", encoding="utf-8") as f:
+with open(os.path.join(HERE, f"claude-{V}.html"), "w", encoding="utf-8") as f:
     f.write(page.replace("__SAMPLE_DATA_JSON__", blob))
-print(os.path.join(HERE, "claude-v3.html"))
+print(os.path.join(HERE, f"claude-{V}.html"))
