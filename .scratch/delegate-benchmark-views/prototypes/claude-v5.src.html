@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark plots</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f7f6f3; --panel: #fcfcfb; --fg: #1b1a18; --muted: #6b6963; --faint: #b4b1a9; --line: #e7e4dd; --grid: #efece6;
+  --h-codex: #2a78d6; --h-claude: #eb6834; --h-kiro: #1baf7a; --h-agy: #c2408a; --h-grok: #45443f;
+  --ctx: #c9c6be; --front: rgba(27, 26, 24, .09);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #131312; --panel: #1a1a19; --fg: #f0efec; --muted: #a7a59d; --faint: #5d5b55; --line: #2e2d2a; --grid: #252422;
+    --h-codex: #3987e5; --h-claude: #e0702f; --h-kiro: #1fae7c; --h-agy: #d04f97; --h-grok: #d4d2ca;
+    --ctx: #4a4844; --front: rgba(240, 239, 236, .05);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131312; --panel: #1a1a19; --fg: #f0efec; --muted: #a7a59d; --faint: #5d5b55; --line: #2e2d2a; --grid: #252422;
+  --h-codex: #3987e5; --h-claude: #e0702f; --h-kiro: #1fae7c; --h-agy: #d04f97; --h-grok: #d4d2ca;
+  --ctx: #4a4844; --front: rgba(240, 239, 236, .05);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1360px; margin: 0 auto; padding: 18px 16px 60px; }
+h1 { font-size: 19px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+h2 { font-size: 14px; margin: 0; font-weight: 650; }
+.sub { color: var(--muted); font-size: 12.5px; }
+button { font: inherit; color: inherit; }
+.ideas { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+.ideas summary { cursor: pointer; color: var(--fg); font-weight: 600; }
+.ideas ul { margin: 6px 0 0; padding-left: 18px; max-width: 900px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tabs { display: flex; gap: 2px; margin: 12px 0 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); font-weight: 600; }
+.tab small { color: var(--faint); margin-left: 4px; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px 6px; align-items: center; margin: 12px 0; }
+.bar .lab { color: var(--muted); font-size: 12px; margin: 0 4px 0 6px; }
+.bar .lab:first-child { margin-left: 0; }
+.pill { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 2px 10px 2px 7px; cursor: pointer; font-size: 12.5px; line-height: 20px; white-space: nowrap; }
+.pill svg { flex: none; display: block; }
+.pill small { color: var(--muted); }
+.pill[aria-pressed="false"] { opacity: .4; }
+.pill.sel { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 6px; min-width: 0; position: relative; }
+.card.wide { grid-column: 1 / -1; }
+.card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.card header .tools { display: flex; gap: 4px; align-items: center; }
+.card header .tools button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 0 8px; font-size: 12px; cursor: pointer; color: var(--muted); line-height: 22px; }
+.card header .tools button:hover { color: var(--fg); }
+.card header .tools button[hidden] { display: none; }
+.plotbox { position: relative; touch-action: none; user-select: none; -webkit-user-select: none; }
+.plotbox svg { display: block; width: 100%; }
+svg text { fill: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.gl { stroke: var(--grid); }
+.zl { stroke: var(--faint); }
+.frb { fill: none; stroke: var(--front); stroke-linejoin: round; stroke-linecap: round; }
+.frr { fill: none; stroke: var(--fg); opacity: .55; }
+.ctx { fill: var(--ctx); }
+.s .ln { fill: none; stroke: var(--c); stroke-linejoin: round; opacity: .85; }
+.s .mk { stroke-linejoin: round; }
+.s .mk.run { fill: var(--c); stroke: var(--panel); }
+.s .mk.out { fill: var(--panel); stroke: var(--c); }
+.s .tl { fill: var(--fg); font-size: 10.5px; }
+.s .tl.nm { fill: var(--fg); font-weight: 600; }
+.s .ld { stroke: var(--c); opacity: .45; }
+.dim .s:not(.on), .dim .ctx { opacity: .14; }
+.dim .s.on .ln { opacity: 1; }
+.brush { fill: var(--front); stroke: var(--muted); stroke-dasharray: 3 3; }
+.hov { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+.hint { color: var(--faint); font-size: 11.5px; margin-right: 4px; }
+.hint[hidden] { display: none; }
+.chips { display: contents; }
+@media (max-width: 640px) {
+  .chips { display: flex; gap: 6px; overflow-x: auto; flex-wrap: nowrap; width: 100%; padding-bottom: 2px; }
+  .hint { display: none; }
+}
+.sec { margin: 24px 0 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tbl { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 980px; font-size: 12.5px; }
+th { text-align: left; font-weight: 500; color: var(--muted); padding: 8px 10px 6px; border-bottom: 1px solid var(--line); vertical-align: bottom; white-space: nowrap; }
+th button { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font-weight: 500; }
+th button.on { color: var(--fg); font-weight: 650; }
+th small { display: block; color: var(--faint); font-weight: 400; }
+td { padding: 4px 10px; border-top: 1px solid var(--grid); vertical-align: middle; }
+tr.r { cursor: pointer; }
+tr.r:hover td { background: color-mix(in srgb, var(--fg) 3%, transparent); }
+tr.r.on td { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.dimt tr.r:not(.on) { opacity: .45; }
+.who { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.who small { color: var(--muted); }
+td.rg { min-width: 170px; padding-top: 6px; padding-bottom: 2px; }
+td.rg svg { display: block; width: 100%; height: 26px; overflow: visible; }
+td.rg text { font-size: 10.5px; fill: var(--muted); }
+td.rg .ed { cursor: crosshair; }
+th.bm .src { color: var(--faint); font-weight: 400; font-size: 11.5px; }
+.scl { display: flex; justify-content: space-between; color: var(--faint); font-size: 10.5px; font-weight: 400; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 2px; }
+th.n, td.n { width: 28px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.num small, td small { color: var(--muted); }
+.tzs { white-space: normal; min-width: 130px; }
+.tz { display: inline-block; margin: 0 8px 0 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tz.b { font-weight: 650; }
+.tz .m { color: var(--muted); font-weight: 400; }
+.tz .u, .tz .d { font-size: 10px; margin-left: 1px; color: var(--muted); }
+.na { color: var(--faint); font-size: 11.5px; }
+.runs { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+details.how { margin-top: 16px; color: var(--muted); font-size: 13px; }
+details.how summary { cursor: pointer; color: var(--fg); font-weight: 600; }
+details.how dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0 0; }
+details.how dt { color: var(--fg); }
+details.how dd { margin: 0; }
+#tip { position: fixed; pointer-events: none; background: var(--panel); color: var(--fg); border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0,0,0,.12); font-size: 12px; padding: 6px 9px; border-radius: 8px; z-index: 9; display: none; max-width: 300px; line-height: 1.4; }
+#tip b { font-size: 13px; }
+#tip .k { display: inline-block; width: 12px; height: 2px; background: var(--c); vertical-align: middle; margin-right: 6px; }
+#tip .m { color: var(--muted); }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<details class="ideas">
+<summary>Prototype 5: zoomable plots with the round 4 Opus 5.5 table</summary>
+<ul>
+<li><b>The plots are the page.</b> One score-against-cost plot per benchmark, two to a row, any one opens full width. Each model on a harness is one line through its efforts, low to max.</li>
+<li><b>Zoom that clears clutter.</b> Drag a box to zoom into it; pinch or ⌘/Ctrl-scroll zooms about the pointer; double-click resets. Markers and lines get thinner as you zoom, and effort labels appear where they fit without overlapping.</li>
+<li><b>A designed harness palette.</b> Codex blue, Claude orange, Kiro teal, Agy plum, Grok ink; checked for colour blindness in both themes. No red, yellow or green carries a meaning. Models inside a harness differ by marker shape.</li>
+<li><b>Fill says what you run.</b> Filled: a lane you carry. Hollow: measured, not carried. Grey dots: models with no lane. The soft band and rings mark the frontier.</li>
+<li><b>The round 4 Opus 5.5 table.</b> One row per model on a harness. Each benchmark cell is the real score range across the efforts measured, on that board's own axis, with the two end values; one dot per effort, filled where you carry it. Then the rank, mean percentile with n of N, relative cost, tier now→here for each carried lane, and the favoured effort.</li>
+<li><b>Linked.</b> Point at a dot in the table and the same point is ringed in every plot. Select a model in a chip, plot or row and it stays bright everywhere. The effort filter shows one effort across all plots.</li>
+</ul>
+</details>
+<div class="top"><h1>Benchmark plots</h1><span class="sub">Sample data. Nothing here writes to the catalog.</span></div>
+<nav class="tabs" role="tablist" id="tabs"></nav>
+<div class="bar" id="bar"></div>
+<div class="grid" id="plots"></div>
+<div class="sec"><h2 id="tt">Effort range</h2><span class="sub" id="ts"></span></div>
+<div class="tbl" id="tbl"></div>
+<details class="how">
+<summary>How to read this page</summary>
+<dl>
+<dt>Line</dt><dd>One model on one harness, its measured efforts joined from low to max. A second harness for the same model draws only the efforts it has lanes for.</dd>
+<dt>Marker</dt><dd>Colour is the harness and shape is the model. Filled: you carry this lane. Hollow: measured, not carried.</dd>
+<dt>Grey dot</dt><dd>A model with no lane, kept for context. Hide them with the "Other models" switch.</dd>
+<dt>Frontier</dt><dd>The soft band and the rings: the best score at or below each cost, over every row on the board.</dd>
+<dt>Zoom</dt><dd>Drag a box, or pinch, or hold ⌘/Ctrl and scroll. Double-click or Reset returns to the full view.</dd>
+<dt>Effort filter</dt><dd>Shows only the dots at one effort in every plot and dims the others in the table.</dd>
+<dt>Score range</dt><dd>Each cell spans the lowest to the highest score the board measured for that model across its efforts, on that board's own score axis, with the two end values. A dot is one effort; a filled dot is one you carry.</dd>
+<dt>#, mean pct</dt><dd>The rank of the model's best carried lane by its mean percentile across the classification's boards that measured it (n of N). ~ means fewer than half did. Used for order and tiers only.</dd>
+<dt>Tier now→here</dt><dd>For each carried lane: the tier it holds now and the tier this classification gives it, cutting the ranked lanes in the proportions the tiers hold now. The best lane is bold; ? means thin evidence.</dd>
+<dt>Favours</dt><dd>The lowest effort whose mean percentile is within 5 points of the model's best effort.</dd>
+</dl>
+</details>
+</main>
+<div id="tip"></div>
+<script type="application/json" id="data">__SAMPLE_DATA_JSON__</script>
+<script>
+"use strict";
+// The one grouping to edit: a board matches by source and the start of its name; the newest version wins.
+const CLASSES = [
+  { id: "coding", title: "Coding", boards: [["aa", "Terminal-Bench"], ["tbench", "Terminal-Bench"], ["swerb", "SWE Refactor Bench"]] },
+  { id: "knowledge", title: "Knowledge work", boards: [["aa", "GDPval"], ["aa", "Omniscience"], ["aa", "AA-LCR"], ["aa", "GPQA Diamond"]] },
+  { id: "automation", title: "Automation", boards: [["aa", "AutomationBench"], ["aa", "IFBench"]] },
+  { id: "overall", title: "Overall", reference: true, boards: [["aa", "Artificial Analysis Intelligence Index"]] },
+];
+const HARNESS_ORDER = ["codex", "claude", "kiro", "agy", "grok"];
+const SHAPES = ["circle", "square", "diamond", "triangle", "down"];
+
+const D = JSON.parse(document.getElementById("data").textContent);
+const EFF = D.efforts;
+const HS = HARNESS_ORDER.filter(h => D.harnesses.includes(h)).concat(D.harnesses.filter(h => !HARNESS_ORDER.includes(h)));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const S = { tab: "coding", sel: null, hide: new Set(), ctx: true, wide: null, sort: null, eff: null, hover: null };
+
+// ---- identity: a series is a model (the catalog's group) on a harness ----
+const LANE = new Map(D.lanes.map(l => [l.name, l]));
+const gid = l => l.group || l.model;
+const byModel = new Map();
+for (const l of D.lanes) {
+  const m = byModel.get(gid(l)) || byModel.set(gid(l), new Map()).get(gid(l));
+  (m.get(l.harness) || m.set(l.harness, []).get(l.harness)).push(l);
+}
+const SERIES = new Map();
+for (const [model, hs] of byModel) {
+  const order = [...hs.keys()].sort((a, b) => (hs.get(b).length - hs.get(a).length) || ((a === "kiro") - (b === "kiro")) || HS.indexOf(a) - HS.indexOf(b));
+  order.forEach((h, i) => {
+    const lanes = hs.get(h), l0 = lanes[0];
+    const short = l0.name.split("@")[0].replace(new RegExp("-" + l0.effort + "$"), "");
+    SERIES.set(model + "@" + h, { id: model + "@" + h, model, harness: h, primary: i === 0, short, lanes: new Map(lanes.map(l => [l.effort, l])) });
+  });
+}
+for (const h of HS) {
+  const models = [...new Set([...SERIES.values()].filter(s => s.harness === h).map(s => s.model))].sort();
+  for (const s of SERIES.values()) if (s.harness === h) s.shape = SHAPES[models.indexOf(s.model) % SHAPES.length];
+}
+const serList = () => [...SERIES.values()].filter(s => !S.hide.has(s.harness)).sort((a, b) => HS.indexOf(a.harness) - HS.indexOf(b.harness) || a.short.localeCompare(b.short));
+const nameOf = s => s.short + (s.primary ? "" : " @" + s.harness);
+const carried = (s, e) => { const l = s.lanes.get(e); return !!(l && l.carried); };
+
+function shape(kind, x, y, r, attrs) {
+  if (kind === "square") { const q = r * .86; return `<rect ${attrs} x="${x - q}" y="${y - q}" width="${2 * q}" height="${2 * q}" rx="${q * .25}"/>`; }
+  if (kind === "diamond") { const q = r * 1.22; return `<path ${attrs} d="M${x},${y - q}L${x + q},${y}L${x},${y + q}L${x - q},${y}Z"/>`; }
+  if (kind === "triangle") return `<path ${attrs} d="M${x},${y - r * 1.18}L${x + r * 1.1},${y + r * .8}L${x - r * 1.1},${y + r * .8}Z"/>`;
+  if (kind === "down") return `<path ${attrs} d="M${x},${y + r * 1.18}L${x + r * 1.1},${y - r * .8}L${x - r * 1.1},${y - r * .8}Z"/>`;
+  return `<circle ${attrs} cx="${x}" cy="${y}" r="${r}"/>`;
+}
+const glyph = (s, filled = true, px = 12) => `<svg width="${px}" height="${px}" viewBox="0 0 12 12" style="--c:var(--h-${s.harness})"><g class="s">${shape(s.shape, 6, 6, 4, `class="mk ${filled ? "run" : "out"}" stroke-width="1.4"`)}</g></svg>`;
+
+// ---- boards ----
+const PM = new Map();
+for (const b of D.boards) for (const p of b.points) for (const n of p.lanes) if (LANE.has(n)) PM.set(p.model, gid(LANE.get(n)));
+const groupOf = p => p.ours ? PM.get(p.model) || (byModel.has(p.model) ? p.model : null) : null;
+const ver = b => (b.benchmark.match(/\d+(\.\d+)*/) || ["0"])[0].split(".").map(Number);
+const newer = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0; };
+for (const C of CLASSES) {
+  C.list = [];
+  for (const [src, name] of C.boards) {
+    const hit = D.boards.filter(b => b.source === src && b.benchmark.startsWith(name)).sort(newer)[0];
+    if (hit && !C.list.includes(hit)) C.list.push(hit);
+  }
+}
+for (const b of D.boards) {
+  b.pts = b.points.filter(p => p.cost > 0);
+  b.frac = b.unit !== "%" && b.points.every(p => Math.abs(p.score) <= 1.5);
+  b.at = new Map();
+  for (const p of b.points) if (groupOf(p)) b.at.set(groupOf(p) + "|" + p.effort, p);
+  const sc = b.points.map(p => p.score).sort((x, y) => x - y), n = sc.length;
+  const cs = b.points.map(p => p.cost).filter(c => c > 0).sort((x, y) => x - y);
+  b.med = cs.length ? cs[Math.floor((cs.length - 1) / 2)] : null;
+  b.pct = s => { let lo = 0, eq = 0; for (const v of sc) { if (v < s) lo++; else if (v === s) eq++; } return n > 1 ? 100 * (lo + (eq - 1) / 2) / (n - 1) : 50; };
+  const fr = []; let best = -Infinity;
+  for (const p of b.pts.slice().sort((a, c) => a.cost - c.cost || c.score - a.score)) if (p.score > best) { fr.push(p); best = p.score; }
+  b.front = fr; b.onFront = new Set(fr);
+  const lx = b.pts.map(p => Math.log10(p.cost)), ys = b.pts.map(p => p.score);
+  const px = (Math.max(...lx) - Math.min(...lx)) * .06 || .5, py = (Math.max(...ys) - Math.min(...ys)) * .07 || 1;
+  b.home = { x0: Math.min(...lx) - px, x1: Math.max(...lx) + px, y0: Math.min(...ys) - py, y1: Math.max(...ys) + py };
+  b.view = Object.assign({}, b.home);
+}
+const fScore = (b, v) => b.frac ? (100 * v).toFixed(1) + "%" : v.toFixed(1) + (b.unit === "%" ? "%" : "");
+const fShort = (b, v) => b.frac ? Math.round(100 * v) + "" : ((b.thi - b.tlo) < 10 ? v.toFixed(1) : Math.round(v) + "");
+const fCost = c => "$" + (c < .01 ? c.toFixed(4) : c < .1 ? c.toFixed(3) : c < 10 ? c.toFixed(2) : c < 1000 ? c.toFixed(0) : Math.round(c).toLocaleString());
+
+// ---- one zoomable plot per benchmark ----
+const M = { l: 42, r: 92, t: 10, b: 30 };
+function niceTicks(lo, hi, n) {
+  const step0 = (hi - lo) / n, p = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(k => k * p).find(k => k >= step0);
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toPrecision(12)); return out;
+}
+function logTicks(l0, l1, n) {
+  let out = [];
+  for (const ms of [[1], [1, 2, 5], [1, 1.5, 2, 3, 5, 7]]) {
+    out = [];
+    for (let k = Math.floor(l0); k <= Math.ceil(l1); k++) for (const m of ms) { const v = m * Math.pow(10, k); const lv = Math.log10(v); if (lv >= l0 && lv <= l1) out.push(v); }
+    if (out.length >= Math.min(3, n)) break;
+  }
+  if (out.length < 3) out = niceTicks(Math.pow(10, l0), Math.pow(10, l1), n).filter(v => v > 0);
+  return out;
+}
+function fTick(v) { return "$" + (v < 1 ? +v.toPrecision(2) : v < 1000 ? +v.toPrecision(3) : (v / 1000).toPrecision(3).replace(/\.?0+$/, "") + "k"); }
+
+function layout(b, el) {
+  const W = Math.max(300, Math.round(el.clientWidth)), H = Math.round(Math.min(460, Math.max(280, W * .62)));
+  return { W, H, iw: W - M.l - M.r, ih: H - M.t - M.b };
+}
+function draw(b, el) {
+  const G = layout(b, el), v = b.view, h = b.home;
+  const X = c => M.l + (Math.log10(c) - v.x0) / (v.x1 - v.x0) * G.iw;
+  const Y = s => M.t + (v.y1 - s) / (v.y1 - v.y0) * G.ih;
+  // zoom factor: how far in we are, relative to the full view
+  const k = Math.sqrt(((h.x1 - h.x0) / (v.x1 - v.x0)) * ((h.y1 - h.y0) / (v.y1 - v.y0)));
+  const R = Math.max(2.4, 5.2 * Math.pow(k, -.32)), LW = Math.max(.9, 1.7 * Math.pow(k, -.25));
+  const inView = (x, y) => x >= M.l - 2 && x <= M.l + G.iw + 2 && y >= M.t - 2 && y <= M.t + G.ih + 2;
+  let g = "";
+  for (const t of niceTicks(v.y0, v.y1, Math.max(3, Math.round(G.ih / 70))))
+    g += `<line class="${t === 0 ? "zl" : "gl"}" x1="${M.l}" x2="${M.l + G.iw}" y1="${Y(t)}" y2="${Y(t)}"/><text x="${M.l - 6}" y="${Y(t) + 3.5}" text-anchor="end">${b.frac ? +(t * 100).toPrecision(3) : t}</text>`;
+  for (const t of logTicks(v.x0, v.x1, Math.max(3, Math.round(G.iw / 110))))
+    g += `<text x="${X(t)}" y="${M.t + G.ih + 16}" text-anchor="middle">${fTick(t)}</text>`;
+  g += `<text x="${M.l + G.iw}" y="${G.H - 2}" text-anchor="end">${esc(b.basis || "cost")} →</text>`;
+  let body = "";
+  // frontier: a soft band behind everything, rings on its points
+  if (b.front.length) {
+    let d = `M${X(b.front[0].cost)},${Y(b.front[0].score)}`; for (const p of b.front.slice(1)) d += `H${X(p.cost)}V${Y(p.score)}`; d += `H${M.l + G.iw + 40}`;
+    body += `<path class="frb" stroke-width="${Math.max(4, 7 * Math.pow(k, -.3))}" d="${d}"/>`;
+  }
+  const hits = [];
+  if (S.ctx) for (const p of b.pts) if (!groupOf(p) && !(S.eff && p.effort !== S.eff)) {
+    const x = X(p.cost), y = Y(p.score); if (!inView(x, y)) continue;
+    body += `<circle class="ctx" cx="${x}" cy="${y}" r="${Math.max(1.6, R * .48)}"/>`;
+    hits.push({ x, y, p, s: null });
+  }
+  const groups = [], ends = [], marks = [];
+  for (const s of serList()) {
+    const own = EFF.map(e => b.at.get(s.model + "|" + e)).filter(p => p && p.cost > 0 && (s.primary || s.lanes.has(p.effort)));
+    if (!own.length) continue;
+    const on = S.sel === s.model;
+    let gg = `<g class="s${on ? " on" : ""}" style="--c:var(--h-${s.harness})">`;
+    if (own.length > 1) gg += `<path class="ln" ${S.eff ? `style="opacity:.2"` : ""} stroke-width="${on ? LW * 1.5 : LW}" ${s.primary ? "" : `stroke-dasharray="${LW * 3} ${LW * 2.5}"`} d="M${own.map(p => X(p.cost).toFixed(1) + "," + Y(p.score).toFixed(1)).join("L")}"/>`;
+    let vis = null;
+    for (const p of own) {
+      const x = X(p.cost), y = Y(p.score); if (!inView(x, y) || (S.eff && p.effort !== S.eff)) continue;
+      const run = carried(s, p.effort), r = s.primary ? R : R * 1.45;
+      if (b.onFront.has(p)) gg += `<circle class="frr" cx="${x}" cy="${y}" r="${r + 2.6}" stroke-width="${Math.max(.8, LW * .7)}"/>`;
+      gg += shape(s.shape, x, y, r, `class="mk ${run && s.primary ? "run" : "out"}" stroke-width="${Math.max(1, LW * .9)}"`);
+      hits.push({ x, y, p, s });
+      marks.push({ x, y, r, p, s, on, run });
+      if (!vis || p.cost > vis.p.cost) vis = { x, y, p };
+    }
+    groups.push(gg);
+    if (vis) ends.push({ s, x: vis.x, y: vis.y, gi: groups.length - 1, on });
+  }
+  // labels: model names at the right edge, then effort labels wherever they fit
+  const boxes = [];
+  const free = (bx) => !boxes.some(o => bx.x < o.x + o.w && o.x < bx.x + bx.w && bx.y < o.y + o.h && o.y < bx.y + bx.h);
+  for (const m of marks) boxes.push({ x: m.x - m.r, y: m.y - m.r, w: 2 * m.r, h: 2 * m.r });
+  ends.sort((a, c) => a.y - c.y);
+  const gap = 12, top = M.t + 5, bot = M.t + G.ih;
+  ends.forEach((e, i) => { e.ly = Math.max(e.y + 3.5, i ? ends[i - 1].ly + gap : top); });
+  for (let i = ends.length - 1; i >= 0; i--) ends[i].ly = Math.min(ends[i].ly, i === ends.length - 1 ? bot : ends[i + 1].ly - gap);
+  const lx = M.l + G.iw + 8;
+  let outside = "";
+  for (const e of ends) {
+    outside += `<g class="s${e.on ? " on" : ""}" style="--c:var(--h-${e.s.harness})"><line class="ld" stroke-width=".7" x1="${e.x + 4}" y1="${e.y}" x2="${lx - 2}" y2="${e.ly - 3.5}"/><text class="tl nm" x="${lx}" y="${e.ly}">${esc(nameOf(e.s))}</text></g>`;
+  }
+  const order = marks.slice().sort((a, c) => (c.on - a.on) || (c.run - a.run) || (c.p.score - a.p.score));
+  const showAll = k > 1.7;
+  for (const m of order) {
+    if (!(m.on || showAll)) continue;
+    const t = m.on || !S.sel ? m.p.effort : "";
+    if (!t) continue;
+    const w = t.length * 5.8 + 2, h = 11;
+    for (const [dx, dy, a] of [[m.r + 3, -m.r - 1, "start"], [m.r + 3, m.r + 9, "start"], [-m.r - 3, -m.r - 1, "end"], [-m.r - 3, m.r + 9, "end"], [-w / 2, -m.r - 4, "mid"]]) {
+      const x0 = a === "end" ? m.x + dx - w : a === "mid" ? m.x + dx : m.x + dx, bx = { x: x0, y: m.y + dy - 9, w, h };
+      if (bx.x < M.l || bx.x + bx.w > M.l + G.iw || bx.y < M.t || !free(bx)) continue;
+      boxes.push(bx);
+      groups[groups.length] = `<g class="s${m.on ? " on" : ""}" style="--c:var(--h-${m.s.harness})"><text class="tl" x="${x0}" y="${m.y + dy}">${esc(t)}</text></g>`;
+      break;
+    }
+  }
+  const zoomed = k > 1.02;
+  el.innerHTML = `<svg width="${G.W}" height="${G.H}" viewBox="0 0 ${G.W} ${G.H}" role="img" aria-label="${esc(b.benchmark)}: score against cost"><defs><clipPath id="c-${b.id}"><rect x="${M.l}" y="${M.t - 2}" width="${G.iw + 4}" height="${G.ih + 4}"/></clipPath></defs>${g}<g class="${S.sel ? "dim" : ""}"><g clip-path="url(#c-${b.id})">${body}${groups.map(x => x.endsWith("</g>") ? x : x + "</g>").join("")}</g>${outside}</g><g id="o-${b.id}"></g></svg>`;
+  el.parentNode.querySelector("[data-reset]").hidden = !zoomed;
+  el.parentNode.querySelector(".hint").hidden = zoomed;
+  b.hits = hits; b.X = X; b.Y = Y; b.G = G;
+  if (S.hover) markHover();
+}
+
+// zoom mechanics: work in (log10 cost, score), animate between views
+function toData(b, px, py) { const v = b.view, G = b.G; return [v.x0 + (px - M.l) / G.iw * (v.x1 - v.x0), v.y1 - (py - M.t) / G.ih * (v.y1 - v.y0)]; }
+function animate(b, el, to) {
+  const from = Object.assign({}, b.view), t0 = performance.now(), dur = 260;
+  cancelAnimationFrame(b.raf);
+  const step = now => {
+    const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 3);
+    for (const key of ["x0", "x1", "y0", "y1"]) b.view[key] = from[key] + (to[key] - from[key]) * e;
+    draw(b, el); if (t < 1) b.raf = requestAnimationFrame(step);
+  };
+  b.raf = requestAnimationFrame(step);
+}
+function zoomAt(b, el, px, py, f) {
+  const [dx, dy] = toData(b, px, py), v = b.view, h = b.home;
+  const nv = { x0: dx - (dx - v.x0) * f, x1: dx + (v.x1 - dx) * f, y0: dy - (dy - v.y0) * f, y1: dy + (v.y1 - dy) * f };
+  if (nv.x1 - nv.x0 > h.x1 - h.x0) { nv.x0 = h.x0; nv.x1 = h.x1; nv.y0 = h.y0; nv.y1 = h.y1; }
+  b.view = nv; draw(b, el);
+}
+function local(el, e) { const r = el.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+function nearest(b, px, py, max = 16) {
+  let best = null, bd = max * max;
+  for (const h of b.hits || []) { const d = (h.x - px) ** 2 + (h.y - py) ** 2; if (d < bd) { bd = d; best = h; } }
+  return best;
+}
+function wire(b, el) {
+  let drag = null;
+  el.addEventListener("pointerdown", e => { if (e.button) return; el.setPointerCapture(e.pointerId); const [x, y] = local(el, e); drag = { x, y, x2: x, y2: y }; });
+  el.addEventListener("pointermove", e => {
+    const [x, y] = local(el, e), o = el.querySelector(`#o-${b.id}`);
+    if (drag) {
+      drag.x2 = x; drag.y2 = y;
+      if (Math.abs(x - drag.x) + Math.abs(y - drag.y) > 6) { hideTip(); o.innerHTML = `<rect class="brush" x="${Math.min(drag.x, x)}" y="${Math.min(drag.y, y)}" width="${Math.abs(x - drag.x)}" height="${Math.abs(y - drag.y)}"/>`; }
+      return;
+    }
+    const n = nearest(b, x, y);
+    if (!n) { hideTip(); o.innerHTML = ""; return; }
+    o.innerHTML = `<circle class="hov" cx="${n.x}" cy="${n.y}" r="9"/>`;
+    showTip(e, b, n);
+  });
+  el.addEventListener("pointerleave", () => { if (!drag) { hideTip(); const o = el.querySelector(`#o-${b.id}`); if (o) o.innerHTML = ""; } });
+  el.addEventListener("pointerup", e => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (Math.abs(d.x2 - d.x) > 8 && Math.abs(d.y2 - d.y) > 8) {
+      const [a0, b0] = toData(b, Math.min(d.x, d.x2), Math.max(d.y, d.y2)), [a1, b1] = toData(b, Math.max(d.x, d.x2), Math.min(d.y, d.y2));
+      animate(b, el, { x0: a0, x1: a1, y0: b0, y1: b1 });
+    } else {
+      const n = nearest(b, d.x, d.y);
+      S.sel = n && n.s ? (S.sel === n.s.model ? null : n.s.model) : null;
+      redraw();
+    }
+  });
+  el.addEventListener("dblclick", () => animate(b, el, b.home));
+  el.addEventListener("wheel", e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const [x, y] = local(el, e); zoomAt(b, el, x, y, Math.exp(e.deltaY * .01));
+  }, { passive: false });
+}
+const tip = document.getElementById("tip");
+function showTip(e, b, n) {
+  const p = n.p, s = n.s;
+  const who = s ? `<span class="k" style="--c:var(--h-${s.harness})"></span>${esc(nameOf(s))} on ${esc(s.harness)} · ${esc(p.effort)}` : `<span class="k" style="--c:var(--ctx)"></span>${esc(p.published || p.model)} · ${esc(p.effort)}`;
+  const note = s ? (carried(s, p.effort) ? "you carry this lane" : s.lanes.has(p.effort) ? "in the catalog, not carried" : "measured; no lane at this effort") : "no lane for this model";
+  tip.innerHTML = `<b>${fScore(b, p.score)}</b> · ${fCost(p.cost)}<br>${who}<br><span class="m">${note}${b.onFront.has(p) ? " · on the frontier" : ""}</span>`;
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+// ---- ranking inputs: percentile per board, mean across the classification's boards ----
+const MARGIN = 5;
+function scoreAt(C, s, effort) {
+  const per = C.list.map(b => { const p = b.at.get(s.model + "|" + effort); return p && (s.primary || s.lanes.has(effort)) ? { b, p, pct: b.pct(p.score), rc: b.med && p.cost > 0 ? p.cost / b.med : null } : null; });
+  const got = per.filter(Boolean);
+  if (!got.length) return { per, n: 0 };
+  const rcs = got.map(x => x.rc).filter(v => v != null);
+  return { per, n: got.length, mean: got.reduce((a, x) => a + x.pct, 0) / got.length, rc: rcs.length ? Math.exp(rcs.reduce((a, v) => a + Math.log(v), 0) / rcs.length) : null };
+}
+function favoured(C, s) {
+  const cand = EFF.map(e => Object.assign({ e }, scoreAt(C, s, e))).filter(x => x.n);
+  if (!cand.length) return null;
+  const top = Math.max(...cand.map(x => x.mean));
+  return cand.find(x => x.mean >= top - MARGIN).e;
+}
+function laneTiers(C) {
+  const rows = [];
+  for (const s of serList()) for (const l of s.lanes.values()) if (l.carried) rows.push(Object.assign({ s, l }, scoreAt(C, s, l.effort)));
+  const N = C.list.length, got = rows.filter(r => r.n).sort((a, c) => c.mean - a.mean || (a.rc || 9) - (c.rc || 9));
+  const counts = {}; for (const r of got) counts[r.l.tier] = (counts[r.l.tier] || 0) + 1;
+  const plan = [4, 3, 2, 1].flatMap(t => Array(counts[t] || 0).fill(t));
+  got.forEach((r, i) => { const tie = i && got[i - 1].mean === r.mean; r.tier = tie ? got[i - 1].tier : plan[i]; r.rank = tie ? got[i - 1].rank : i + 1; r.thin = N > 1 && (r.n < N / 2 || r.n === 1); });
+  return new Map(rows.map(r => [r.l.name, r]));
+}
+
+// ---- effort range table: real scores, one row per model on a harness ----
+function renderTable(C) {
+  for (const b of C.list) {
+    const ours = b.points.filter(p => groupOf(p)).map(p => p.score), pad = (Math.max(...ours) - Math.min(...ours)) * .04;
+    b.tlo = Math.min(...ours) - pad; b.thi = Math.max(...ours) + pad;
+  }
+  const LT = laneTiers(C), N = C.list.length;
+  const rows = [];
+  for (const s of serList()) {
+    const cells = C.list.map(b => {
+      const pts = EFF.map(e => b.at.get(s.model + "|" + e)).filter(p => p && (s.primary || s.lanes.has(p.effort)));
+      if (!pts.length) return null;
+      const run = pts.filter(p => carried(s, p.effort));
+      return { b, pts, lo: Math.min(...pts.map(p => p.score)), hi: Math.max(...pts.map(p => p.score)), best: run.length ? Math.max(...run.map(p => p.score)) : null };
+    });
+    if (!cells.some(Boolean)) continue;
+    const lanes = [...s.lanes.values()].filter(l => l.carried).sort((a, c) => EFF.indexOf(a.effort) - EFF.indexOf(c.effort)).map(l => LT.get(l.name));
+    const best = lanes.filter(r => r.n).sort((a, c) => c.mean - a.mean)[0] || null;
+    rows.push({ s, cells, lanes, best, fav: favoured(C, s) });
+  }
+  const key = r => S.sort == null ? (r.best ? -r.best.rank : -1e9) : S.sort === "cost" ? (r.best && r.best.rc != null ? -r.best.rc : -1e9) : (r.cells[S.sort] ? (r.cells[S.sort].best != null ? r.cells[S.sort].best : r.cells[S.sort].hi - 1e6) : -1e9);
+  rows.sort((a, c) => key(c) - key(a));
+  const sortBtn = (k, label) => `<button data-sort="${k}" class="${String(S.sort) === String(k) || (k === "rank" && S.sort == null) ? "on" : ""}">${label}</button>`;
+  const head = `<tr><th class="n">${sortBtn("rank", "#")}</th><th>Model on harness</th>${C.list.map((b, i) => `<th class="bm">${sortBtn(i, esc(b.benchmark))} <span class="src">${esc(b.source)}</span><div class="scl"><span>${fShort(b, b.tlo)}</span><span>${b.frac || b.unit === "%" ? "score %" : "score"}</span><span>${fShort(b, b.thi)}</span></div></th>`).join("")}<th class="num">Mean pct<small>n/${N}</small></th><th class="num">${sortBtn("cost", "Rel. cost")}</th><th>Tier now→here<small>each carried lane</small></th><th>Favours</th></tr>`;
+  const body = rows.map(r => {
+    const s = r.s, on = S.sel === s.model, c0 = `var(--h-${s.harness})`;
+    const tds = r.cells.map(c => {
+      if (!c) return `<td><span class="na">not measured</span></td>`;
+      const b = c.b, sx = v => Math.max(1, Math.min(99, (v - b.tlo) / ((b.thi - b.tlo) || 1) * 100));
+      let svg = `<line x1="${sx(c.lo)}%" x2="${sx(c.hi)}%" y1="7" y2="7" stroke="${c0}" stroke-width="2" stroke-linecap="round" opacity=".5"/>`;
+      for (const p of c.pts) {
+        const run = carried(s, p.effort), dim = S.eff && p.effort !== S.eff;
+        svg += `<circle class="ed" cx="${sx(p.score)}%" cy="7" r="${run ? 4.2 : 3.3}" fill="${run ? c0 : "var(--panel)"}" stroke="${run ? "var(--panel)" : c0}" stroke-width="1.4" opacity="${dim ? .25 : 1}" data-m="${esc(s.model)}" data-e="${esc(p.effort)}" data-t="${esc(b.benchmark + "|" + p.effort + "|" + fScore(b, p.score) + "|" + fCost(p.cost) + "|" + (run ? "you carry this lane" : "not carried"))}"/>`;
+      }
+      const a = sx(c.lo), z = sx(c.hi);
+      svg += z - a < 22 ? `<text x="${(a + z) / 2}%" y="21" text-anchor="middle">${c.lo === c.hi ? fShort(b, c.lo) : fShort(b, c.lo) + "–" + fShort(b, c.hi)}</text>` : `<text x="${a}%" y="21" text-anchor="middle">${fShort(b, c.lo)}</text><text x="${z}%" y="21" text-anchor="middle">${fShort(b, c.hi)}</text>`;
+      return `<td class="rg"><svg>${svg}</svg></td>`;
+    }).join("");
+    const B = r.best;
+    const tiers = r.lanes.map(x => !x.n ? `<span class="tz"><span class="m">${esc(x.l.effort)}</span> ${x.l.tier}→?</span>` : `<span class="tz${x === B ? " b" : ""}"><span class="m">${esc(x.l.effort)}</span> ${x.l.tier}→${x.tier}${x.tier > x.l.tier ? `<span class="u">▲</span>` : x.tier < x.l.tier ? `<span class="d">▼</span>` : ""}${x.thin ? "?" : ""}</span>`).join("");
+    const favRun = r.fav && carried(s, r.fav);
+    return `<tr class="r${on ? " on" : ""}" data-m="${esc(s.model)}"><td class="n">${B ? B.rank : "–"}</td><td><span class="who">${glyph(s)}<b>${esc(s.short)}</b><small>@${esc(s.harness)}</small></span></td>${tds}<td class="num">${B ? `<b>${B.thin ? "~" : ""}${Math.round(B.mean)}</b> <small>${B.n}/${N}</small>` : "–"}</td><td class="num">${B && B.rc != null ? fX(B.rc) : "–"}</td><td class="tzs">${tiers || `<span class="na">none carried</span>`}</td><td>${r.fav ? `${esc(r.fav)}${favRun ? "" : ` <small class="na">not carried</small>`}` : "–"}</td></tr>`;
+  }).join("");
+  const t = document.getElementById("tbl");
+  t.innerHTML = `<table class="${S.sel ? "dimt" : ""}"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+const fX = x => (x < 1 ? x.toFixed(2) : x.toFixed(1)) + "×";
+
+// pointing at an effort dot in the table rings the same point in every plot
+function markHover() {
+  for (const b of D.boards) {
+    const o = document.getElementById("o-" + b.id); if (!o || !b.X) continue;
+    const h = S.hover, p = h && b.at.get(h.model + "|" + h.effort);
+    o.innerHTML = p && p.cost > 0 ? `<circle class="hov" cx="${b.X(p.cost)}" cy="${b.Y(p.score)}" r="10"/><circle class="hov" cx="${b.X(p.cost)}" cy="${b.Y(p.score)}" r="15" opacity=".35"/>` : "";
+  }
+}
+
+// ---- page ----
+function redraw() {
+  const C = CLASSES.find(c => c.id === S.tab);
+  document.getElementById("tabs").innerHTML = CLASSES.map(c => `<button class="tab" role="tab" data-tab="${c.id}" aria-selected="${c.id === S.tab}">${esc(c.title)}<small>${c.reference ? "reference" : c.list.length}</small></button>`).join("");
+  document.getElementById("bar").innerHTML = `<span class="lab">Harness</span>${HS.map(h => `<button class="pill" data-h="${h}" aria-pressed="${!S.hide.has(h)}"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="var(--h-${h})"/></svg>${h}</button>`).join("")}<button class="pill" data-ctx aria-pressed="${S.ctx}"><svg width="10" height="10"><circle cx="5" cy="5" r="3.5" fill="var(--ctx)"/></svg>other models</button><span class="lab">Effort</span>${[null].concat(EFF.filter(e => C.list.some(b => b.points.some(p => p.effort === e && groupOf(p))))).map(e => `<button class="pill${S.eff === e ? " sel" : ""}" data-eff="${e || ""}">${e || "all"}</button>`).join("")}<span class="lab">Model</span><span class="chips">${serList().filter(s => C.list.some(b => EFF.some(e => b.at.has(s.model + "|" + e)))).map(s => `<button class="pill${S.sel === s.model ? " sel" : ""}" data-m="${esc(s.model)}">${glyph(s)}${esc(s.short)}<small>${esc(s.harness)}</small></button>`).join("")}</span>`;
+  const P = document.getElementById("plots");
+  P.innerHTML = C.list.map(b => `<article class="card${S.wide === b.id ? " wide" : ""}" data-b="${b.id}"><header><span><h2 style="display:inline">${esc(b.benchmark)}</h2> <span class="sub">${esc(b.source)} · ${b.points.length} rows · score${b.frac || b.unit === "%" ? " %" : ""}</span></span><span class="tools"><span class="hint">drag a box to zoom · double-click resets</span><button data-reset hidden>Reset</button><button data-wide>${S.wide === b.id ? "Smaller" : "Expand"}</button></span></header><div class="plotbox"></div></article>`).join("");
+  for (const card of P.children) {
+    const b = D.boards.find(x => x.id === card.dataset.b), el = card.querySelector(".plotbox");
+    draw(b, el); wire(b, el);
+    card.querySelector("[data-reset]").onclick = () => animate(b, el, b.home);
+    card.querySelector("[data-wide]").onclick = () => { S.wide = S.wide === b.id ? null : b.id; redraw(); };
+  }
+  document.getElementById("tt").textContent = `${C.title}: score range across the efforts`;
+  document.getElementById("ts").textContent = "One row per model on a harness. Each cell is the board's own score axis: one dot per measured effort, filled where you carry it. Point at a dot to find it in the plots.";
+  renderTable(C);
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab],[data-h],[data-ctx],[data-eff],[data-m],[data-sort]");
+  if (!t) return;
+  if (t.dataset.tab) { S.tab = t.dataset.tab; S.wide = null; S.sort = null; history.replaceState(null, "", "#" + S.tab); }
+  else if (t.dataset.h) S.hide.has(t.dataset.h) ? S.hide.delete(t.dataset.h) : S.hide.add(t.dataset.h);
+  else if ("ctx" in t.dataset) S.ctx = !S.ctx;
+  else if (t.dataset.eff != null) S.eff = t.dataset.eff || null;
+  else if (t.dataset.sort != null) { const v = t.dataset.sort; S.sort = v === "rank" ? null : v === "cost" ? "cost" : +v; }
+  else if (t.dataset.m) S.sel = S.sel === t.dataset.m ? null : t.dataset.m;
+  redraw();
+});
+document.getElementById("tbl").addEventListener("pointerleave", () => { S.hover = null; markHover(); hideTip(); });
+document.getElementById("tbl").addEventListener("pointermove", e => {
+  const c = e.target.closest("circle[data-t]");
+  const h = c ? { model: c.dataset.m, effort: c.dataset.e } : null;
+  if (JSON.stringify(h) !== JSON.stringify(S.hover)) { S.hover = h; markHover(); }
+  if (!c) { hideTip(); return; }
+  const [bn, ef, sc, co, st] = c.dataset.t.split("|");
+  tip.innerHTML = `<b>${esc(sc)}</b> · ${esc(co)}<br>${esc(bn)} · ${esc(ef)}<br><span class="m">${esc(st)}</span>`;
+  tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
+});
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 120); });
+// #tab&m=model&zoom=boardId:x0,x1,y0,y1 (for screenshots and links)
+for (const part of location.hash.slice(1).split("&")) {
+  if (CLASSES.some(c => c.id === part)) S.tab = part;
+  else if (part.startsWith("m=")) S.sel = decodeURIComponent(part.slice(2));
+  else if (part.startsWith("zoom=")) { const [id, q] = part.slice(5).split(":"), b = D.boards.find(x => x.id === id); if (b) { const [x0, x1, y0, y1] = q.split(",").map(Number); b.view = { x0, x1, y0, y1 }; } }
+}
+redraw();
+</script>
+</body>
+</html>
