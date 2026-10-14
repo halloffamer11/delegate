@@ -35,6 +35,8 @@ history. The repo is public.
   `.scratch/delegate-any-harness/issues/`.
 - Deepening (eight deep modules): spec `.scratch/delegate-deepening/spec.md`, tickets
   `.scratch/delegate-deepening/issues/`.
+- Benchmark views (the page's flat tabs): spec `.scratch/delegate-benchmark-views/spec.md`,
+  tickets `.scratch/delegate-benchmark-views/issues/`.
 - Modular (complete): `.scratch/delegate-modular/CLAUDE.md`.
 - A ticket's `**Status:**` line names each open box that waits on the user.
 - Settled decisions: `docs/adr/`. Do not reopen one.

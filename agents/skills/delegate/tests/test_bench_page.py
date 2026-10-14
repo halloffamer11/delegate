@@ -237,7 +237,9 @@ try:
            and all(inside_details(i) for i in tables)
            and not inside_details(compare)
            and not re.search(r"<details[^>]*\bopen\b", page)
-           and page.find('id="plots"') < compare < page.find("<details"),
+           # the comparison opens the Numbers tab, above the collapsed evidence
+           # (benchmark-views ticket 01)
+           and page.find('id="plots"') < compare < page.find('<section class="evidence">'),
            f"kinds={kinds} tables={len(tables)}")
 except Exception as e:
     record("every table is collapsed until asked for, under the plots", False, repr(e))
@@ -906,9 +908,12 @@ except Exception as e:
 
 try:
     script = open(bench_page.SCRIPT_PATH, encoding="utf-8").read()
+    # the views' plots (ticket 05) show their Reset only once zoomed; the
+    # workbench's is always there
+    workbench = script[:script.index("function makeViews(")] + script[script.index("// --- the tabs"):]
     record("selecting a board redraws its description, and the reset button is never hidden",
-           "drawAbout(board)" in script and "reset.hidden" not in script
-           and '"wheel"' in script and "passive: false" in script)
+           "drawAbout(board)" in workbench and "reset.hidden" not in workbench
+           and '"wheel"' in workbench and "passive: false" in workbench)
 except Exception as e:
     record("selecting a board redraws its description, and the reset button is never hidden", False, repr(e))
 
@@ -986,7 +991,8 @@ try:
            and by_name["astra-high@codex"]["harness"] == "codex"
            and by_name["astra-high@codex"]["tier"] == doc["lanes"]["astra-high@codex"]["tier"]
            # ticket 27 added the lane's meter, which colour is now drawn from
-           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "effort", "tier",
+           # and benchmark-views ticket 05 the Model's versioned name, which the views print
+           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "label", "effort", "tier",
                                 "carried", "off", "rows", "kind", "source", "competitor"},
            repr(lanes[:3]))
     key = data["catalogKey"]
@@ -1533,7 +1539,8 @@ try:
                                 "tierView": True, "focusTier": None},
                repr(out["after"]))
         record("36.3 what it clears is cleared in the browser too, so a reload draws nothing",
-               out["stored"] == {"version": 2, "tiers": {}, "lines": {}, "manual": {}, "tierView": True}
+               out["stored"] == {"version": 2, "tiers": {}, "lines": {}, "manual": {}, "tierView": True,
+                                 "view": None}
                and out["reloaded"] == {"tiers": {}, "manual": {}, "lines": {}, "tierView": True},
                repr((out["stored"], out["reloaded"])))
 except Exception as e:
@@ -1715,9 +1722,212 @@ try:
 except Exception as e:
     record("36.10 the cheapest label goes above its dot, not over its link", False, repr(e))
 
+# --- benchmark-views ticket 05: one tab per kind of job, plots and range tables -----
+
+VIEW_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        **{f"opus55-{e}@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": e,
+                                  "tier": 3, "meter": "claude-general"}
+           for e in ("medium", "high")},
+        "opus55-high@kiro": {"harness": "kiro", "model": "claude-opus-5-5", "effort": "high",
+                             "tier": 3, "meter": "kiro-credits"},
+    },
+}
+VIEW_ROWS = [{"source": "aa", "model": "Claude Opus 5.5", "effort": e, "benchmark": b,
+              "score": sc, "cost_usd": c, "uncertain": False}
+             for e, sc, c in (("medium", 0.6, 1.0), ("high", 0.7, 2.0), ("max", 0.8, 4.0))
+             for b in ("Terminal-Bench 2.1", "Terminal-Bench 2.0", "GDPval")] + \
+            [{"source": "aa", "model": m, "effort": "high", "benchmark": "GDPval",
+              "score": 0.5, "cost_usd": 1.0, "uncertain": False}
+             for m in ("Some Other Model", "Maker Some Other Model")]
+
+try:
+    views = bench_page.load_views()
+    ids = [v["id"] for v in views]
+    named = " ".join(str(v["boards"]) for v in views).lower()
+    record("V1 views.json defines a few job views and a reference view last, and names no model",
+           3 <= len(views) <= 6 and len(set(ids)) == len(ids)
+           and all(v["why"] and v["boards"] for v in views)
+           and not views[0]["reference"] and [v["reference"] for v in views].count(True) == 1
+           and views[-1]["reference"]
+           and not any(w in named for w in ("opus", "sonnet", "gpt", "gemini", "grok", "fable")),
+           repr([(v["id"], v["reference"]) for v in views]))
+    record("V2 a missing views file is no views, never a crash",
+           bench_page.load_views(os.path.join(_ISOLATED_CWD.name, "nope.json")) == [])
+except Exception as e:
+    record("V1 views.json defines a few job views", False, repr(e))
+
+try:
+    boards = [{"id": "b0", "source": "aa", "benchmark": "Terminal-Bench 2.0"},
+              {"id": "b1", "source": "aa", "benchmark": "Terminal-Bench 2.1"},
+              {"id": "b2", "source": "aa", "benchmark": "Terminal-Bench-Hard"},
+              {"id": "b3", "source": "tbench", "benchmark": "Terminal-Bench 4.0"}]
+    view = {"id": "c", "boards": [("aa", "Terminal-Bench"), ("tbench", "Terminal-Bench"),
+                                  ("swerb", "SWE Refactor Bench"), ("aa", "Terminal-Bench 2")]}
+    record("V3 a view plots the newest version of each board it names, in its order, once",
+           bench_page.view_boards(view, boards) == ["b1", "b3"],
+           repr(bench_page.view_boards(view, boards)))
+except Exception as e:
+    record("V3 view boards", False, repr(e))
+
+try:
+    names = {m: bench_page.display_name(m) for m in
+             ("claude-fable-5-1", "gpt-6-astra", "gemini-3-8-flash", "claude-opus-5-5", "grok-4-6",
+              "claude-sonnet-5-20260101", None)}
+    record("V4 a Model's name on the views carries its version, read from its id",
+           names == {"claude-fable-5-1": "Fable 5.1", "gpt-6-astra": "Astra 6",
+                     "gemini-3-8-flash": "Flash 3.8", "claude-opus-5-5": "Opus 5.5",
+                     "grok-4-6": "Grok 4.6", "claude-sonnet-5-20260101": "Sonnet 5", None: "?"},
+           repr(names))
+    keys = bench_page.reference_keys(["Claude Opus 4.8", "Opus 4.8", "kimi-k3", "Kimi K3",
+                                      "GPT-5.5", "GPT-5.5 mini", None])
+    record("V5 a reference model printed two ways is drawn under its shorter name, and a variant stays apart",
+           keys == {"Opus 4.8": "Opus 4.8", "Claude Opus 4.8": "Opus 4.8", "Kimi K3": "Kimi K3",
+                    "kimi-k3": "Kimi K3", "GPT-5.5": "GPT-5.5", "GPT-5.5 mini": "GPT-5.5 mini"},
+           repr(keys))
+except Exception as e:
+    record("V4 display names", False, repr(e))
+
+try:
+    data = bench_page.plot_data(VIEW_ROWS, VIEW_LANES)
+    by_id = {v["id"]: v for v in data["views"]}
+    tb = board_named(data, "Terminal-Bench 2.1")["id"]
+    gdp = board_named(data, "GDPval")
+    record("V6 the page carries each view with the boards it plots, and no board it lacks",
+           [v["id"] for v in data["views"]] == [v["id"] for v in bench_page.load_views()]
+           and by_id["coding"]["boards"] == [tb] and by_id["knowledge"]["boards"] == [gdp["id"]]
+           and by_id["automation"]["boards"] == [] and by_id["overall"]["reference"] is True,
+           repr([(v["id"], v["boards"]) for v in data["views"]]))
+    ours = [p for p in gdp["points"] if p["ours"]]
+    refs = sorted((p["published"], p["group"], p["ref"]) for p in gdp["points"] if not p["ours"])
+    labels = {l["name"]: (l["group"], l["label"]) for l in data["lanes"]}
+    record("V7 a catalog Model's rows carry its group and every lane its versioned label",
+           ours and all(p["group"] == "claude-opus-5-5" and p["ref"] is None for p in ours)
+           and labels["opus55-high@kiro"] == ("claude-opus-5-5", "Opus 5.5")
+           and labels["opus55-medium@claude"] == ("claude-opus-5-5", "Opus 5.5"),
+           repr((ours, labels)))
+    record("V8 a model with no lane is a reference, drawn under one name however its source prints it",
+           refs == [("Maker Some Other Model", None, "Some Other Model"),
+                    ("Some Other Model", None, "Some Other Model")], repr(refs))
+    page = bench_page.render(None, VIEW_LANES, VIEW_ROWS)
+    tabs = re.findall(r'class="tab" role="tab" href="#view-([\w-]+)"', page)
+    record("V9 the tabs are one flat row: each view, then All boards, Prices and Numbers",
+           tabs == [v["id"] for v in bench_page.load_views()] + ["boards", "prices", "numbers"]
+           and page.count('<nav class="tabs"') == 1
+           and all(f'id="view-{t}"' in page for t in tabs if t != "prices")
+           and all(f'data-view-body="{v["id"]}"' in page for v in bench_page.load_views())
+           and page.count('class="v-ref"') == 1 and "frontier" not in tabs,
+           repr(tabs))
+    record("V10 the page opens light, with a toggle the script shows",
+           '<html lang="en" data-theme="light">' in page
+           and re.search(r'<button type="button" id="theme"[^>]* hidden>', page) is not None
+           and ':root[data-theme="dark"]' in page, page[:300])
+except Exception as e:
+    record("V6-V10 view data and tabs", False, repr(e))
+
+VIEWS_JS = r"""
+const P = require(process.argv[1]);
+const c = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const out = {};
+const lanes = c.lanes.map((l, rank) => Object.assign({ rank }, l));
+out.held = P.heldTiers(lanes, c.tiers);
+const s = new Set(["a"]);
+out.pick = [[...P.pick(new Set(s), "b", false)], [...P.pick(new Set(s), "b", true)],
+            [...P.pick(new Set(s), "a", false)], [...P.pick(new Set(["a", "b"]), "a", true)],
+            [...P.pick(new Set(["a", "b"]), "a", false)]];
+out.cut = [...P.cutRanked([["w", 9], ["x", 8], ["y", 8], ["z", 1]], { 4: 1, 3: 1, 1: 2 }, 4)];
+const vs = P.viewSeries(lanes);
+out.order = vs.order;
+out.series = vs.list.map((x) => [x.id, x.primary, x.shape, x.label, [...x.lanes.keys()]]);
+const boards = c.boards.map(P.indexBoard);
+out.pct = [P.percentile([1, 2, 3, 4, 5], 5), P.percentile([1, 2, 3, 4, 5], 1), P.percentile([1, 3, 3, 5], 3)];
+const g = vs.list.find((x) => x.id === "g@claude"), k = vs.list.find((x) => x.id === "g@kiro");
+out.score = [P.viewScore(boards, g, "high"), P.viewScore(boards, k, "max"), P.viewScore(boards, k, "high")]
+  .map((r) => [r.n, r.mean === undefined ? null : Math.round(r.mean), r.rc === undefined || r.rc === null ? null : +r.rc.toFixed(3)]);
+out.favour = [P.favouredEffort(boards, g, ["low", "medium", "high", "max"]),
+              P.favouredEffort(boards, vs.list.find((x) => x.id === "h@codex"), ["low", "high"])];
+const vt = P.viewTiers(boards, vs.list, out.held);
+out.tiers = [...vt.values()].map((r) => [r.name, r.n, r.tier === undefined ? null : r.tier, r.rank === undefined ? null : r.rank, !!r.thin])
+  .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+process.stdout.write(JSON.stringify(out));
+"""
+
+try:
+    if not NODE:
+        record("V11 the views' pure functions, under node", True, "(node not on PATH; skipped)")
+    else:
+        def vp(group, effort, score, cost):
+            return {"group": group, "effort": effort, "score": score, "cost": cost}
+        lanes = [
+            # g: two lanes on claude, one on kiro; an ultra lane is never a series' effort
+            {"name": "g-high@claude", "group": "g", "label": "G 1", "harness": "claude", "effort": "high",
+             "meter": "m", "carried": True, "tier": 4},
+            {"name": "g-max@claude", "group": "g", "label": "G 1", "harness": "claude", "effort": "max",
+             "meter": "m", "carried": True, "tier": 3},
+            {"name": "g-ultra@claude", "group": "g", "label": "G 1", "harness": "claude", "effort": "ultra",
+             "meter": "m", "carried": False, "tier": None},
+            {"name": "g-high@kiro", "group": "g", "label": "G 1", "harness": "kiro", "effort": "high",
+             "meter": "k", "carried": True, "tier": 2},
+            {"name": "h-low@codex", "group": "h", "label": "H 2", "harness": "codex", "effort": "low",
+             "meter": "c", "carried": True, "tier": 2},
+            {"name": "h-high@codex", "group": "h", "label": "H 2", "harness": "codex", "effort": "high",
+             "meter": "c", "carried": False, "tier": 1},
+            {"name": "j-high@codex", "group": "j", "label": "J 3", "harness": "codex", "effort": "high",
+             "meter": "c", "carried": True, "tier": 1},
+        ]
+        case = {
+            "lanes": lanes,
+            # h-low is placed on the page at 1 over its catalog 2; j is off on the page
+            "tiers": {"h-low@codex": 1, "j-high@codex": "off"},
+            "boards": [
+                {"id": "b1", "unit": "%", "points": [
+                    vp("g", "medium", 70, 1), vp("g", "high", 80, 2), vp("g", "max", 90, 8),
+                    vp("h", "low", 60, 0.5), vp("h", "high", 61, 1), vp(None, "high", 50, 1)]},
+                # the second board does not measure g at high
+                {"id": "b2", "unit": "%", "points": [
+                    vp("g", "max", 40, 8), vp("h", "low", 30, 2), vp("h", "high", 20, 4), vp(None, "x", 10, 1)]},
+            ],
+        }
+        run = subprocess.run([NODE, "-e", VIEWS_JS, bench_page.SCRIPT_PATH], input=json.dumps(case),
+                             capture_output=True, text=True, timeout=30)
+        out = json.loads(run.stdout) if run.returncode == 0 else {"error": run.stderr}
+        record("V11 a lane holds the page's tier, else the catalog's when carried; off holds none",
+               out.get("held") == {"g-high@claude": 4, "g-max@claude": 3, "g-high@kiro": 2, "h-low@codex": 1},
+               repr(out))
+        record("V12 a click picks one, a click on the only pick clears, shift-click adds or removes",
+               out.get("pick") == [["b"], ["a", "b"], [], ["b"], ["a"]], repr(out.get("pick")))
+        record("V13 a ranking cut in held proportions gives a tie the better tier",
+               out.get("cut") == [["w", 4], ["x", 3], ["y", 3], ["z", 1]], repr(out.get("cut")))
+        record("V14 a series is a Model on a Harness: the busiest Harness is primary, Kiro last, ultra left out",
+               out.get("order") == ["codex", "claude", "kiro"]
+               and out.get("series") == [["h@codex", True, "circle", "H 2", ["low", "high"]],
+                                         ["j@codex", True, "square", "J 3", ["high"]],
+                                         ["g@claude", True, "circle", "G 1", ["high", "max"]],
+                                         ["g@kiro", False, "circle", "G 1", ["high"]]],
+               repr(out.get("series")))
+        record("V15 a percentile is the share of other rows beaten, ties counting half",
+               out.get("pct") == [100, 0, 50], repr(out.get("pct")))
+        # b1 medians: costs .5 1 1 1 2 8 -> 1; b2: 1 2 4 8 -> 2. g high on b1 beats 4 of 5 (80);
+        # kiro draws only the efforts it has lanes for, so g@kiro max is unmeasured
+        record("V16 a series' view score is its mean percentile over the boards that measured it, and cost to the median",
+               out.get("score") == [[1, 80, 2.0], [0, None, None], [1, 80, 2.0]], repr(out.get("score")))
+        # g: medium 40, high 80, max (100+100)/2 = 100 -> max; h: low (20+66.7)/2 = 43, high (60+33)/2 = 47 -> low
+        record("V17 the favoured effort is the lowest within five points of the best",
+               out.get("favour") == ["max", "low"], repr(out.get("favour")))
+        # held: g-high@claude 80 (n1), g-max@claude 100 (n2), g-high@kiro 80 (n1), h-low@codex 43 (n2);
+        # counts 4:1 3:1 2:1 1:1 of 4 -> ends 1 2 3 4
+        record("V18 a view ranks the held lanes it measured and cuts them in the held proportions; one of two boards is thin",
+               out.get("tiers") == [["g-high@claude", 1, 3, 2, True], ["g-high@kiro", 1, 3, 2, True],
+                                    ["g-max@claude", 2, 4, 1, False], ["h-low@codex", 2, 1, 4, False]],
+               repr(out.get("tiers")))
+except Exception as e:
+    record("V11 the views' pure functions, under node", False, repr(e))
+
 # The script names the Python it mirrors in its comments (`carry.beats`), so a
 # reader can check one against the other. A citation that names a module the
 # function does not live in sends that reader to the wrong file.
+
 try:
     import ast
     with open(bench_page.SCRIPT_PATH, encoding="utf-8") as f:

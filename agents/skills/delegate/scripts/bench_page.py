@@ -20,6 +20,7 @@ import html
 import json
 import math
 import os
+import re
 from collections import defaultdict
 
 import bench
@@ -54,6 +55,7 @@ ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"
 SOURCES_PATH = bench.SOURCES_PATH
 BOARDS_PATH = bench.BOARDS_PATH
 SCRIPT_PATH = os.path.join(ASSETS, "bench_page.js")
+VIEWS_PATH = os.path.join(ASSETS, "views.json")
 
 # Said in place of a description for a board `assets/boards.json` does not
 # cover. A description is quoted from the source's own methodology page, never
@@ -444,6 +446,10 @@ def _point(r, lanes):
         provenance = str(r.get("provenance") or "unlabelled")
     return {"model": _model_key(r), "name": _short_model(r.get("model"), r["_lane_model"]),
             "published": r.get("model"), "ours": bool(r["_lane_model"]),
+            # the catalog Model this row measures (`model_identity`), which the
+            # views draw it under on every Harness that runs it; None for a
+            # model the catalog does not run, which `_plot_data` gives a `ref`
+            "group": r["_record"].get("model_key") if r["_lane_model"] else None, "ref": None,
             "effort": r.get("effort") or "?", "score": r["_score"], "cost": r["_cost"],
             "plotted": _plotted(r), "kind": r["_kind"], "weak": r["_weak"], "lanes": at,
             "harness": harness, "meter": meter, "tier": min(tiers) if tiers else None,
@@ -473,7 +479,8 @@ def _lane_list(lanes_doc, bench, items, proposals):
         decision = (proposals or {}).get(name) or {}
         out.append({"name": name, "harness": lane.get("harness"), "meter": lane.get("meter"),
                     "model": lane.get("model"),
-                    "group": model_identity(lane), "effort": lane.get("effort"),
+                    "group": model_identity(lane), "label": display_name(model_identity(lane) or name),
+                    "effort": lane.get("effort"),
                     "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
                     "carried": _carried(lane), "off": off.get(name), "rows": name in drawn,
                     "kind": decision.get("kind"), "source": decision.get("source"),
@@ -595,6 +602,10 @@ def _plot_data(items, lanes_doc, proposals, bench=None):
         board["aboutMissing"] = None if board["about"] else NO_ABOUT
         board["points"] = [_point(r, lanes) for r in rows]
         boards.append(board)
+    others = [p for b in boards for p in b["points"] if not p["group"]]
+    keys = reference_keys(p["published"] or p["model"] for p in others)
+    for p in others:
+        p["ref"] = keys.get(p["published"] or p["model"])
     # Two plots to start: the board a decision is made on, and the best board
     # from another source if there is one, else the next board of this one.
     defaults = [b["id"] for b in boards[:1]]
@@ -609,7 +620,93 @@ def _plot_data(items, lanes_doc, proposals, bench=None):
             "meters": meter_shades(lanes_doc),
             "efforts": sorted(efforts, key=_effort_key),
             "lanes": _lane_list(lanes_doc, bench, items, proposals),
+            "views": [dict(v, boards=view_boards(v, boards)) for v in load_views()],
             "catalogKey": catalog_key(lanes_doc)}
+
+
+# --- the views: one tab per kind of job (benchmark-views ticket 05) -------------------
+
+# The tabs every page has after the views: the workbench of free plots, the
+# prices and the numbers. One level, never nested.
+FIXED_TABS = (("boards", "All boards"), ("prices", "Prices"), ("numbers", "Numbers"))
+
+
+def load_views(path=None):
+    """The views `assets/views.json` defines, in its order. A missing or
+    unreadable file is no views, and the page opens on All boards."""
+    try:
+        with open(path or VIEWS_PATH, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return []
+    views = []
+    for v in doc.get("views") or ():
+        if not isinstance(v, dict) or not isinstance(v.get("id"), str):
+            continue
+        pairs = [tuple(b) for b in v.get("boards") or () if isinstance(b, list) and len(b) == 2]
+        views.append({"id": v["id"], "title": v.get("title") or v["id"], "why": v.get("why") or "",
+                      "reference": bool(v.get("reference")), "boards": pairs})
+    return views
+
+
+def _names_board(benchmark, wanted):
+    """`Terminal-Bench` names `Terminal-Bench 2.1`: a new version of a board
+    needs no edit to the views."""
+    return benchmark == wanted or benchmark.startswith(wanted + " ")
+
+
+def _version_key(benchmark):
+    return [int(x) if x.isdigit() else x for x in benchmark.replace("-", " ").replace(".", " ").split()]
+
+
+def view_boards(view, boards):
+    """The ids of the boards a view plots, one per [source, benchmark] it
+    lists, in its order: the newest version of each. A pair no board on the
+    page answers is left out."""
+    out = []
+    for source, wanted in view["boards"]:
+        found = [b for b in boards if b["source"] == source and _names_board(b["benchmark"], wanted)]
+        found.sort(key=lambda b: _version_key(b["benchmark"]), reverse=True)
+        if found and found[0]["id"] not in out:
+            out.append(found[0]["id"])
+    return out
+
+
+_NAME_PARTS = re.compile(r"[-_.\s]+")
+
+
+def display_name(model_id):
+    """The name a Model wears on the views, with its version, read from its id:
+    `claude-fable-5-1` is Fable 5.1, `gpt-6-astra` is Astra 6, `gemini-3-8-flash`
+    is Flash 3.8. The first word is the maker when more words follow, and a
+    number longer than three digits is a date, not a version. Never a list of
+    names, so a new Model needs no edit."""
+    parts = [t for t in _NAME_PARTS.split(str(model_id or "")) if t]
+    numbers = [t for t in parts if t.isdigit() and len(t) <= 3]
+    words = [t for t in parts if not t.isdigit()]
+    words = words[1:] if len(words) > 1 else words
+    name = " ".join(w[:1].upper() + w[1:] for w in words)
+    return " ".join(x for x in (name, ".".join(numbers)) if x) or str(model_id or "?")
+
+
+def _loose(name):
+    """A printed name with case, hyphens and underscores set aside."""
+    return " ".join(re.sub(r"[-_]+", " ", name.lower()).split())
+
+
+def reference_keys(names):
+    """{printed name: the name it is drawn under} for the models the catalog
+    does not run. Sources print one model differently (`Claude Opus 4.8` and
+    `Opus 4.8`, `Kimi K3` and `kimi-k3`), so a name that equals a shorter one,
+    or ends with it as a whole word, is drawn under the shorter one's name.
+    Reference only: nothing ranks these."""
+    ordered = sorted({n for n in names if n}, key=lambda n: (len(n), n))
+    key = {}
+    for n in ordered:
+        loose = _loose(n)
+        base = next((m for m in key if m != n and (loose == _loose(m) or loose.endswith(" " + _loose(m)))), None)
+        key[n] = key[base] if base else n
+    return key
 
 
 def _json_for_script(data):
@@ -627,32 +724,89 @@ def _script():
     return text
 
 
+def _tabs(views):
+    """The flat row of tabs. Each is a link to its section, so with the script
+    off the row is a table of contents and every section shows."""
+    tabs = [(v["id"], v["title"]) for v in views] + list(FIXED_TABS)
+    links = "".join(f'<a class="tab" role="tab" href="#view-{_esc(i)}" data-view="{_esc(i)}">{_esc(t)}</a>'
+                    for i, t in tabs)
+    return [f'<nav class="tabs" role="tablist" aria-label="Views">{links}</nav>']
+
+
+# How a view reads, under each one. The script draws what these describe.
+VIEW_HOW = (
+    ("Line", "One model on one harness, its measured efforts joined from the lowest to the highest. "
+             "A second harness for the same model draws only the efforts it has lanes for, dashed."),
+    ("Marker", "Colour is the harness and shape is the model. Filled: a lane you carry. Hollow: "
+               "measured, not carried."),
+    ("Grey dot", "A model with no lane, for reference. Pick it under Reference (or click its dot) to "
+                 "draw it as a grey dashed line with its name. It never enters the ranking or the tiers."),
+    ("Select", "Click shows one model or effort; shift-click adds or removes one; clicking the only "
+               "pick, “all” or Clear filters shows everything again. A harness name hides "
+               "or shows all its lanes."),
+    ("Frontier", "The soft band and the rings: the best score at or below each cost, over every row "
+                 "on the board."),
+    ("Zoom", "Drag a box, or hold ⌘ or Ctrl and scroll. Double-click or Reset returns to the "
+             "full view, or to the picked models."),
+    ("Score range", "Each cell spans the lowest to the highest score the board measured for the model "
+                    "across its efforts, on that board's own axis. A dot is one effort; a filled dot "
+                    "is one you carry. Point at a dot to ring it in the plots."),
+    ("#, Mean pct", "The rank of the model's best held lane by its mean percentile across the view's "
+                    "boards that measured it (n of N); ~ means fewer than half did."),
+    ("Tier now→here", "For each lane that holds a tier (drawn on this page, else the "
+                           "catalog's): that tier, and the tier this view gives it when the ranked "
+                           "lanes are cut in the proportions the tiers hold now. ? means thin "
+                           "evidence. A display aid: nothing writes it."),
+    ("Favours", "The lowest effort whose mean percentile is within 5 points of the model's best."),
+)
+
+
+def _view_shell(view):
+    """One view's section: its title and why it is a view, from views.json,
+    and how to read it; the script draws its filters, one plot per board and
+    the score-range table into the body."""
+    ref = ' <span class="v-ref">reference</span>' if view.get("reference") else ""
+    how = "".join(f"<dt>{_esc(term)}</dt><dd>{_esc(text)}</dd>" for term, text in VIEW_HOW)
+    return [f'<section class="view vw" id="view-{_esc(view["id"])}" data-view="{_esc(view["id"])}">',
+            f'<h2>{_esc(view["title"])}{ref}</h2>',
+            f'<p class="lede">{_esc(view["why"])}</p>',
+            f'<div class="v-body" data-view-body="{_esc(view["id"])}"></div>',
+            f'<details class="v-how"><summary>How to read this view</summary><dl>{how}</dl></details>',
+            "</section>"]
+
+
 def _plots_section(effort_rows, items, lanes_doc, proposals, bench=None):
-    out = ['<section class="plots">', "<h2>Score against cost</h2>"]
     if effort_rows is None:
-        return out + [_missing("Per-effort"), "</section>"]
+        return ['<section class="plots">', "<h2>Score against cost</h2>", _missing("Per-effort"), "</section>"], None
     data = _plot_data(items, lanes_doc, proposals, bench)
     if not data["boards"]:
-        return out + ["<p>No per-effort rows.</p>", "</section>"]
-    out += ['<p class="lede">Up is better and left is cheaper. The amber line is the best score '
+        return ['<section class="plots">', "<h2>Score against cost</h2>",
+                "<p>No per-effort rows.</p>", "</section>"], None
+    views = data["views"]
+    out = _tabs(views)
+    for view in views:
+        out += _view_shell(view)
+    out += ['<div class="board">',
+            '<div class="plot-column">',
+            '<section class="view plots" id="view-boards" data-view="boards">',
+            "<h2>Score against cost</h2>",
+            '<p class="lede">Up is better and left is cheaper. The amber line is the best score '
             "the money buys, and everything in the shade under it is beaten by a point on the "
             "line. Colour is the meter, the quota a lane spends. Each plot is one benchmark from "
             "one source, because a dollar on one board is not a dollar on another. Drag a tier "
             "line to move it; click a dot and press 1 to 4 to give its lane a tier, or o to turn "
             "it off.</p>",
-            '<div class="board">',
-            '<div class="plot-column">',
             '<div id="plots"></div>',
             '<button id="add-plot" type="button" class="add" hidden>Add a plot</button>',
             '<section id="sensitivity" class="sensitivity" aria-label="Tiers each board alone would give" hidden></section>',
+            "</section>",
             "</div>",
             '<aside id="tiers" class="tiers" aria-label="Tiers drawn on this page" hidden></aside>',
             "</div>",
             '<noscript><p class="missing">The plots need JavaScript. Every number is in the '
             "tables under “The numbers”.</p></noscript>",
-            f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>',
-            "</section>"]
-    return out + _comparison_section(data)
+            f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>']
+    return out, data
 
 
 def _price_section(lanes_doc):
@@ -1118,7 +1272,9 @@ def _header(lanes_doc, effort_rows, prescreen):
     lanes = _lanes(lanes_doc)
     off = _proposed_off(proposals)
     carried = sum(1 for name, lane in lanes.items() if lane.get("enabled", True) and lane.get("effort") != "ultra")
-    out = ["<header>", "<h1>Benchmark evidence for the lane catalog</h1>",
+    # light unless this browser asked for dark; the script shows the toggle
+    out = ["<header>", '<div class="top"><h1>Benchmark evidence for the lane catalog</h1>'
+           '<button type="button" id="theme" class="ghost" hidden>Dark mode</button></div>',
            "<p>Read-only for the catalog: a tier or an off drawn here stays in this browser, keyed to "
            "this catalog, until you paste it into the wizard, which is the only thing that writes. "
            f"{len(lanes)} lanes in the catalog, {carried} carried."
@@ -1142,29 +1298,32 @@ def _header(lanes_doc, effort_rows, prescreen):
 
 STYLE = """
 :root { color-scheme: light;
-  --page: #eceee9; --surface: #fbfbf8; --ink: #1a1e1c; --ink-2: #4c5450;
-  --muted: #7c8480; --grid: #e3e6e0; --rule: #cdd2ca; --head: #f0f2ed;
+  --page: #f7f6f3; --surface: #fcfcfb; --ink: #1b1a18; --ink-2: #4a4843;
+  --muted: #6b6963; --faint: #b4b1a9; --grid: #efece6; --rule: #dedbd3; --head: #f1efea;
   --accent: #2b5fc4; --off: #c63d33; --off-ink: #a3291f;
   --frontier: #c27806; --frontier-ink: #7f4d00; --flag: #f6ecd2; --flag-ink: #6b4d00;
-  --h-codex: #2b5fc4; --h-claude: #7a4cc2; --h-agy: #13866a; --h-grok: #b3306f;
-  --h-codex-1: #173a82; --h-claude-1: #43207e; --h-agy-1: #0a5443; --h-grok-1: #6e1a43;
+  --h-codex: #2a78d6; --h-claude: #eb6834; --h-kiro: #1baf7a; --h-agy: #c2408a; --h-grok: #45443f;
+  --h-codex-1: #1b4f91; --h-claude-1: #a8461c; --h-kiro-1: #0f7a54; --h-agy-1: #87285f; --h-grok-1: #8a8880;
+  --ctx: #c9c6be; --front: rgba(27, 26, 24, 0.09); --refc: #5f5d57;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { color-scheme: dark;
-    --page: #121513; --surface: #1a1e1b; --ink: #edf0ec; --ink-2: #b3bbb5;
-    --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
+    --page: #131312; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c9c7c0;
+    --muted: #a7a59d; --faint: #5d5b55; --grid: #252422; --rule: #34332f; --head: #21201e;
     --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
     --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
-    --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
-    --h-codex-1: #b7cdfa; --h-claude-1: #dccafb; --h-agy-1: #a3e8d2; --h-grok-1: #f4b8d3; } }
+    --h-codex: #3987e5; --h-claude: #e0702f; --h-kiro: #1fae7c; --h-agy: #d04f97; --h-grok: #d4d2ca;
+    --h-codex-1: #a9c8f5; --h-claude-1: #f3b48a; --h-kiro-1: #93dcbf; --h-agy-1: #eda6cc; --h-grok-1: #8f8c84;
+    --ctx: #4a4844; --front: rgba(240, 239, 236, 0.05); --refc: #bdbab2; } }
 :root[data-theme="dark"] { color-scheme: dark;
-  --page: #121513; --surface: #1a1e1b; --ink: #edf0ec; --ink-2: #b3bbb5;
-  --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
+  --page: #131312; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c9c7c0;
+  --muted: #a7a59d; --faint: #5d5b55; --grid: #252422; --rule: #34332f; --head: #21201e;
   --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
   --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
-  --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
-  --h-codex-1: #b7cdfa; --h-claude-1: #dccafb; --h-agy-1: #a3e8d2; --h-grok-1: #f4b8d3; }
+  --h-codex: #3987e5; --h-claude: #e0702f; --h-kiro: #1fae7c; --h-agy: #d04f97; --h-grok: #d4d2ca;
+  --h-codex-1: #a9c8f5; --h-claude-1: #f3b48a; --h-kiro-1: #93dcbf; --h-agy-1: #eda6cc; --h-grok-1: #8f8c84;
+  --ctx: #4a4844; --front: rgba(240, 239, 236, 0.05); --refc: #bdbab2; }
 * { box-sizing: border-box; }
 body { font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--ink);
   background: var(--page); margin: 0; padding-block: 2rem 4rem; padding-inline: 1.25rem; }
@@ -1415,6 +1574,135 @@ td.model { border-right: 1px solid var(--grid); }
 .rows tr.weak td { border-left: 3px solid var(--flag-ink); }
 .rows tr.nolane td { color: var(--ink-2); }
 .notes { font-size: 12.5px; padding-left: 1.2rem; }
+/* the tabs and the views (benchmark-views ticket 05) */
+header .top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+.ghost { font: inherit; font-size: 12.5px; line-height: 24px; padding: 0 9px; cursor: pointer; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+.ghost:hover { color: var(--ink); }
+.ghost[hidden] { display: none; }
+nav.tabs { display: flex; gap: 2px; margin: 1.2rem 0 0; border-bottom: 1px solid var(--rule); overflow-x: auto;
+  position: sticky; top: 0; z-index: 4; background: var(--page); }
+nav.tabs .tab { padding: 8px 12px; text-decoration: none; color: var(--muted); white-space: nowrap;
+  border-bottom: 2px solid transparent; }
+nav.tabs .tab:hover { color: var(--ink); }
+nav.tabs .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.view[hidden], .board[hidden] { display: none; }
+.view > h2:first-child { margin-top: 1.1rem; }
+.tiers.tucked { display: none; }
+.v-ref { font-size: 12px; font-weight: 400; color: var(--muted); border: 1px solid var(--rule); border-radius: 999px;
+  padding: 0 7px; margin-left: 0.4rem; vertical-align: 2px; }
+.v-bar { margin: 12px 0; display: grid; gap: 8px; }
+.v-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.v-row .lab { color: var(--muted); font-size: 12px; margin-right: 2px; min-width: 44px; }
+.v-row .sp { flex: 1; }
+.vw .how2 { color: var(--faint); font-size: 11.5px; }
+.v-hg { display: inline-flex; align-items: center; gap: 2px; background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 2px 3px 2px 2px; }
+.v-hh { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; color: var(--muted);
+  background: none; border: 0; border-right: 1px solid var(--rule); border-radius: 6px 0 0 6px;
+  padding: 2px 6px 2px 5px; margin-right: 2px; cursor: pointer; }
+.v-hh i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); display: inline-block; }
+.v-hg.off { opacity: 0.45; }
+.v-hg.off .v-mc { pointer-events: none; }
+.v-mc { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12.5px; line-height: 20px;
+  color: var(--ink); background: none; border: 1px solid transparent; border-radius: 6px; padding: 1px 7px 1px 5px;
+  cursor: pointer; white-space: nowrap; }
+.v-mc:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.v-mc.on { border-color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.v-mc.out { opacity: 0.4; }
+.v-mc svg { flex: none; display: block; }
+.v-refs { border: 1px dashed var(--faint); border-radius: 8px; padding: 4px 8px; }
+.v-refs summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.v-refs summary b { color: var(--ink); font-weight: 600; }
+.v-refs label { margin-left: 8px; cursor: pointer; }
+.v-rl { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 2px; }
+.v-rc { font: inherit; font-size: 12px; line-height: 22px; color: var(--muted); background: none;
+  border: 1px dashed var(--faint); border-radius: 6px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.v-rc.on { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.v-rc.on::before { content: "◎ "; }
+.v-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.v-card { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 10px 12px 6px;
+  min-width: 0; position: relative; }
+.v-card.wide { grid-column: 1 / -1; }
+.v-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.v-card h3 { display: inline; margin: 0; font-size: 14px; }
+.v-sub { color: var(--muted); font-size: 12.5px; }
+.v-card .tools { display: flex; gap: 4px; align-items: center; }
+.v-card .tools button { font: inherit; font-size: 12px; line-height: 22px; color: var(--muted); cursor: pointer;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 0 8px; }
+.v-card .tools button:hover { color: var(--ink); }
+.v-card .tools [hidden] { display: none; }
+.v-hint { color: var(--faint); font-size: 11.5px; margin-right: 4px; }
+.v-plot { position: relative; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.v-plot svg { display: block; width: 100%; }
+.v-plot svg text { fill: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.v-plot .v-gl { stroke: var(--grid); }
+.v-plot .v-zl { stroke: var(--faint); }
+.v-plot .v-frb { fill: none; stroke: var(--front); stroke-linejoin: round; stroke-linecap: round; }
+.v-plot .v-frr { fill: none; stroke: var(--ink); opacity: 0.55; }
+.v-plot .v-ctx { fill: var(--ctx); }
+.v-s .v-ln { fill: none; stroke: var(--c); stroke-linejoin: round; opacity: 0.85; }
+.v-s .v-mk { stroke-linejoin: round; }
+.v-s .v-mk.run { fill: var(--c); stroke: var(--surface); }
+.v-s .v-mk.out { fill: var(--surface); stroke: var(--c); }
+.v-plot .v-s text.v-tl { fill: var(--ink); font-size: 10.5px; }
+.v-plot .v-s text.v-tl.nm { font-weight: 600; }
+.v-s .v-ld { stroke: var(--c); opacity: 0.45; }
+.v-s.on .v-ln { opacity: 1; }
+.v-s.v-other .v-ln { stroke: var(--refc); opacity: 0.9; }
+.v-s.v-other .v-mk { fill: var(--surface); stroke: var(--refc); }
+.v-plot .v-s.v-other text.v-tl { fill: var(--refc); }
+.v-plot .v-s.v-other text.v-tl.nm { font-style: italic; font-weight: 500; }
+.v-s.v-other .v-ld { stroke: var(--refc); }
+.v-plot .v-brush { fill: var(--front); stroke: var(--muted); stroke-dasharray: 3 3; }
+.v-hov { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.v-sec { margin: 24px 0 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.v-sec h3 { margin: 0; font-size: 14px; }
+.v-tbl { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; }
+.v-tbl table { border-collapse: collapse; width: 100%; min-width: 980px; font-size: 12.5px; background: transparent; }
+.v-tbl th { text-align: left; font-weight: 500; color: var(--muted); background: transparent; padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--rule); vertical-align: bottom; white-space: nowrap; }
+.v-tbl th button { font: inherit; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; }
+.v-tbl th button.on { color: var(--ink); font-weight: 650; }
+.v-tbl th small { display: block; color: var(--faint); font-weight: 400; }
+.v-tbl td { padding: 4px 10px; border-bottom: 0; border-top: 1px solid var(--grid); vertical-align: middle; }
+.v-tbl tr.r { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.v-tbl tr.r:hover td { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.v-tbl tr.r.on td { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.v-tbl table.dim tr.r:not(.on) { opacity: 0.45; }
+.v-tbl .who { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.v-tbl .who small, .v-tbl td small { color: var(--muted); }
+.v-tbl td.rg { min-width: 170px; padding-top: 6px; padding-bottom: 2px; }
+.v-tbl td.rg svg { display: block; width: 100%; height: 26px; overflow: visible; }
+.v-tbl td.rg text { font-size: 10.5px; fill: var(--muted); }
+.v-tbl td.rg .ed { cursor: crosshair; }
+.v-tbl th.bm .src { color: var(--faint); font-weight: 400; font-size: 11.5px; }
+.v-tbl .scl { display: flex; justify-content: space-between; color: var(--faint); font-size: 10.5px; font-weight: 400;
+  border-top: 1px solid var(--rule); margin-top: 4px; padding-top: 2px; }
+.v-tbl th.n, .v-tbl td.n { width: 28px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.v-tbl th.num, .v-tbl td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.v-tbl .tzs { white-space: normal; min-width: 130px; }
+.v-tbl .tz { display: inline-block; margin: 0 8px 0 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.v-tbl .tz.b { font-weight: 650; }
+.v-tbl .tz .m { color: var(--muted); font-weight: 400; }
+.v-tbl .tz .d { font-size: 10px; margin-left: 1px; color: var(--muted); }
+.v-tbl .na { color: var(--faint); font-size: 11.5px; }
+.v-how { margin-top: 16px; color: var(--muted); font-size: 13px; }
+.v-how summary { cursor: pointer; color: var(--ink); font-weight: 600; }
+.v-how dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0 0; }
+.v-how dt { color: var(--ink); }
+.v-how dd { margin: 0; }
+.v-tip { position: fixed; z-index: 9; pointer-events: none; max-width: 300px; padding: 6px 9px; font-size: 12px;
+  line-height: 1.4; color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); }
+.v-tip[hidden] { display: none; }
+.v-tip b { font-size: 13px; }
+.v-tip .k { display: inline-block; width: 12px; height: 2px; background: var(--c); vertical-align: middle; margin-right: 6px; }
+.v-tip .quiet { color: var(--muted); }
+@media (max-width: 84rem) { .v-card:not(.wide) .v-hint { display: none; } }
+@media (max-width: 56rem) { .v-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 40rem) { .v-groups { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .vw .how2, .v-hint { display: none; } }
 footer { margin-top: 3rem; color: var(--muted); font-size: 12.5px; }
 @media (max-width: 62rem) { .plot-body, .board { grid-template-columns: minmax(0, 1fr); }
   .tiers { position: static; max-height: none; } }
@@ -1436,7 +1724,7 @@ def render(bench, lanes_doc, effort_rows=None, epoch_rows=None):
     items = _annotate(effort_rows, lanes_doc, prescreen)
     chunks = [
         "<!DOCTYPE html>",
-        '<html lang="en">',
+        '<html lang="en" data-theme="light">',
         "<head>",
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -1449,15 +1737,22 @@ def render(bench, lanes_doc, effort_rows=None, epoch_rows=None):
         "<main>",
     ]
     chunks.extend(_header(lanes_doc, effort_rows, prescreen))
-    chunks.extend(_plots_section(effort_rows, items, lanes_doc, proposals, bench))
-    chunks.extend(_price_section(lanes_doc))
+    plots, data = _plots_section(effort_rows, items, lanes_doc, proposals, bench)
+    chunks.extend(plots)
+    prices = _price_section(lanes_doc)
+    if prices:
+        prices[0] = '<section class="view prices" id="view-prices" data-view="prices">'
+    chunks.extend(prices)
+    chunks += ['<div class="view" id="view-numbers" data-view="numbers">']
+    if data:
+        chunks.extend(_comparison_section(data))
     chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
                "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
     chunks.extend(_boards_block(items))
     chunks.extend(_rows_block(items, lanes_doc, epoch_rows))
     chunks.extend(_catalog_block(lanes_doc, proposals))
     chunks.extend(_scores_block(bench, lanes_doc))
-    chunks.append("</section>")
+    chunks += ["</section>", "</div>"]
     chunks.append("<footer>Epoch AI data is CC-BY 4.0. Artificial Analysis data requires "
                   "attribution. Terminal-Bench scores an agent-model pair, never a model "
                   "alone. Costs are never comparable across sources.</footer>")

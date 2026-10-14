@@ -158,6 +158,14 @@ _Avoid_: snapshot (alone), bench data, the cache (when you mean the rows), prove
 The benchmark rows that belong to one lane: published for the lane's Model and measured at the lane's effort. The carry rule compares them with the rows of the same Model at the other efforts the lane's Harness runs. A row at an effort that Harness does not run belongs to that Model as context and is no lane's evidence there.
 _Avoid_: lane rows, matched rows, attributed rows (in prose), scores (when you mean the rows)
 
+**View**:
+One tab of the benchmark page for one kind of job, such as coding, knowledge work or automation: a score-and-cost plot for each board `assets/views.json` lists for it, and a table of each Model's score range across its efforts on those boards. The Lanes come from the catalog. A View's tier is a display aid: the tier the View's boards together would give each Lane, and nothing writes it. A View marked reference (the overall index) is drawn and never weighed as a kind of job.
+_Avoid_: domain (until per-domain Tiers exist), category, nested view, net tier
+
+**Reference model**:
+A model on a board that no Lane in the catalog runs. A View can draw it for comparison; it never enters a ranking, a cut or a tier. One model printed two ways by two sources (`Claude Opus 4.8`, `Opus 4.8`) is one Reference model.
+_Avoid_: competitor (that is the carry rule's other effort), other model
+
 ## Delegate: usage
 
 **Meter**:
