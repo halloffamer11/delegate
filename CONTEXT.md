@@ -159,12 +159,12 @@ The benchmark rows that belong to one lane: published for the lane's Model and m
 _Avoid_: lane rows, matched rows, attributed rows (in prose), scores (when you mean the rows)
 
 **View**:
-One tab of the benchmark page that ranks Lanes for one kind of job from one board, such as a coding agent or knowledge work. `assets/views.json` names each View's boards; the Lanes come from the catalog. A View's tier is a display aid: it is the tier that board alone would give each Lane, and nothing writes it.
-_Avoid_: domain (until per-domain Tiers exist), category, nested view
+One tab of the benchmark page for one kind of job, such as coding, knowledge work or automation: a score-and-cost plot for each board `assets/views.json` lists for it, and a table of each Model's score range across its efforts on those boards. The Lanes come from the catalog. A View's tier is a display aid: the tier the View's boards together would give each Lane, and nothing writes it. A View marked reference (the overall index) is drawn and never weighed as a kind of job.
+_Avoid_: domain (until per-domain Tiers exist), category, nested view, net tier
 
-**Net tier**:
-The middle of the tiers a Lane's Views give it, the lower one on a split, leaving out the composite. It is a display aid beside the Tier the Lane holds.
-_Avoid_: overall tier, average tier
+**Reference model**:
+A model on a board that no Lane in the catalog runs. A View can draw it for comparison; it never enters a ranking, a cut or a tier. One model printed two ways by two sources (`Claude Opus 4.8`, `Opus 4.8`) is one Reference model.
+_Avoid_: competitor (that is the carry rule's other effort), other model
 
 ## Delegate: usage
 

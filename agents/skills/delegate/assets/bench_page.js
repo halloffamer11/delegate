@@ -387,11 +387,29 @@
              groups: groups.map((g) => ({ tier: g.tier, count: g.count, rows: g.meters.flatMap((m) => m.lanes.map(row)) })) };
   }
 
-  // One board's cut, shared by the sensitivity table and the views: the lanes
-  // in `names` the board measured, each at its best plotted point, ranked by
-  // score and cut in the proportions `counts` gives out of `total`, tier 4
-  // first. Lanes that tie on score take the better tier. A Map, best first,
-  // of lane -> { tier, score, cost }.
+  // A ranking cut in the proportions `counts` gives out of `total`, tier 4
+  // first: [[name, value]], best first, in, and a Map of name -> tier out.
+  // Entries that tie on value take the better tier. Shared by a board's cut
+  // and a view's (`viewTiers`).
+  function cutRanked(ranked, counts, total) {
+    const ends = [];
+    let cum = 0;
+    for (const t of TIERS) {
+      cum += counts[t] || 0;
+      ends.push([t, total ? Math.round(ranked.length * cum / total) : 0]);
+    }
+    const out = new Map();
+    let tieStart = 0;
+    ranked.forEach(([name, value], i) => {
+      if (i > 0 && value !== ranked[i - 1][1]) tieStart = i;
+      out.set(name, (ends.find(([, end]) => tieStart < end) || ends[ends.length - 1])[0]);
+    });
+    return out;
+  }
+
+  // One board's cut, for the sensitivity table: the lanes in `names` the board
+  // measured, each at its best plotted point, ranked by score and cut by
+  // `cutRanked`. A Map, best first, of lane -> { tier, score, cost }.
   function cutBoard(board, names, counts, total) {
     const best = new Map();
     for (const p of board ? board.points : []) {
@@ -406,23 +424,11 @@
     }
     const ranked = [...best.entries()].sort((x, y) => y[1].score - x[1].score || x[1].cost - y[1].cost
                                                      || (x[0] < y[0] ? -1 : 1));
-    const ends = [];
-    let cum = 0;
-    for (const t of TIERS) {
-      cum += counts[t] || 0;
-      ends.push([t, total ? Math.round(ranked.length * cum / total) : 0]);
-    }
-    const out = new Map();
-    let tieStart = 0;
-    ranked.forEach(([name, at], i) => {
-      if (i > 0 && at.score !== ranked[i - 1][1].score) tieStart = i;
-      const tier = (ends.find(([, end]) => tieStart < end) || ends[ends.length - 1])[0];
-      out.set(name, Object.assign({ tier }, at));
-    });
-    return out;
+    const tiers = cutRanked(ranked.map(([name, at]) => [name, at.score]), counts, total);
+    return new Map(ranked.map(([name, at]) => [name, Object.assign({ tier: tiers.get(name) }, at)]));
   }
 
-  // --- the flat views (benchmark-views ticket 01) ----------------------------------
+  // --- the views (benchmark-views ticket 05) -----------------------------------------
 
   // The tier each lane holds for the views: the one drawn on this page, else
   // the catalog's own. A lane off on this page holds none, and so does a lane
@@ -438,62 +444,169 @@
     return out;
   }
 
-  // The tier each view alone would give each held lane, in the proportions the
-  // held tiers make, and the net: the median of the views that measured the
-  // lane, the lower one when two sit in the middle, so a lane is never netted
-  // up on a split. A composite view is shown and never counted in the net.
-  function viewTiers(views, boards, lanes, tiers) {
-    const held = heldTiers(lanes, tiers);
-    const names = new Set(Object.keys(held));
+  // A view is one kind of job (coding, knowledge work, automation; the overall
+  // index for reference) and the boards views.json lists for it, one zoomable
+  // plot each. A series is a Model on a Harness: its efforts joined in effort
+  // order, coloured by the Harness and shaped by the Model. Under the plots a
+  // table gives each series' score range across its efforts on every board.
+  // Which Models are picked, the effort filter and the reference Models drawn
+  // are how the page is read, not what it holds, so none of it is saved; the
+  // tier a view gives a lane is a display aid, and nothing writes it.
+
+  const HARNESS_ORDER = ["codex", "claude", "kiro", "agy", "grok"];
+  const SHAPES = ["circle", "square", "diamond", "triangle", "down"];
+  // a lower effort within this many percentile points of a Model's best is the
+  // one a view favours
+  const FAVOUR_MARGIN = 5;
+
+  // A click picks one; shift-click adds or removes one; a click on the only
+  // pick clears it.
+  function pick(set, value, shift) {
+    if (shift) {
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+    } else if (set.size === 1 && set.has(value)) {
+      set.clear();
+    } else {
+      set.clear();
+      set.add(value);
+    }
+    return set;
+  }
+
+  // One series per Model (the lanes' `group`) on each Harness that runs it. A
+  // Model's primary Harness is the one with the most lanes, Kiro last as it
+  // re-runs Models other Harnesses run, and it draws every effort a board
+  // measured; another Harness draws only the efforts it has lanes for. Each
+  // Model has a shape within its Harness. `ultra` is never a series' effort.
+  function viewSeries(lanes) {
+    const seen = [...new Set((lanes || []).map((l) => l.harness).filter(Boolean))];
+    const order = HARNESS_ORDER.filter((h) => seen.includes(h))
+      .concat(seen.filter((h) => !HARNESS_ORDER.includes(h)).sort());
+    const byModel = new Map();
+    for (const l of lanes || []) {
+      if (!l.group || !l.harness || l.effort === "ultra") continue;
+      if (!byModel.has(l.group)) byModel.set(l.group, new Map());
+      const hs = byModel.get(l.group);
+      if (!hs.has(l.harness)) hs.set(l.harness, []);
+      hs.get(l.harness).push(l);
+    }
+    const list = [];
+    for (const [group, hs] of byModel) {
+      const ranked = [...hs.keys()].sort((a, b) => (hs.get(b).length - hs.get(a).length)
+        || ((a === "kiro") - (b === "kiro")) || (order.indexOf(a) - order.indexOf(b)));
+      ranked.forEach((h, i) => {
+        const own = new Map();
+        for (const l of hs.get(h)) if (!own.has(l.effort)) own.set(l.effort, l);
+        const first = hs.get(h)[0];
+        list.push({ id: `${group}@${h}`, group, harness: h, primary: i === 0,
+                    label: first.label || group, lanes: own });
+      });
+    }
+    for (const h of order) {
+      const models = [...new Set(list.filter((s) => s.harness === h).map((s) => s.group))].sort();
+      for (const s of list) if (s.harness === h) s.shape = SHAPES[models.indexOf(s.group) % SHAPES.length];
+    }
+    list.sort((a, b) => (order.indexOf(a.harness) - order.indexOf(b.harness)) || a.label.localeCompare(b.label));
+    return { order, list };
+  }
+
+  // One board as a view reads it: its scored points by Model and effort (the
+  // best when two rows share one), the plotted ones, their frontier, the
+  // median cost, whether the scores are fractions, and the full extent of its
+  // plot in log cost and score.
+  function indexBoard(board) {
+    const scored = board.points.filter((p) => p.score !== null && p.score !== undefined);
+    const pts = scored.filter((p) => p.cost > 0);
+    const at = new Map();
+    for (const p of scored) {
+      if (!p.group) continue;
+      const key = `${p.group}|${p.effort}`, was = at.get(key);
+      if (!was || p.score > was.score) at.set(key, p);
+    }
+    const front = [];
+    let best = -Infinity;
+    for (const p of pts.slice().sort((a, c) => a.cost - c.cost || c.score - a.score)) {
+      if (p.score > best) { front.push(p); best = p.score; }
+    }
+    const costs = pts.map((p) => p.cost).sort((a, c) => a - c);
+    let home = null;
+    if (pts.length) {
+      const lx = pts.map((p) => Math.log10(p.cost)), ys = pts.map((p) => p.score);
+      const px = (Math.max(...lx) - Math.min(...lx)) * 0.06 || 0.5, py = (Math.max(...ys) - Math.min(...ys)) * 0.07 || 1;
+      home = { x0: Math.min(...lx) - px, x1: Math.max(...lx) + px, y0: Math.min(...ys) - py, y1: Math.max(...ys) + py };
+    }
+    return { board, scored, pts, at, front, onFront: new Set(front), home,
+             scores: scored.map((p) => p.score).sort((a, c) => a - c),
+             med: costs.length ? costs[Math.floor((costs.length - 1) / 2)] : null,
+             frac: board.unit !== "%" && scored.every((p) => Math.abs(p.score) <= 1.5) };
+  }
+
+  // The share of a board's other rows a score beats, ties counting half, 0 to 100.
+  function percentile(sorted, score) {
+    let lo = 0, eq = 0;
+    for (const v of sorted) {
+      if (v < score) lo++;
+      else if (v === score) eq++;
+    }
+    return sorted.length > 1 ? 100 * (lo + Math.max(eq - 1, 0) / 2) / (sorted.length - 1) : 50;
+  }
+
+  // A series at one effort across a view's boards: how many measured it, its
+  // mean percentile over those, and its cost against each board's median cost,
+  // as a geometric mean. A series off its primary Harness counts only the
+  // efforts it has lanes for.
+  function viewScore(boards, s, effort) {
+    if (!s.primary && !s.lanes.has(effort)) return { n: 0 };
+    const got = [];
+    for (const x of boards) {
+      const p = x.at.get(`${s.group}|${effort}`);
+      if (p) got.push({ pct: percentile(x.scores, p.score), rc: x.med && p.cost > 0 ? p.cost / x.med : null });
+    }
+    if (!got.length) return { n: 0 };
+    const rcs = got.map((g) => g.rc).filter((v) => v !== null);
+    return { n: got.length, mean: got.reduce((a, g) => a + g.pct, 0) / got.length,
+             rc: rcs.length ? Math.exp(rcs.reduce((a, v) => a + Math.log(v), 0) / rcs.length) : null };
+  }
+
+  // The lowest effort, of `efforts` in effort order, whose mean percentile is
+  // within FAVOUR_MARGIN of the series' best. Null when nothing measured it.
+  function favouredEffort(boards, s, efforts) {
+    const cand = efforts.map((e) => Object.assign({ e }, viewScore(boards, s, e))).filter((c) => c.n);
+    if (!cand.length) return null;
+    const top = Math.max(...cand.map((c) => c.mean));
+    return cand.find((c) => c.mean >= top - FAVOUR_MARGIN).e;
+  }
+
+  // The tier a view gives each lane that holds one (`heldTiers`): the held
+  // lanes it measured at their own effort, ranked by mean percentile, the
+  // cheaper first on a tie, and cut in the proportions the held tiers make
+  // (`cutRanked`, as a board's cut in the sensitivity table). `thin` when the
+  // view's boards measured the lane on fewer than half, or on one of several.
+  // A Map of lane -> row; a held lane no board measured has `n` 0 and no tier.
+  function viewTiers(boards, series, held) {
     const counts = {};
-    for (const n of names) counts[held[n]] = (counts[held[n]] || 0) + 1;
-    const byId = new Map(boards.map((b) => [b.id, b]));
-    const cuts = {};
-    for (const v of views) cuts[v.id] = v.board ? cutBoard(byId.get(v.board), names, counts, names.size) : new Map();
-    const rows = placeable(lanes).filter((l) => names.has(l.name)).map((l) => {
-      const cells = {};
-      const counted = [];
-      for (const v of views) {
-        const c = cuts[v.id].get(l.name) || null;
-        cells[v.id] = c;
-        if (c && v.kind !== "composite") counted.push(c.tier);
+    for (const t of Object.values(held)) counts[t] = (counts[t] || 0) + 1;
+    const rows = [];
+    for (const s of series) {
+      for (const l of s.lanes.values()) {
+        if (held[l.name] === undefined) continue;
+        rows.push(Object.assign({ name: l.name, group: s.group, harness: s.harness, effort: l.effort,
+                                  held: held[l.name] }, viewScore(boards, s, l.effort)));
       }
-      counted.sort((a, b) => a - b);
-      const net = counted.length ? counted[Math.floor((counted.length - 1) / 2)] : null;
-      return { name: l.name, harness: l.harness, meter: l.meter, effort: l.effort, rank: l.rank || 0,
-               tier: held[l.name], cells, net, measured: counted.length };
+    }
+    const cost = (r) => (r.rc === null || r.rc === undefined ? Infinity : r.rc);
+    const ranked = rows.filter((r) => r.n)
+      .sort((a, c) => c.mean - a.mean || cost(a) - cost(c) || (a.name < c.name ? -1 : 1));
+    const tiers = cutRanked(ranked.map((r) => [r.name, r.mean]), counts, Object.keys(held).length);
+    const N = boards.length;
+    ranked.forEach((r, i) => {
+      const tie = i > 0 && ranked[i - 1].mean === r.mean;
+      r.tier = tiers.get(r.name);
+      r.rank = tie ? ranked[i - 1].rank : i + 1;
+      r.thin = N > 1 && (r.n < N / 2 || r.n === 1);
     });
-    rows.sort((a, b) => ((b.net || 0) - (a.net || 0)) || (b.tier - a.tier) || (a.rank - b.rank));
-    return { held, counts, cuts, rows };
-  }
-
-  // One view's board as four tiers: the lanes its cut gives each, best first,
-  // and the held lanes it did not measure.
-  function viewColumns(view, cut, held) {
-    const columns = TIERS.map((tier) => ({ tier, lanes: [] }));
-    for (const [name, c] of cut) {
-      columns[TIERS.indexOf(c.tier)].lanes.push(Object.assign({ name, held: held[name] }, c));
-    }
-    for (const col of columns) {
-      const costs = col.lanes.map((l) => l.cost).filter(Number.isFinite);
-      const cheapest = costs.length ? Math.min(...costs) : null;
-      col.lanes.forEach((l, i) => { l.best = i === 0; l.cheapest = col.lanes.length > 1 && l.cost === cheapest; });
-    }
-    const missing = Object.keys(held).filter((n) => !cut.has(n)).sort();
-    return { columns, missing };
-  }
-
-  // Which efforts a coverage cell measured, and which of them a row's lanes run.
-  function coverageCell(cell, lanes) {
-    const runs = new Set((lanes || []).filter((l) => l.carried).map((l) => l.effort));
-    const measured = Object.keys((cell && cell.efforts) || {});
-    let best = null, mine = null;
-    for (const e of measured) {
-      const at = cell.efforts[e];
-      if (!best || at.score > best.score) best = Object.assign({ effort: e }, at);
-      if (runs.has(e) && (!mine || at.score > mine.score)) mine = Object.assign({ effort: e }, at);
-    }
-    return { measured: new Set(measured), runs, best, mine };
+    return new Map(rows.map((r) => [r.name, r]));
   }
 
   // The zoom that shows one tier: its band between the tier lines when there
@@ -1613,165 +1726,662 @@
     return { draw };
   }
 
-  // --- the tabs, the Frontier tab and each view's tiers ---------------------------
+  // --- the views: one tab per kind of job (benchmark-views ticket 05) ----------------
 
-  const PIPS = ["low", "medium", "high", "xhigh", "max"];
+  const VM = { l: 42, r: 92, t: 10, b: 30 };
 
-  function fmtTierScore(c, board) {
-    return board ? fmtScore(c.score, board.unit, scoreDecimals(board)) : String(c.score);
+  function svgText(parent, attrs, text) {
+    const node = svg("text", attrs, parent);
+    node.textContent = text;
+    return node;
   }
 
-  // The Frontier tab: the coverage matrix, then the tier each view alone gives.
-  function drawFrontier(data, page, host) {
-    const cov = data.coverage;
-    const byId = new Map(data.boards.map((b) => [b.id, b]));
-    host.textContent = "";
-    el("h3", {}, "Which model is measured where", host);
-    el("p", { class: "aside" }, "Each cell is one view's board. The five pips are low, medium, high, xhigh "
-      + "and max: filled is measured, ringed is an effort a carried lane on that harness runs. The figure is the "
-      + "best score at an effort you run, else the board's best for the model in grey.", host);
-    const scroll = el("div", { class: "scroll" }, null, host);
-    const t = el("table", { class: "coverage" }, null, scroll);
-    const hr = el("tr", {}, null, el("thead", {}, null, t));
-    el("th", {}, "Model on harness", hr);
-    el("th", {}, "Your efforts", hr);
-    for (const v of cov.views) {
-      const th = el("th", { class: "cell" + (v.kind === "composite" ? " composite" : "") }, v.title, hr);
-      el("span", { class: "sub" }, v.benchmark ? `${v.benchmark}, ${v.source}` : "no board", th);
+  function linearTicks(lo, hi, n) {
+    const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((m) => m >= raw);
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toPrecision(12));
+    return out;
+  }
+
+  // Dollar ticks between two log10 costs: decades first, then 1-2-5, then
+  // finer, until at least three fit.
+  function costTicks(l0, l1, n) {
+    let out = [];
+    for (const ms of [[1], [1, 2, 5], [1, 1.5, 2, 3, 5, 7]]) {
+      out = [];
+      for (let k = Math.floor(l0); k <= Math.ceil(l1); k++) {
+        for (const m of ms) {
+          const v = m * Math.pow(10, k), lv = Math.log10(v);
+          if (lv >= l0 && lv <= l1) out.push(v);
+        }
+      }
+      if (out.length >= Math.min(3, n)) break;
     }
-    el("th", { class: "cell" }, "Views", hr);
-    const tb = el("tbody", {}, null, t);
-    const others = cov.rows.filter((r) => !r.ours);
-    const drawRow = (r, extra) => {
-      const tr = el("tr", { class: (r.ours ? "ours" : "other") + (extra || "") }, null, tb);
-      const name = el("td", { class: "lane" }, null, tr);
-      if (r.harness) {
-        el("span", { class: "swatch", style: `background:${harnessColour(r.harness)}` }, null, name);
-        name.appendChild(document.createTextNode(`${r.name} `));
-        el("span", { class: "sub inline" }, `on ${r.harness}`, name);
-      } else {
-        name.appendChild(document.createTextNode(r.name));
-      }
-      const efforts = r.lanes.map((l) => l.effort + (l.carried ? "" : "°")).join(" ");
-      el("td", { class: "efforts mono", title: "° = in the catalog, not carried" }, efforts || "—", tr);
-      let count = 0, mineCount = 0;
-      for (const v of cov.views) {
-        const c = coverageCell(r.cells[v.id], r.lanes);
-        const td = el("td", { class: "cell cov" + (v.kind === "composite" ? " composite" : "") }, null, tr);
-        if (!c.measured.size) {
-          el("span", { class: "quiet" }, "—", td);
-          continue;
-        }
-        if (v.kind !== "composite") { count++; if (c.mine) mineCount++; }
-        const pips = el("span", { class: "pips", title: `measured: ${[...c.measured].join(", ")}` }, null, td);
-        for (const e of PIPS) {
-          const cls = "pip" + (c.measured.has(e) ? " on" : "") + (c.runs.has(e) ? " runs" : "");
-          el("span", { class: cls, title: e }, null, pips);
-        }
-        const at = c.mine || c.best;
-        el("span", { class: "fig" + (c.mine ? "" : " quiet") },
-           `${fmtTierScore(at, byId.get(v.board))} ${at.effort}`, td);
-      }
-      const counted = cov.views.filter((v) => v.kind !== "composite").length;
-      el("td", { class: "cell", title: "views measured / at an effort you run" },
-         r.ours ? `${count}/${counted} · ${mineCount}` : `${count}/${counted}`, tr);
+    if (out.length < 3) out = linearTicks(Math.pow(10, l0), Math.pow(10, l1), n).filter((v) => v > 0);
+    return out;
+  }
+
+  function fmtCostTick(v) {
+    if (v < 1) return "$" + String(+v.toPrecision(2));
+    if (v < 1000) return "$" + String(+v.toPrecision(3));
+    return "$" + (v / 1000).toPrecision(3).replace(/\.?0+$/, "") + "k";
+  }
+
+  function shapeAt(parent, kind, x, y, r, attrs) {
+    if (kind === "square") {
+      const q = r * 0.86;
+      return svg("rect", Object.assign({ x: x - q, y: y - q, width: 2 * q, height: 2 * q, rx: q * 0.25 }, attrs), parent);
+    }
+    let d = null;
+    if (kind === "diamond") { const q = r * 1.22; d = `M${x},${y - q}L${x + q},${y}L${x},${y + q}L${x - q},${y}Z`; }
+    if (kind === "triangle") d = `M${x},${y - r * 1.18}L${x + r * 1.1},${y + r * 0.8}L${x - r * 1.1},${y + r * 0.8}Z`;
+    if (kind === "down") d = `M${x},${y + r * 1.18}L${x + r * 1.1},${y - r * 0.8}L${x - r * 1.1},${y - r * 0.8}Z`;
+    if (d) return svg("path", Object.assign({ d }, attrs), parent);
+    return svg("circle", Object.assign({ cx: x, cy: y, r }, attrs), parent);
+  }
+
+  // The views' state, drawing and events. `show(id)` draws a view the first
+  // time its tab shows (so its plots are laid out at their real width) and
+  // every time after; `redraw()` draws the shown one again, when the page's
+  // tiers change. Null when no view has a board on this page.
+  function makeViews(data, page) {
+    const byId = new Map(data.boards.map((b) => [b.id, b]));
+    const views = (data.views || []).map((v) => Object.assign({}, v, { boards: v.boards.filter((id) => byId.has(id)) }))
+      .filter((v) => v.boards.length);
+    if (!views.length) return null;
+    const { order: HS, list: SERIES } = viewSeries(data.lanes);
+    const GROUPS = new Set(SERIES.map((s) => s.group));
+    const EFF = (data.efforts || []).slice().sort((a, b) => effortIndex(a) - effortIndex(b));
+    const index = new Map();
+    const boardOf = (id) => {
+      if (!index.has(id)) index.set(id, indexBoard(byId.get(id)));
+      return index.get(id);
     };
-    cov.rows.filter((r) => r.ours).forEach((r) => drawRow(r));
-    if (others.length) {
-      const tr = el("tr", { class: "more" }, null, tb);
-      const td = el("td", { colspan: String(cov.views.length + 3) }, null, tr);
-      const button = el("button", { type: "button", class: "quiet-button" },
-                        page.showOthers ? `Hide the ${others.length} models your catalog does not run`
-                                        : `Show the ${others.length} models your catalog does not run, best overall first`, td);
-      button.addEventListener("click", () => { page.showOthers = !page.showOthers; drawFrontier(data, page, host); });
-      if (page.showOthers) others.forEach((r) => drawRow(r));
-    }
+    const st = { view: null, sel: new Set(), hide: new Set(), eff: new Set(), ref: new Set(), ctx: true,
+                 wide: null, sort: null, hover: null, refOpen: false };
+    let shown = [];
+    let carried = carriedNames(data.lanes, page.tiers);
 
-    // the classification: each view alone, and the net
-    const vt = viewTiers(cov.views, data.boards, data.lanes, page.tiers);
-    el("h3", {}, "The tier each view alone would give", host);
-    const shares = TIERS.map((tier) => `${vt.counts[tier] || 0} on tier ${tier}`).join(", ");
-    el("p", { class: "aside" }, "Each view ranks your tiered lanes it measured and cuts them in the proportions "
-      + `your tiers make (${shares}; drawn on this page, else the catalog's). A marked cell differs from your `
-      + "tier. Net is the middle of the views that measured the lane, the lower one on a split; Overall is a "
-      + "composite, shown and never counted.", host);
-    const s2 = el("div", { class: "scroll" }, null, host);
-    const t2 = el("table", { class: "sens views" }, null, s2);
-    const h2 = el("tr", {}, null, el("thead", {}, null, t2));
-    el("th", { class: "lane" }, "Lane", h2);
-    el("th", { class: "cell" }, "Yours", h2);
-    for (const v of cov.views) el("th", { class: "cell" + (v.kind === "composite" ? " composite" : "") }, v.title, h2);
-    el("th", { class: "cell" }, "Net", h2);
-    const b2 = el("tbody", {}, null, t2);
-    for (const r of vt.rows) {
-      const tr = el("tr", { "data-lane": r.name }, null, b2);
-      const td = el("td", { class: "lane" }, null, tr);
-      el("span", { class: "swatch", style: `background:${meterColour(r.meter)}` }, null, td);
-      td.appendChild(document.createTextNode(r.name));
-      el("td", { class: "mine" }, String(r.tier), tr);
-      for (const v of cov.views) {
-        const c = r.cells[v.id];
-        const comp = v.kind === "composite" ? " composite" : "";
-        if (!c) { el("td", { class: "cell none" + comp }, "—", tr); continue; }
-        const differs = c.tier !== r.tier;
-        const cell = el("td", { class: "cell" + (differs ? " diff" : "") + comp,
-                                title: `${v.title}: ${fmtTierScore(c, byId.get(v.board))} at ${c.effort}` }, null, tr);
-        el("span", {}, String(c.tier), cell);
-      }
-      el("td", { class: "mine" + (r.net !== null && r.net !== r.tier ? " net-diff" : "") },
-         r.net === null ? "—" : String(r.net), tr);
-      tr.addEventListener("mouseenter", () => page.highlight(r.name));
-      tr.addEventListener("mouseleave", () => page.highlight(null));
-    }
-    if (!vt.rows.length) el("p", { class: "aside" }, "No carried lane has a tier yet, so there is nothing to cut.", host);
-  }
-
-  // One view's body: its four tiers on its board, then its plot.
-  function drawView(view, data, page, host) {
-    const byId = new Map(data.boards.map((b) => [b.id, b]));
-    const board = view.board ? byId.get(view.board) : null;
-    let tiersHost = host.querySelector(".view-tiers");
-    if (!tiersHost) tiersHost = el("div", { class: "view-tiers" }, null, host);
-    tiersHost.textContent = "";
-    if (!board) {
-      el("p", { class: "missing" }, "None of this view's boards has rows on this page, so it has nothing to rank.", tiersHost);
-      return;
-    }
-    const vt = viewTiers([view], data.boards, data.lanes, page.tiers);
-    const { columns, missing } = viewColumns(view, vt.cuts[view.id], vt.held);
-    el("p", { class: "meta" }, `Board: ${board.benchmark}, ${board.source}, ${board.basis}, observed ${board.when}. `
-      + "Your tiered lanes, ranked on this board at their own effort and cut in the proportions of your tiers. "
-      + "The top of each tier is its best lane here.", tiersHost);
-    const grid = el("div", { class: "tier-grid" }, null, tiersHost);
-    for (const col of columns) {
-      const box = el("div", { class: "tier-col" }, null, grid);
-      const h = el("h3", {}, `Tier ${col.tier}`, box);
-      el("span", { class: "n" }, `${col.lanes.length}`, h);
-      if (!col.lanes.length) el("p", { class: "empty" }, "No lane", box);
-      const ol = el("ol", {}, null, box);
-      for (const l of col.lanes) {
-        const li = el("li", { class: (l.best ? "best" : "") + (l.held !== col.tier ? " moved" : ""), "data-lane": l.name }, null, ol);
-        const lane = data.lanes.find((x) => x.name === l.name) || {};
-        el("span", { class: "swatch", style: `background:${meterColour(lane.meter)}` }, null, li);
-        el("span", { class: "nm" }, l.name, li);
-        el("span", { class: "fig" }, fmtScore(l.score, board.unit, scoreDecimals(board)), li);
-        el("span", { class: "cost" }, fmtMoney(l.cost) + (l.cheapest ? " · cheapest in tier" : ""), li);
-        if (l.held !== col.tier) el("span", { class: "was", title: "your tier" }, `yours ${l.held}`, li);
-        li.addEventListener("mouseenter", () => page.highlight(l.name));
-        li.addEventListener("mouseleave", () => page.highlight(null));
+    // #tab=coding&m=<group>,<group>&eff=high,max&ref=<name>&zoom=<board>:x0,x1,y0,y1
+    for (const part of (location.hash || "").replace(/^#/, "").split("&")) {
+      const eq = part.indexOf("=");
+      if (eq < 0) continue;
+      const key = part.slice(0, eq), list = decodeURIComponent(part.slice(eq + 1)).split(",").filter(Boolean);
+      if (key === "m") st.sel = new Set(list);
+      else if (key === "eff") st.eff = new Set(list);
+      else if (key === "ref") st.ref = new Set(list);
+      else if (key === "zoom" && list.length) {
+        const [id, q] = list.join(",").split(":");
+        const nums = (q || "").split(",").map(Number);
+        if (byId.has(id) && nums.length === 4 && nums.every(Number.isFinite)) boardOf(id).view = { x0: nums[0], x1: nums[1], y0: nums[2], y1: nums[3] };
       }
     }
-    if (missing.length) el("p", { class: "aside" }, `Not measured here at the effort they run: ${missing.join(", ")}.`, tiersHost);
+
+    const effOk = (e) => !st.eff.size || st.eff.has(e);
+    const nameOf = (s) => s.label + (s.primary ? "" : ` · ${s.harness}`);
+    const isCarried = (s, e) => { const l = s.lanes.get(e); return !!(l && carried.has(l.name)); };
+    const ownPoints = (x, s) => EFF.map((e) => x.at.get(`${s.group}|${e}`))
+      .filter((p) => p && (s.primary || s.lanes.has(p.effort)));
+    const fmtViewScore = (x, v) => (x.frac ? (100 * v).toFixed(1) + "%" : v.toFixed(1) + (x.board.unit === "%" ? "%" : ""));
+    const fmtShort = (x, v) => (x.frac ? String(Math.round(100 * v)) : ((x.thi - x.tlo) < 10 ? v.toFixed(1) : String(Math.round(v))));
+    const fmtTimes = (v) => (v < 1 ? v.toFixed(2) : v.toFixed(1)) + "×";
+    const bodyOf = (id) => [...document.querySelectorAll("[data-view-body]")].find((n) => n.dataset.viewBody === id);
+
+    const tip = el("div", { class: "v-tip" }, null, document.body);
+    tip.hidden = true;
+    function placeTip(e) {
+      tip.hidden = false;
+      tip.style.left = Math.max(8, Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8)) + "px";
+      tip.style.top = Math.max(8, Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8)) + "px";
+    }
+    const hideTip = () => { tip.hidden = true; };
+    function tipLine(text, cls) {
+      const line = el("div", cls ? { class: cls } : {}, null, tip);
+      if (text) line.textContent = text;
+      return line;
+    }
+
+    // with Models picked, a plot opens fitted to them (and to any reference
+    // Model drawn); Reset and a double-click return there
+    function fitView(x) {
+      if (!st.sel.size) return Object.assign({}, x.home);
+      const pts = [];
+      for (const s of SERIES) {
+        if (!st.sel.has(s.group) || st.hide.has(s.harness)) continue;
+        for (const p of ownPoints(x, s)) if (p.cost > 0 && effOk(p.effort)) pts.push(p);
+      }
+      for (const p of x.pts) if (p.ref && st.ref.has(p.ref) && effOk(p.effort)) pts.push(p);
+      if (!pts.length) return Object.assign({}, x.home);
+      const h = x.home, lx = pts.map((p) => Math.log10(p.cost)), ys = pts.map((p) => p.score);
+      const px = Math.max((Math.max(...lx) - Math.min(...lx)) * 0.12, 0.18);
+      const py = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.14, (h.y1 - h.y0) * 0.04);
+      return { x0: Math.max(h.x0, Math.min(...lx) - px), x1: Math.min(h.x1, Math.max(...lx) + px),
+               y0: Math.max(h.y0, Math.min(...ys) - py), y1: Math.min(h.y1, Math.max(...ys) + py) };
+    }
+
+    function drawPlot(x) {
+      const box = x.box;
+      box.textContent = "";
+      if (!x.home) {
+        el("p", { class: "aside" }, "No row on this board has both a score and a cost, so there is nothing to plot.", box);
+        return;
+      }
+      const v = x.view, h = x.home;
+      const W0 = Math.max(300, Math.round(box.clientWidth)), H0 = Math.round(Math.min(460, Math.max(280, W0 * 0.62)));
+      const iw = W0 - VM.l - VM.r, ih = H0 - VM.t - VM.b;
+      const X = (c) => VM.l + (Math.log10(c) - v.x0) / (v.x1 - v.x0) * iw;
+      const Y = (s) => VM.t + (v.y1 - s) / (v.y1 - v.y0) * ih;
+      // how far in the plot is zoomed: marks and lines thin as it grows
+      const k = Math.sqrt(((h.x1 - h.x0) / (v.x1 - v.x0)) * ((h.y1 - h.y0) / (v.y1 - v.y0)));
+      const R = Math.max(2.4, 5.2 * Math.pow(k, -0.32)), LW = Math.max(0.9, 1.7 * Math.pow(k, -0.25));
+      const inView = (px, py) => px >= VM.l - 2 && px <= VM.l + iw + 2 && py >= VM.t - 2 && py <= VM.t + ih + 2;
+      const root = svg("svg", { width: W0, height: H0, viewBox: `0 0 ${W0} ${H0}`, role: "img",
+                                "aria-label": `${x.board.benchmark}: score against cost` }, box);
+      const clipId = `vc-${st.view}-${x.board.id}`;
+      svg("rect", { x: VM.l, y: VM.t - 2, width: iw + 4, height: ih + 4 }, svg("clipPath", { id: clipId }, svg("defs", {}, root)));
+      for (const t of linearTicks(v.y0, v.y1, Math.max(3, Math.round(ih / 70)))) {
+        svg("line", { class: t === 0 ? "v-zl" : "v-gl", x1: VM.l, x2: VM.l + iw, y1: Y(t), y2: Y(t) }, root);
+        svgText(root, { x: VM.l - 6, y: Y(t) + 3.5, "text-anchor": "end" }, x.frac ? String(+(t * 100).toPrecision(3)) : String(t));
+      }
+      for (const t of costTicks(v.x0, v.x1, Math.max(3, Math.round(iw / 110)))) {
+        svgText(root, { x: X(t), y: VM.t + ih + 16, "text-anchor": "middle" }, fmtCostTick(t));
+      }
+      svgText(root, { x: VM.l + iw, y: H0 - 2, "text-anchor": "end" }, `${x.board.basis || "cost"} →`);
+      const clip = svg("g", { "clip-path": `url(#${clipId})` }, root);
+      const outside = svg("g", {}, root);
+      x.overlay = svg("g", {}, root);
+      // the frontier: a soft band behind everything, and rings on its points
+      if (x.front.length) {
+        let d = `M${X(x.front[0].cost)},${Y(x.front[0].score)}`;
+        for (const p of x.front.slice(1)) d += `H${X(p.cost)}V${Y(p.score)}`;
+        svg("path", { class: "v-frb", "stroke-width": Math.max(4, 7 * Math.pow(k, -0.3)), d: d + `H${VM.l + iw + 40}` }, clip);
+      }
+      const hits = [], marks = [], ends = [];
+      const line = (pts) => "M" + pts.map((p) => `${X(p.cost).toFixed(1)},${Y(p.score).toFixed(1)}`).join("L");
+      if (st.ctx) {
+        for (const p of x.pts) {
+          if (GROUPS.has(p.group) || st.ref.has(p.ref) || !effOk(p.effort)) continue;
+          const px = X(p.cost), py = Y(p.score);
+          if (!inView(px, py)) continue;
+          svg("circle", { class: "v-ctx", cx: px, cy: py, r: Math.max(1.6, R * 0.48) }, clip);
+          hits.push({ x: px, y: py, p, s: null });
+        }
+      }
+      for (const key of st.ref) {
+        const own = x.pts.filter((p) => p.ref === key)
+          .sort((a, c) => (effortIndex(a.effort) - effortIndex(c.effort)) || a.cost - c.cost);
+        if (!own.length) continue;
+        const g = svg("g", { class: "v-s v-other" }, clip);
+        if (own.length > 1) {
+          const attrs = { class: "v-ln", "stroke-width": LW, "stroke-dasharray": `${LW * 2} ${LW * 2}`, d: line(own) };
+          if (st.eff.size) attrs.opacity = 0.25;
+          svg("path", attrs, g);
+        }
+        let last = null;
+        for (const p of own) {
+          const px = X(p.cost), py = Y(p.score);
+          if (!inView(px, py) || !effOk(p.effort)) continue;
+          svg("circle", { class: "v-mk", cx: px, cy: py, r: R * 0.9, "stroke-width": Math.max(1, LW * 0.9), "stroke-dasharray": "2 1.5" }, g);
+          hits.push({ x: px, y: py, p, s: null });
+          marks.push({ x: px, y: py, r: R, p, s: null, on: true, run: false });
+          if (!last || p.cost > last.p.cost) last = { x: px, y: py, p };
+        }
+        if (last) ends.push({ name: key, x: last.x, y: last.y, on: true });
+      }
+      for (const s of SERIES) {
+        if (st.hide.has(s.harness) || (st.sel.size && !st.sel.has(s.group))) continue;
+        const own = ownPoints(x, s).filter((p) => p.cost > 0);
+        if (!own.length) continue;
+        const on = st.sel.has(s.group);
+        const g = svg("g", { class: "v-s" + (on ? " on" : ""), style: `--c:${harnessColour(s.harness)}` }, clip);
+        if (own.length > 1) {
+          const attrs = { class: "v-ln", "stroke-width": on ? LW * 1.5 : LW, d: line(own) };
+          if (!s.primary) attrs["stroke-dasharray"] = `${LW * 3} ${LW * 2.5}`;
+          if (st.eff.size) attrs.opacity = 0.2;
+          svg("path", attrs, g);
+        }
+        let last = null;
+        for (const p of own) {
+          const px = X(p.cost), py = Y(p.score);
+          if (!inView(px, py) || !effOk(p.effort)) continue;
+          const run = isCarried(s, p.effort), r = s.primary ? R : R * 1.45;
+          if (x.onFront.has(p)) svg("circle", { class: "v-frr", cx: px, cy: py, r: r + 2.6, "stroke-width": Math.max(0.8, LW * 0.7) }, g);
+          shapeAt(g, s.shape, px, py, r, { class: `v-mk ${run && s.primary ? "run" : "out"}`, "stroke-width": Math.max(1, LW * 0.9) });
+          hits.push({ x: px, y: py, p, s });
+          marks.push({ x: px, y: py, r, p, s, on, run });
+          if (!last || p.cost > last.p.cost) last = { x: px, y: py, p };
+        }
+        if (last) ends.push({ s, x: last.x, y: last.y, on });
+      }
+      // the names at the right edge, kept apart, then effort labels where they fit
+      const boxes = marks.map((m) => ({ x: m.x - m.r, y: m.y - m.r, w: 2 * m.r, h: 2 * m.r }));
+      const free = (b) => !boxes.some((o) => b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h);
+      ends.sort((a, c) => a.y - c.y);
+      const gap = 12, top = VM.t + 5, bottom = VM.t + ih;
+      ends.forEach((e, i) => { e.ly = Math.max(e.y + 3.5, i ? ends[i - 1].ly + gap : top); });
+      for (let i = ends.length - 1; i >= 0; i--) ends[i].ly = Math.min(ends[i].ly, i === ends.length - 1 ? bottom : ends[i + 1].ly - gap);
+      const lx = VM.l + iw + 8;
+      const groupFor = (parent, s, on) => (s ? svg("g", { class: "v-s" + (on ? " on" : ""), style: `--c:${harnessColour(s.harness)}` }, parent)
+                                             : svg("g", { class: "v-s v-other" }, parent));
+      for (const e of ends) {
+        const g = groupFor(outside, e.s, e.on);
+        svg("line", { class: "v-ld", "stroke-width": 0.7, x1: e.x + 4, y1: e.y, x2: lx - 2, y2: e.ly - 3.5 }, g);
+        svgText(g, { class: "v-tl nm", x: lx, y: e.ly }, e.s ? nameOf(e.s) : e.name);
+      }
+      const all = k > 1.7;
+      const ranked = marks.slice().sort((a, c) => (c.on - a.on) || (c.run - a.run) || (c.p.score - a.p.score));
+      for (const m of ranked) {
+        if (!(m.on || all) || (m.s && !m.s.primary)) continue;
+        const t = m.p.effort, w = t.length * 5.8 + 2;
+        for (const [dx, dy, a] of [[m.r + 3, -m.r - 1, "start"], [m.r + 3, m.r + 9, "start"], [-m.r - 3, -m.r - 1, "end"],
+                                   [-m.r - 3, m.r + 9, "end"], [-w / 2, -m.r - 4, "mid"]]) {
+          const x0 = a === "end" ? m.x + dx - w : m.x + dx, b = { x: x0, y: m.y + dy - 9, w, h: 11 };
+          if (b.x < VM.l || b.x + b.w > VM.l + iw || b.y < VM.t || !free(b)) continue;
+          boxes.push(b);
+          svgText(groupFor(clip, m.s, m.on), { class: "v-tl", x: x0, y: m.y + dy }, t);
+          break;
+        }
+      }
+      const f = fitView(x);
+      const zoomed = Math.abs(f.x0 - v.x0) + Math.abs(f.x1 - v.x1) > 1e-6 || Math.abs(f.y0 - v.y0) + Math.abs(f.y1 - v.y1) > 1e-6;
+      x.reset.hidden = !zoomed;
+      x.hint.hidden = zoomed;
+      Object.assign(x, { hits, X, Y, iw, ih });
+      if (st.hover) markHover();
+    }
+
+    function toData(x, px, py) {
+      const v = x.view;
+      return [v.x0 + (px - VM.l) / x.iw * (v.x1 - v.x0), v.y1 - (py - VM.t) / x.ih * (v.y1 - v.y0)];
+    }
+    function animate(x, to) {
+      const from = Object.assign({}, x.view), t0 = performance.now(), still = window.matchMedia
+        && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      cancelAnimationFrame(x.raf);
+      const step = (now) => {
+        const t = still ? 1 : Math.min(1, (now - t0) / 260), e = 1 - Math.pow(1 - t, 3);
+        for (const key of ["x0", "x1", "y0", "y1"]) x.view[key] = from[key] + (to[key] - from[key]) * e;
+        drawPlot(x);
+        if (t < 1) x.raf = requestAnimationFrame(step);
+      };
+      x.raf = requestAnimationFrame(step);
+    }
+    function zoomAt(x, px, py, factor) {
+      const [dx, dy] = toData(x, px, py), v = x.view, h = x.home;
+      const nv = { x0: dx - (dx - v.x0) * factor, x1: dx + (v.x1 - dx) * factor, y0: dy - (dy - v.y0) * factor, y1: dy + (v.y1 - dy) * factor };
+      x.view = nv.x1 - nv.x0 > h.x1 - h.x0 ? Object.assign({}, h) : nv;
+      drawPlot(x);
+    }
+    const local = (node, e) => { const r = node.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    function nearest(x, px, py) {
+      let best = null, bd = 16 * 16;
+      for (const hit of x.hits || []) {
+        const d = (hit.x - px) ** 2 + (hit.y - py) ** 2;
+        if (d < bd) { bd = d; best = hit; }
+      }
+      return best;
+    }
+    function pointTip(e, x, n) {
+      const p = n.p, s = n.s;
+      tip.textContent = "";
+      const head = tipLine(null, "v-tip-head");
+      el("b", {}, fmtViewScore(x, p.score), head);
+      head.appendChild(document.createTextNode(` · ${fmtMoney(p.cost)}`));
+      const who = tipLine(null);
+      el("span", { class: "k", style: `--c:${s ? harnessColour(s.harness) : "var(--refc)"}` }, null, who);
+      who.appendChild(document.createTextNode(s ? `${s.label} on ${s.harness} · ${p.effort}` : `${p.published || p.model} · ${p.effort}`));
+      const lane = s && s.lanes.get(p.effort);
+      const note = !s ? "reference only: no lane runs this model · click to draw it"
+        : lane && carried.has(lane.name) ? `you carry ${lane.name}`
+        : lane ? `${lane.name}, in the catalog, not carried` : "measured; no lane at this effort";
+      tipLine(note + (x.onFront.has(p) ? " · on the frontier" : ""), "quiet");
+      placeTip(e);
+    }
+    function wire(x) {
+      const box = x.box;
+      let drag = null;
+      box.addEventListener("pointerdown", (e) => {
+        if (e.button) return;
+        box.setPointerCapture(e.pointerId);
+        const [px, py] = local(box, e);
+        drag = { x: px, y: py, x2: px, y2: py };
+      });
+      box.addEventListener("pointermove", (e) => {
+        const [px, py] = local(box, e);
+        if (!x.overlay) return;
+        if (drag) {
+          drag.x2 = px;
+          drag.y2 = py;
+          if (Math.abs(px - drag.x) + Math.abs(py - drag.y) > 6) {
+            hideTip();
+            x.overlay.textContent = "";
+            svg("rect", { class: "v-brush", x: Math.min(drag.x, px), y: Math.min(drag.y, py),
+                          width: Math.abs(px - drag.x), height: Math.abs(py - drag.y) }, x.overlay);
+          }
+          return;
+        }
+        const n = nearest(x, px, py);
+        x.overlay.textContent = "";
+        if (!n) { hideTip(); return; }
+        svg("circle", { class: "v-hov", cx: n.x, cy: n.y, r: 9 }, x.overlay);
+        pointTip(e, x, n);
+      });
+      box.addEventListener("pointerleave", () => {
+        if (drag) return;
+        hideTip();
+        if (x.overlay) x.overlay.textContent = "";
+      });
+      box.addEventListener("pointerup", (e) => {
+        if (!drag || !x.home) { drag = null; return; }
+        const d = drag;
+        drag = null;
+        if (Math.abs(d.x2 - d.x) > 8 && Math.abs(d.y2 - d.y) > 8) {
+          const [a0, b0] = toData(x, Math.min(d.x, d.x2), Math.max(d.y, d.y2));
+          const [a1, b1] = toData(x, Math.max(d.x, d.x2), Math.min(d.y, d.y2));
+          animate(x, { x0: a0, x1: a1, y0: b0, y1: b1 });
+          return;
+        }
+        const n = nearest(x, d.x, d.y);
+        if (n && n.s) pick(st.sel, n.s.group, e.shiftKey);
+        else if (n && n.p.ref) pick(st.ref, n.p.ref, true);
+        else if (!e.shiftKey && st.sel.size) st.sel.clear();
+        else return;
+        render();
+      });
+      box.addEventListener("dblclick", () => { if (x.home) animate(x, fitView(x)); });
+      box.addEventListener("wheel", (e) => {
+        if (!(e.ctrlKey || e.metaKey) || !x.home) return;
+        e.preventDefault();
+        const [px, py] = local(box, e);
+        zoomAt(x, px, py, Math.exp(e.deltaY * 0.01));
+      }, { passive: false });
+    }
+
+    function chip(parent, text, attrs, on, extra) {
+      const b = el("button", Object.assign({ type: "button", class: "v-mc" + (on ? " on" : "") + (extra || ""),
+                                             "aria-pressed": String(!!on) }, attrs), null, parent);
+      if (text !== null) b.appendChild(document.createTextNode(text));
+      return b;
+    }
+    function seriesGlyph(s, filled) {
+      const g = svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", style: `--c:${harnessColour(s.harness)}`, "aria-hidden": "true" });
+      shapeAt(svg("g", { class: "v-s" }, g), s.shape, 6, 6, 4, { class: `v-mk ${filled ? "run" : "out"}`, "stroke-width": 1.4 });
+      return g;
+    }
+    const hasData = (boards, s) => boards.some((x) => ownPoints(x, s).length);
+
+    function drawBar(boards, bar) {
+      const r1 = el("div", { class: "v-row" }, null, bar);
+      el("span", { class: "lab" }, "Effort", r1);
+      chip(r1, "all", { "data-eff": "" }, !st.eff.size);
+      for (const e of EFF.filter((e) => boards.some((x) => x.scored.some((p) => p.effort === e)))) {
+        chip(r1, e, { "data-eff": e }, st.eff.has(e));
+      }
+      el("span", { class: "sp" }, null, r1);
+      el("span", { class: "how2" }, "click shows one · shift-click adds or removes", r1);
+      el("button", { type: "button", class: "ghost", "data-clear": "" }, "Clear filters", r1);
+      const r2 = el("div", { class: "v-row v-groups" }, null, bar);
+      el("span", { class: "lab" }, "Lanes", r2);
+      for (const h of HS) {
+        const ss = SERIES.filter((s) => s.harness === h && hasData(boards, s));
+        if (!ss.length) continue;
+        const off = st.hide.has(h);
+        const g = el("span", { class: "v-hg" + (off ? " off" : ""), style: `--c:${harnessColour(h)}` }, null, r2);
+        const hh = el("button", { type: "button", class: "v-hh", "data-h": h, "aria-pressed": String(!off),
+                                  title: `Show or hide every ${h} lane` }, null, g);
+        el("i", {}, null, hh);
+        hh.appendChild(document.createTextNode(h));
+        for (const s of ss) {
+          const b = chip(g, null, { "data-m": s.group }, st.sel.has(s.group), st.sel.size && !st.sel.has(s.group) ? " out" : "");
+          b.appendChild(seriesGlyph(s, true));
+          b.appendChild(document.createTextNode(s.label));
+        }
+      }
+      const names = [...new Set(boards.flatMap((x) => x.scored.filter((p) => p.ref).map((p) => p.ref)))]
+        .sort((a, c) => a.localeCompare(c));
+      if (!names.length) return;
+      const d = el("details", { class: "v-refs" }, null, bar);
+      d.open = st.refOpen || st.ref.size > 0;
+      d.addEventListener("toggle", () => { st.refOpen = d.open; });
+      const sum = el("summary", {}, null, d);
+      el("b", {}, "Reference", sum);
+      sum.appendChild(document.createTextNode(` · ${names.length} models with no lane, for comparison only. They never enter the ranking.`));
+      const label = el("label", { class: "how2" }, null, sum);
+      const box = el("input", { type: "checkbox", "data-ctx": "" }, null, label);
+      box.checked = st.ctx;
+      label.appendChild(document.createTextNode(" show as grey dots"));
+      const list = el("div", { class: "v-rl" }, null, d);
+      for (const n of names) el("button", { type: "button", class: "v-rc" + (st.ref.has(n) ? " on" : ""), "data-ref": n,
+                                            "aria-pressed": String(st.ref.has(n)) }, n, list);
+    }
+
+    function drawCards(view, boards, grid) {
+      const sig = [[...st.sel], [...st.ref], [...st.eff], [...st.hide]].map((xs) => xs.join(",")).join("|");
+      for (const x of boards) {
+        const id = x.board.id;
+        const card = el("article", { class: "v-card" + (st.wide === id ? " wide" : "") }, null, grid);
+        const head = el("header", {}, null, card);
+        const title = el("span", {}, null, head);
+        el("h3", {}, x.board.benchmark, title);
+        el("span", { class: "v-sub" }, ` ${x.board.source} · ${x.scored.length} rows · ${x.frac || x.board.unit === "%" ? "score %" : "score"}`, title);
+        const tools = el("span", { class: "tools" }, null, head);
+        x.hint = el("span", { class: "v-hint" }, "drag a box to zoom · double-click resets", tools);
+        x.reset = el("button", { type: "button" }, "Reset", tools);
+        x.reset.hidden = true;
+        const wide = el("button", { type: "button" }, st.wide === id ? "Smaller" : "Expand", tools);
+        x.box = el("div", { class: "v-plot" }, null, card);
+        if (x.home && x.sig !== sig) {
+          if (x.sig !== undefined || st.sel.size || !x.view) x.view = fitView(x);
+          x.sig = sig;
+        }
+        if (x.home && !x.view) x.view = Object.assign({}, x.home);
+        x.reset.addEventListener("click", () => animate(x, fitView(x)));
+        wide.addEventListener("click", () => { st.wide = st.wide === id ? null : id; render(); });
+      }
+      for (const x of boards) { drawPlot(x); wire(x); }
+    }
+
+    function drawTable(view, boards, host) {
+      for (const x of boards) {
+        const ours = x.scored.filter((p) => GROUPS.has(p.group)).map((p) => p.score);
+        const lo = ours.length ? Math.min(...ours) : 0, hi = ours.length ? Math.max(...ours) : 1;
+        const pad = (hi - lo) * 0.04 || Math.abs(hi) * 0.05 || 0.05;
+        x.tlo = lo - pad;
+        x.thi = hi + pad;
+      }
+      const tiers = viewTiers(boards, SERIES, heldTiers(data.lanes, page.tiers));
+      const N = boards.length;
+      const rows = [];
+      for (const s of SERIES) {
+        if (st.hide.has(s.harness)) continue;
+        const cells = boards.map((x) => {
+          const pts = ownPoints(x, s);
+          if (!pts.length) return null;
+          const run = pts.filter((p) => isCarried(s, p.effort)).map((p) => p.score);
+          const scores = pts.map((p) => p.score);
+          return { x, pts, lo: Math.min(...scores), hi: Math.max(...scores), best: run.length ? Math.max(...run) : null };
+        });
+        if (!cells.some(Boolean)) continue;
+        const lanes = [...s.lanes.values()].filter((l) => tiers.has(l.name))
+          .sort((a, c) => effortIndex(a.effort) - effortIndex(c.effort)).map((l) => tiers.get(l.name));
+        const best = lanes.filter((r) => r.n).sort((a, c) => a.rank - c.rank)[0] || null;
+        rows.push({ s, cells, lanes, best, fav: favouredEffort(boards, s, EFF) });
+      }
+      const key = (r) => {
+        if (st.sort === null) return r.best ? -r.best.rank : -Infinity;
+        if (st.sort === "cost") return r.best && r.best.rc !== null ? -r.best.rc : -Infinity;
+        const c = r.cells[st.sort];
+        return c ? (c.best !== null ? c.best : c.hi - 1e6) : -Infinity;
+      };
+      rows.sort((a, c) => key(c) - key(a));
+      const table = el("table", { class: st.sel.size ? "dim" : "" }, null, host);
+      const hr = el("tr", {}, null, el("thead", {}, null, table));
+      const sortButton = (parent, k, text) => el("button", { type: "button", "data-sort": String(k),
+        class: String(st.sort) === String(k) || (k === "rank" && st.sort === null) ? "on" : "" }, text, parent);
+      sortButton(el("th", { class: "n" }, null, hr), "rank", "#");
+      el("th", {}, "Model on harness", hr);
+      boards.forEach((x, i) => {
+        const th = el("th", { class: "bm" }, null, hr);
+        sortButton(th, i, x.board.benchmark);
+        el("span", { class: "src" }, ` ${x.board.source}`, th);
+        const scale = el("div", { class: "scl" }, null, th);
+        el("span", {}, fmtShort(x, x.tlo), scale);
+        el("span", {}, x.frac || x.board.unit === "%" ? "score %" : "score", scale);
+        el("span", {}, fmtShort(x, x.thi), scale);
+      });
+      const mean = el("th", { class: "num" }, "Mean pct", hr);
+      el("small", {}, `n/${N}`, mean);
+      sortButton(el("th", { class: "num" }, null, hr), "cost", "Rel. cost");
+      const tierHead = el("th", {}, "Tier now→here", hr);
+      el("small", {}, "each lane with a tier", tierHead);
+      el("th", {}, "Favours", hr);
+      const tbody = el("tbody", {}, null, table);
+      for (const r of rows) {
+        const s = r.s, colour = harnessColour(s.harness);
+        const tr = el("tr", { class: "r" + (st.sel.has(s.group) ? " on" : ""), "data-m": s.group }, null, tbody);
+        el("td", { class: "n" }, r.best ? String(r.best.rank) : "–", tr);
+        const who = el("span", { class: "who" }, null, el("td", {}, null, tr));
+        who.appendChild(seriesGlyph(s, true));
+        el("b", {}, s.label, who);
+        el("small", {}, s.harness, who);
+        for (const c of r.cells) {
+          if (!c) { el("span", { class: "na" }, "not measured", el("td", {}, null, tr)); continue; }
+          const x = c.x, at = (v) => Math.max(1, Math.min(99, (v - x.tlo) / ((x.thi - x.tlo) || 1) * 100));
+          const g = svg("svg", { "aria-hidden": "true" }, el("td", { class: "rg" }, null, tr));
+          svg("line", { x1: `${at(c.lo)}%`, x2: `${at(c.hi)}%`, y1: 7, y2: 7, stroke: colour, "stroke-width": 2,
+                        "stroke-linecap": "round", opacity: 0.5 }, g);
+          for (const p of c.pts) {
+            const run = isCarried(s, p.effort);
+            svg("circle", { class: "ed", cx: `${at(p.score)}%`, cy: 7, r: run ? 4.2 : 3.3, fill: run ? colour : "var(--surface)",
+                            stroke: run ? "var(--surface)" : colour, "stroke-width": 1.4, opacity: effOk(p.effort) ? 1 : 0.25,
+                            "data-m": s.group, "data-e": p.effort, "data-b": String(boards.indexOf(x)) }, g);
+          }
+          const a = at(c.lo), z = at(c.hi);
+          if (z - a < 22) {
+            svgText(g, { x: `${(a + z) / 2}%`, y: 21, "text-anchor": "middle" },
+                    c.lo === c.hi ? fmtShort(x, c.lo) : `${fmtShort(x, c.lo)}–${fmtShort(x, c.hi)}`);
+          } else {
+            svgText(g, { x: `${a}%`, y: 21, "text-anchor": "middle" }, fmtShort(x, c.lo));
+            svgText(g, { x: `${z}%`, y: 21, "text-anchor": "middle" }, fmtShort(x, c.hi));
+          }
+        }
+        const B = r.best;
+        const meanCell = el("td", { class: "num" }, B ? null : "–", tr);
+        if (B) {
+          el("b", {}, `${B.thin ? "~" : ""}${Math.round(B.mean)}`, meanCell);
+          meanCell.appendChild(document.createTextNode(" "));
+          el("small", {}, `${B.n}/${N}`, meanCell);
+        }
+        el("td", { class: "num" }, B && B.rc !== null && B.rc !== undefined ? fmtTimes(B.rc) : "–", tr);
+        const tz = el("td", { class: "tzs" }, null, tr);
+        if (!r.lanes.length) el("span", { class: "na" }, "none held", tz);
+        for (const t of r.lanes) {
+          const span = el("span", { class: "tz" + (t === B ? " b" : ""), title: t.name }, null, tz);
+          el("span", { class: "m" }, t.effort, span);
+          if (!t.n) { span.appendChild(document.createTextNode(` ${t.held}→?`)); continue; }
+          span.appendChild(document.createTextNode(` ${t.held}→${t.tier}`));
+          if (t.tier !== t.held) el("span", { class: "d" }, t.tier > t.held ? "▲" : "▼", span);
+          if (t.thin) span.appendChild(document.createTextNode("?"));
+        }
+        const fav = el("td", {}, r.fav || "–", tr);
+        if (r.fav && !isCarried(s, r.fav)) el("small", { class: "na" }, " not carried", fav);
+      }
+      if (!rows.length) el("p", { class: "aside" }, "No model you have a lane for is measured here.", host);
+    }
+
+    // pointing at an effort in the table rings the same point in every plot
+    function markHover() {
+      for (const x of shown) {
+        if (!x.overlay || !x.X) continue;
+        x.overlay.textContent = "";
+        const h = st.hover, p = h && x.at.get(`${h.group}|${h.effort}`);
+        if (!p || !(p.cost > 0)) continue;
+        svg("circle", { class: "v-hov", cx: x.X(p.cost), cy: x.Y(p.score), r: 10 }, x.overlay);
+        svg("circle", { class: "v-hov", cx: x.X(p.cost), cy: x.Y(p.score), r: 15, opacity: 0.35 }, x.overlay);
+      }
+    }
+
+    function render() {
+      const view = views.find((v) => v.id === st.view);
+      const body = view && bodyOf(view.id);
+      if (!body) return;
+      carried = carriedNames(data.lanes, page.tiers);
+      hideTip();
+      shown = view.boards.map(boardOf);
+      body.textContent = "";
+      drawBar(shown, el("div", { class: "v-bar" }, null, body));
+      drawCards(view, shown, el("div", { class: "v-grid" }, null, body));
+      const head = el("div", { class: "v-sec" }, null, body);
+      el("h3", {}, `${view.title}: score range across the efforts`, head);
+      el("span", { class: "v-sub" }, "One row per model on a harness. Each cell is the board's own score axis: one dot per "
+        + "measured effort, filled where you carry it. Point at a dot to find it in the plots.", head);
+      const host = el("div", { class: "v-tbl" }, null, body);
+      drawTable(view, shown, host);
+      host.addEventListener("pointermove", (e) => {
+        const c = e.target.closest && e.target.closest("circle[data-e]");
+        const h = c ? { group: c.dataset.m, effort: c.dataset.e } : null;
+        if (JSON.stringify(h) !== JSON.stringify(st.hover)) { st.hover = h; markHover(); }
+        if (!c) { hideTip(); return; }
+        const x = shown[Number(c.dataset.b)], p = x && x.at.get(`${h.group}|${h.effort}`);
+        if (!p) return;
+        tip.textContent = "";
+        el("b", {}, fmtViewScore(x, p.score), tipLine(null, "v-tip-head")).after(document.createTextNode(` · ${fmtMoney(p.cost)}`));
+        tipLine(`${x.board.benchmark} · ${p.effort}`);
+        placeTip(e);
+      });
+      host.addEventListener("pointerleave", () => { st.hover = null; markHover(); hideTip(); });
+    }
+
+    // one listener per view body: the filters, the picks and the table's sort
+    for (const v of views) {
+      const body = bodyOf(v.id);
+      if (!body) continue;
+      body.addEventListener("click", (e) => {
+        const t = e.target.closest("[data-h],[data-ctx],[data-eff],[data-m],[data-ref],[data-sort],[data-clear]");
+        if (!t || !body.contains(t)) return;
+        const d = t.dataset;
+        if (d.h !== undefined) { if (st.hide.has(d.h)) st.hide.delete(d.h); else st.hide.add(d.h); }
+        else if (d.ctx !== undefined) st.ctx = t.checked;
+        else if (d.clear !== undefined) { st.sel.clear(); st.eff.clear(); st.hide.clear(); st.ref.clear(); }
+        else if (d.eff !== undefined) { if (d.eff) pick(st.eff, d.eff, e.shiftKey); else st.eff.clear(); }
+        else if (d.ref !== undefined) pick(st.ref, d.ref, true);
+        else if (d.sort !== undefined) st.sort = d.sort === "rank" ? null : d.sort === "cost" ? "cost" : Number(d.sort);
+        else if (d.m !== undefined) pick(st.sel, d.m, e.shiftKey);
+        render();
+      });
+    }
+    let resizing = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizing);
+      resizing = setTimeout(() => { if (st.view) render(); }, 120);
+    });
+
+    return {
+      ids: views.map((v) => v.id),
+      show(id) {
+        const known = views.some((v) => v.id === id);
+        if (known && st.view !== id) { st.wide = null; st.sort = null; }
+        st.view = known ? id : null;
+        if (known) render();
+        else hideTip();
+      },
+      redraw() { if (st.view) render(); },
+    };
   }
 
-  function makeTabs(data, page, onShow) {
+  // --- the tabs ---------------------------------------------------------------------
+
+  // One flat row: each view, then All boards, Prices and Numbers. The tab is
+  // kept in the hash (`#tab=<id>`) and with the page's own state; the page
+  // opens on the first view.
+  function makeTabs(page, first, onShow) {
     const tabs = [...document.querySelectorAll("nav.tabs .tab")];
     const sections = [...document.querySelectorAll("[data-view]")].filter((n) => !n.classList.contains("tab"));
     const known = new Set(tabs.map((t) => t.dataset.view));
     const aside = document.getElementById("tiers");
-    const viewIds = new Set(data.coverage.views.map((v) => v.id).concat(["boards"]));
     function show(id, push) {
-      if (!known.has(id)) id = "frontier";
+      if (!known.has(id)) id = first;
       page.view = id;
       for (const t of tabs) {
         const on = t.dataset.view === id;
@@ -1779,14 +2389,10 @@
         t.tabIndex = on ? 0 : -1;
       }
       for (const n of sections) n.hidden = n.dataset.view !== id;
-      // the board grid holds the frontier, the views and the workbench
+      // the board grid holds the workbench of free plots and the tier panel
       const grid = document.querySelector(".board");
-      if (grid) {
-        grid.hidden = !(id === "frontier" || viewIds.has(id));
-        grid.classList.toggle("solo", id === "frontier");
-      }
-      if (aside) aside.classList.toggle("tucked", !viewIds.has(id));
-
+      if (grid) grid.hidden = id !== "boards";
+      if (aside) aside.classList.toggle("tucked", id !== "boards");
       if (push && history.replaceState) history.replaceState(null, "", `#tab=${id}`);
       page.saveView(id);
       onShow(id);
@@ -1799,11 +2405,32 @@
         if (to) { e.preventDefault(); to.focus(); show(to.dataset.view, true); }
       });
     }
-    const fromHash = (location.hash || "").replace(/^#(tab=|view-)/, "");
-    show(known.has(fromHash) ? fromHash : (page.savedView && known.has(page.savedView) ? page.savedView : "frontier"), false);
+    // the hash may carry a view's picks after the tab (`#tab=coding&m=...`)
+    const fromHash = (location.hash || "").replace(/^#(tab=|view-)/, "").split("&")[0];
+    show(known.has(fromHash) ? fromHash : (page.savedView && known.has(page.savedView) ? page.savedView : first), false);
     // the hash names a tab, not a place to scroll to
     if (fromHash) setTimeout(() => window.scrollTo(0, 0), 0);
     return { show };
+  }
+
+  // Light unless this browser asked for dark (`#theme=dark` asks too); the
+  // choice is kept for every page, not per catalog, when storage allows.
+  const THEME_KEY = "delegate-bench-page:theme";
+  function bootTheme() {
+    const button = document.getElementById("theme");
+    if (!button) return;
+    const set = (theme, keep) => {
+      document.documentElement.setAttribute("data-theme", theme);
+      button.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+      if (!keep) return;
+      try { localStorage.setItem(THEME_KEY, theme); } catch (_err) { /* stays for this visit */ }
+    };
+    let theme = "light";
+    try { if (localStorage.getItem(THEME_KEY) === "dark") theme = "dark"; } catch (_err) { /* light */ }
+    const asked = /(?:^#|&)theme=(dark|light)(?:&|$)/.exec(location.hash || "");
+    set(asked ? asked[1] : theme, false);
+    button.hidden = false;
+    button.addEventListener("click", () => set(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true));
   }
 
   // --- the page's own state, kept in this browser -----------------------------------
@@ -1997,6 +2624,7 @@
   }
 
   function boot() {
+    bootTheme();
     bootPrices();
     const source = document.getElementById("bench-data");
     const host = document.getElementById("plots");
@@ -2017,20 +2645,11 @@
     };
     page.boardChanged = () => { if (tierPanel) tierPanel.draw(); };
 
-    const views = (data.coverage && data.coverage.views) || [];
-    const frontierHost = document.getElementById("frontier");
-    const viewPanels = new Map();
-    const drawViews = () => {
-      if (frontierHost) drawFrontier(data, page, frontierHost);
-      for (const v of views) {
-        const body = document.querySelector(`[data-view-body="${v.id}"]`);
-        if (body) drawView(v, data, page, body);
-      }
-    };
+    const views = makeViews(data, page);
     page.redraw = (onlySource) => {
       every((p) => { if (!onlySource || p.source() === onlySource) p.draw(); });
       if (tierPanel && !onlySource) tierPanel.draw();
-      if (!onlySource) drawViews();
+      if (!onlySource && views) views.redraw();
     };
     page.setTiers = (changes) => {
       for (const [names, tier] of changes) {
@@ -2083,18 +2702,10 @@
     };
     for (const id of data.defaults) add(id);
     if (tierPanel) tierPanel.draw();
-    drawViews();
-    // a view's plot is made the first time its tab shows, so it is laid out
-    // at its real size; the view's board is picked, and the drop-down still
-    // reaches every board
-    makeTabs(data, page, (id) => {
-      const v = views.find((x) => x.id === id);
-      if (v && v.board && !viewPanels.has(id)) {
-        const body = document.querySelector(`[data-view-body="${id}"]`);
-        const host = el("div", { class: "view-plot" }, null, body);
-        viewPanels.set(id, makePanel(data, host, count++, v.board, remove, every, page));
-        panels.push(viewPanels.get(id));
-      }
+    // a view is drawn when its tab shows, so its plots are laid out at their
+    // real width; All boards' panels redraw when theirs does
+    makeTabs(page, views ? views.ids[0] : "boards", (id) => {
+      if (views) views.show(id);
       every((p) => { if (p.root.offsetParent !== null) p.draw(); });
     });
     const more = document.getElementById("add-plot");
@@ -2133,7 +2744,8 @@
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
                        tierLinesText, focusDomain, applyBands, makeStore, boardKey, pointOff, carriedNames,
                        placeable, beatenByLane, panelGroups, sensitivity, meterColour, setShades,
-                       cutBoard, heldTiers, viewTiers, viewColumns, coverageCell, PIPS,
+                       cutRanked, cutBoard, heldTiers, pick, viewSeries, indexBoard, percentile, viewScore,
+                       favouredEffort, viewTiers, linearTicks, costTicks, fmtCostTick,
                        priceValues, drawPrices, fmtPrice, OFF, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

@@ -446,17 +446,24 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   beats on score for no more cost on a board shown says "beaten by" in its tooltip and panel line.
   Both are display aids computed in the script (`sensitivity`, `beatenByLane`); the carry rule is
   unchanged. `--effort-rows` may be repeated to put several sources on one page.
-  The page is one flat row of tabs (benchmark-views ticket 01): Frontier, one tab per View from
-  `assets/views.json` (Overall, Coding agent, Whole-repo coding, Knowledge work, Factual
-  reliability, Automation), then All boards (the free plots and the sensitivity table), Prices and
-  Numbers. `bench_page.load_views`, `view_boards` (a View names a board by its unversioned name,
-  newest version first) and `coverage` build the Frontier matrix in Python: one row per Model on a
-  Harness, so a Model on Claude Code and on Kiro is two rows with the same measurements and their
-  own Lanes, then the Models the catalog does not run. The script's `viewTiers` cuts each View's
-  board in the proportions of the tiers the Lanes hold (the page's, else the catalog's), and the
-  Net tier is the lower middle of the non-composite Views; `drawView` lists each View's four tiers,
-  best first. Each View's plot is the same panel as All boards, made the first time its tab shows.
-  The tab is kept in the hash (`#tab=<id>`) and with the page's own state.
+  The page is one flat row of tabs (benchmark-views ticket 05): one tab per View from
+  `assets/views.json` (Coding, Knowledge work, Automation, then Overall marked reference), then All
+  boards (the free plots, the tier panel and the sensitivity table), Prices and Numbers. Python makes
+  the data decisions: `load_views` and `view_boards` (each [source, benchmark] pair a View lists
+  plots the newest version of its board), each Lane's `label` from `display_name` (the Model's name
+  with its version, read from the id), each catalog row's `group` (its `model_identity`) and, for a
+  model no Lane runs, a `ref` name from `reference_keys` so one model printed two ways is one
+  Reference model. The script's `makeViews` draws each View as one zoomable plot per board (log
+  cost against score; a box drag or Ctrl/Cmd-wheel zooms, markers shrink and effort labels appear
+  as it zooms) with each Model on a Harness as one line through its efforts (`viewSeries`), the
+  frontier as a soft band, and a range table under them. Clicking a Model or an effort shows only
+  it; shift-click adds or removes. `viewTiers` ranks the held Lanes by their mean percentile across
+  the View's boards and cuts that ranking with `cutRanked`, the cut `cutBoard` uses for the
+  sensitivity table; `favouredEffort` is the lowest effort within five points of a Model's best.
+  All of it is display: nothing a View shows is saved or written. Every string from a benchmark
+  page is set as text, never markup. The page opens light; the theme toggle is kept in this
+  browser (`delegate-bench-page:theme`), and `#theme=dark` overrides it. The tab is kept in the
+  hash (`#tab=<id>`) and with the page's own state.
 The tier pages propose a Tier for each carried Lane with a score (ticket 17,
 `scripts/tier_proposal.py`): the rule is `routing.json`'s `tier_proposal` (source, benchmark,
 thresholds for Tiers 2-4, diversity; the sample catalog's when a catalog has none,

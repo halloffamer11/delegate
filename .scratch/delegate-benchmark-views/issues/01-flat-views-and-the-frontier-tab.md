@@ -7,7 +7,9 @@
 `render`; `heldTiers`, `cutBoard` (shared with `sensitivity`), `viewTiers`, `viewColumns`,
 `coverageCell`, `drawFrontier`, `drawView` and `makeTabs` in `assets/bench_page.js`.
 
-**Status:** implemented 2026-10-13 on the branch for this effort. The last box waits on the user.
+**Status:** superseded by 05 (2026-10-14). The Frontier tab, the coverage matrix, the one-board
+Views and the Net tier were replaced after the prototype rounds; the boxes below record what this
+ticket built.
 
 - [x] One flat row of tabs: Frontier, each View, All boards, Prices, Numbers.
 - [x] A View names its board without a version and draws the newest one.
@@ -17,7 +19,7 @@
 - [x] Each View lists its four tiers best first; the Frontier lists each View's tier and the Net tier.
 - [x] `views.json` names no model, harness or effort.
 - [x] Tests: `tests/test_bench_page.py` V1 to V11; `make test` passes.
-- [ ] The user opens the page from `delegate global` with `o` and confirms the six Views.
+- [x] ~~The user opens the page from `delegate global` with `o` and confirms the six Views.~~ Moot: see 05.
 
 ## Implemented, 2026-10-13
 
