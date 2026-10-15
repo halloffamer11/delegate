@@ -359,11 +359,13 @@ def _finding(groups, order, off_points, unit):
             if abs(ds) < 0.05:
                 scores = f"scores the same as {other.get('effort')}"
             else:
-                scores = f"scores {_fmt_score(abs(ds), unit)} less than {other.get('effort')}"
+                scores = (f"scores {_fmt_score(abs(ds), unit)} {'more' if ds > 0 else 'less'} "
+                          f"than {other.get('effort')}")
             if abs(dc) < 0.005:
                 costs = "costs the same"
             else:
-                costs = f"costs {_fmt_money(abs(dc))} more {_fmt_pct_change(other['_cost'], r['_cost'])}"
+                costs = (f"costs {_fmt_money(abs(dc))} {'more' if dc > 0 else 'less'} "
+                         f"{_fmt_pct_change(other['_cost'], r['_cost'])}")
             sentences.append(f"Proposed off: {', '.join(names)}. {r.get('effort')} {scores} and {costs}.")
         beaten = {name for names in r["_beaten"].values() for name in names}
         for name in r["_off_lanes"]:
@@ -851,15 +853,13 @@ def _verdict_notes(item):
     """What carry said about an accepted row's Lanes: the effort that beats
     each off Lane on this row's source, and which Lanes it proposes off."""
     note = []
-    if len(item["_beaten"]) == 1:
-        note.append(f"beaten by {item['_dominated_by']}")
-    elif item["_beaten"]:
+    if item["_beaten"]:
         # off Lanes on one point that lose to different efforts, each named
         note.append("beaten by " + ", ".join(f"{effort} ({', '.join(names)})"
                                              for effort, names in item["_beaten"].items()))
     if item["_off_lanes"]:
-        note.append("proposed off" if item["_kind"] == LANE_OFF
-                    else f"proposed off: {', '.join(item['_off_lanes'])}")
+        note.append("proposed off: " + ", ".join(
+            f"{name} ({carry_reason(item['_verdicts'][name])})" for name in item["_off_lanes"]))
     return note
 
 

@@ -1372,4 +1372,49 @@ try:
 except Exception as e:
     record("inspection evidence presentation regressions", False, repr(e))
 
+# Review A-2: one spelling can name different Models on two Harnesses.
+SHARED_MODEL_LANES = {"version": "delegate-lanes.v1", "lanes": {
+    "edge-high@codex": {"harness": "codex", "model": "gpt-6-edge-high", "effort": "high",
+                         "tier": 2, "meter": "codex", "published_as": ["Codex Edge High"]},
+    "edge-high@agy": {"harness": "agy", "model": "gpt-6-edge-high", "effort": "high",
+                       "tier": 2, "meter": "agy-claude-gpt"},
+}}
+
+try:
+    rows = [aa_row("gpt-6-edge", "high", "B", 0.70, 1.0),
+            aa_row("Codex Edge High", "high", "B", 0.30, 1.0)]
+    views = {}
+    for query in ("gpt-6-edge", "Codex Edge High"):
+        doc = bench.inspect_model(query, SHARED_MODEL_LANES, effort_rows=rows,
+                                  epoch_rows=epoch_rows_of(EPOCH_FIXTURE))
+        views[query] = (doc["family"]["lanes"],
+                        {v["lane"]: [r["score"] for r in v["records"]] for v in doc["lane_view"]},
+                        [r["score"] for r in doc["family_view"]])
+    record("inspection selects Lanes by Model identity when Harnesses share a spelling",
+           views == {"gpt-6-edge": (["edge-high@agy"], {"edge-high@agy": [0.70]}, [0.70]),
+                     "Codex Edge High": (["edge-high@codex"], {"edge-high@codex": [0.30]}, [0.30])},
+           repr(views))
+except Exception as e:
+    record("inspection selects Lanes by Model identity when Harnesses share a spelling", False, repr(e))
+
+try:
+    lanes_doc = {"lanes": dict(SHARED_MODEL_LANES["lanes"])}
+    lanes_doc["lanes"].update({"missing-model": {}, "null-model": {"model": None},
+                              "empty-model": {"model": ""}, "not-a-lane": None})
+    rows = [aa_row("gpt-6-edge-high", "high", "B", 0.40, 1.0),
+            aa_row("Unlisted Model", "high", "B", 0.20, 1.0)]
+    views = {}
+    for query in ("gpt-6-edge-high", "Unlisted Model", "", " "):
+        doc = bench.inspect_model(query, lanes_doc, effort_rows=rows)
+        views[query] = (doc["query_identity"]["model_key"],
+                        doc["query_identity"]["identity_reason"], doc["lane_view"],
+                        doc["family"]["lanes"], [r["score"] for r in doc["family_view"]])
+    record("inspection keeps HEAD's lane_view for queries with no Model identity",
+           views == {"gpt-6-edge-high": (None, "conflicting identity", [], [], [0.40]),
+                     "Unlisted Model": (None, "no catalog model", [], [], [0.20]),
+                     "": (None, "empty published name", [], [], []),
+                     " ": (None, "empty published name", [], [], [])}, repr(views))
+except Exception as e:
+    record("inspection keeps HEAD's lane_view for queries with no Model identity", False, repr(e))
+
 sys.exit(1 if fails else 0)

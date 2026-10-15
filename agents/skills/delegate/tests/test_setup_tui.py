@@ -3075,13 +3075,20 @@ try:
     old = evidence(w)
     w.handle("r")
     new = evidence(w)
+    expected = evidence(fresh)
+    w.handle("enter")
+    view = w.view()
+    reasons = {row["cells"][1]: why_of(row) for row in view["rows"]}
     record("77 a rescan rebuilds the proposals, the reasons and the unmatched models from the "
            "rows it found",
-           new == evidence(fresh) and old != new
+           new == expected and old != new
+           and view["screen"] == "prescreen" and reasons == expected[1]
+           and len(old[2]) != len(expected[2])
+           and view["legend"] == [f"{len(expected[2])} benchmarked models have no lane"]
            and any(p["kind"] == carry.KIND_DOMINATED for p in new[0].values())
            # and the carry decisions start from the new proposals
            and w.draft == fresh.draft,
-           repr((new[1], evidence(fresh)[1])))
+           repr((reasons, expected[1], view["legend"], expected[2])))
 except Exception as e:
     record("77 a rescan rebuilds the proposals, the reasons and the unmatched models", False, repr(e))
 
@@ -3215,5 +3222,31 @@ try:
            repr((shown, written)))
 except Exception as e:
     record("81 the confirm page lists each carried Lane with the Order y writes", False, repr(e))
+
+try:
+    # p can materialize Order while leaving the sequence unchanged. A proposal
+    # over the same already numbered records still makes no choice.
+    grok, terra = "grok46-high@grok", "terra-high@codex"
+    rows = [{"source": "aa", "model": "grok-4.6", "effort": "high",
+             "benchmark": "Artificial Analysis Intelligence Index", "score": 35,
+             "cost_usd": 1, "composite": True}]
+    w = wizard(bench_data=False, effort_rows=rows, focus="tier2")
+    before = w.draft.tier_lanes(2)
+    w.handle("p")
+    numbered = copy.deepcopy(LANES)
+    numbered["lanes"][grok]["order"] = 1
+    numbered["lanes"][terra]["order"] = 2
+    unchanged = wizard(bench_data=False, effort_rows=rows, lanes=numbered, focus="tier2")
+    unchanged.handle("p")
+    record("82 p materializing Order makes a choice; an unchanged numbered proposal stays settled",
+           before == w.draft.tier_lanes(2) == [grok, terra]
+           and {(c.path, c.old, c.new) for c in w.draft.changes()}
+           == {(("lanes", grok, "order"), None, 1), (("lanes", terra, "order"), None, 2)}
+           and not w.draft.is_settled() and w.made_choice()
+           and unchanged.draft.changes() == []
+           and unchanged.draft.is_settled() and not unchanged.made_choice(),
+           repr((w.draft.changes(), w.made_choice(), unchanged.draft.is_settled())))
+except Exception as e:
+    record("82 p materializing Order makes a choice", False, repr(e))
 
 sys.exit(1 if fails else 0)

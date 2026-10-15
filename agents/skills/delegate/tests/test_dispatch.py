@@ -398,10 +398,11 @@ def main():
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=world.env)
         started12i = False
         for _ in range(400):
-            try:
-                started12i = any(e.get("kind") == "dispatch.start" for e in ledger_lines()[ledger_before12i:])
-            except ValueError:
-                started12i = False
+            # argv.json is written by the fake relay: a Ledger start alone
+            # does not establish that there is a child to terminate.
+            dirs12i = sorted(set(os.listdir(world.runs_dir)) - runs_before12i)
+            dir12i = os.path.join(world.runs_dir, dirs12i[0]) if len(dirs12i) == 1 else None
+            started12i = dir12i is not None and os.path.isfile(os.path.join(dir12i, "argv.json"))
             if started12i or proc12i.poll() is not None:
                 break
             time.sleep(0.05)
@@ -415,6 +416,7 @@ def main():
         time.sleep(1.5)
         ok12i = (
             started12i and proc12i.returncode == 1 and dir12i is not None and
+            os.path.isfile(os.path.join(dir12i, "argv.json")) and
             parse_run_dir_from_stdout(out12i) == dir12i and
             disp12i.get("status") == "blocked" and disp12i.get("reason") == "dispatch terminated (SIGTERM)" and
             [e.get("kind") for e in new12i] == ["dispatch.start", "dispatch.finish"] and

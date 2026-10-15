@@ -152,6 +152,41 @@ def apply_tests(root):
            repr((queued, model_queue.applied())))
 
 
+def dangling_during_scan_test(root):
+    """Routing becomes dangling while discovery lists models: no catalog
+    write is made and the unapplied successor stays queued for setup."""
+    cfg = config_dir(root)
+    fixtures = newer_fixtures(root)
+    os.environ["DELEGATE_MODEL_QUEUE"] = os.path.join(root, "q", "new-models.json")
+    lanes_path = os.path.join(cfg, "lanes.json")
+    routing_path = os.path.join(cfg, "routing.json")
+    missing = os.path.join(root, "missing-routing.json")
+    before = load(lanes_path)
+    real_discover = discover.discover
+
+    def listing(lanes_doc, **kwargs):
+        os.remove(routing_path)
+        os.symlink(missing, routing_path)
+        return real_discover(lanes_doc, **kwargs)
+
+    discover.discover = listing
+    error = None
+    try:
+        queued = model_queue.scan(config_dir=cfg, fixture_dir=fixtures,
+                                  present={"codex", "agy", "grok"})
+    except catalog.CatalogError as e:
+        queued, error = [], e
+    finally:
+        discover.discover = real_discover
+    models = [(m["harness"], m["model"]) for m in queued]
+    record("15. a scan whose routing becomes dangling still queues its successor",
+           error is None and load(lanes_path) == before
+           and os.path.islink(routing_path) and not os.path.lexists(missing)
+           and not os.path.exists(os.path.join(cfg, "backups"))
+           and ("codex", "gpt-6.1-sol") in models and model_queue.applied() == [],
+           f"error={error!r} queued={models}")
+
+
 def scan_imports_test(root):
     """A detached scan swaps a newer model into the catalog and writes it, and
     loads no module of the wizard to do it (deepening D2)."""
@@ -184,6 +219,8 @@ def main():
     with tempfile.TemporaryDirectory() as root:
         os.environ.pop("DELEGATE_MODEL_APPLY", None)
         apply_tests(root)
+    with tempfile.TemporaryDirectory() as root:
+        dangling_during_scan_test(root)
     with tempfile.TemporaryDirectory() as root:
         scan_imports_test(root)
     with tempfile.TemporaryDirectory() as root:

@@ -332,7 +332,8 @@ def _evidence(items):
     for item in items[:12]:
         if isinstance(item, dict) and "file" in item and "line" in item and "claim" in item:
             try:
-                kept.append({"file": str(item["file"]), "line": int(item["line"]),
+                line = None if item["line"] is None else int(item["line"])
+                kept.append({"file": str(item["file"]), "line": line,
                              "claim": str(item["claim"])[:200]})
             except (TypeError, ValueError, OverflowError):
                 pass

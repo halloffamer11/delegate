@@ -121,6 +121,16 @@ def case_a_done_block_is_kept_within_its_caps(run_dir):
            f"{finish} problems={problems(finish)}")
 
 
+def case_a_done_block_preserves_null_line_evidence(run_dir):
+    block = {"status": "done", "deliverable": "all done",
+             "evidence": [{"file": "CONTEXT.md", "line": None, "claim": "domain vocabulary"}],
+             "open_questions": [], "changed_files": []}
+    finish = settle(relays.Report(status="completed", final_message=json.dumps(block), exit=0), run_dir)
+    record("s1b. a done block preserves evidence with a null line",
+           not problems(finish) and finish.returned == block,
+           f"{finish} problems={problems(finish)}")
+
+
 def case_a_partial_or_blocked_block_is_the_return(run_dir):
     partial = settle(relays.Report(status="completed", exit=0, final_message=json.dumps({
         "status": "partial", "deliverable": "partially done", "evidence": [],
@@ -610,6 +620,7 @@ def case_ads_token_counts_for_each_spelling(w):
 def main():
     with tempfile.TemporaryDirectory() as run_dir:
         case_a_done_block_is_kept_within_its_caps(run_dir)
+        case_a_done_block_preserves_null_line_evidence(run_dir)
         case_a_partial_or_blocked_block_is_the_return(run_dir)
         case_prose_with_no_block_is_partial(run_dir)
         case_an_empty_final_message_is_blocked(run_dir)

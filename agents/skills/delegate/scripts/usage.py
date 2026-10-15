@@ -156,20 +156,21 @@ def _filled(observation, now=None):
     A cache written while agy figures were forced unknown holds the Windows
     beside a null Remaining and Pace. Reading it derives them by the same
     arithmetic a probe uses, at `now` (a Meter snapshot passes the moment of
-    its reading), so the figures need no fresh probe. An observation that
-    already carries a Remaining or a Pace is returned untouched, and one with
-    no Window at all stays unknown.
+    its reading), so the figures need no fresh probe. Each missing figure is
+    derived independently, preserving those supplied; one with no Window at
+    all stays unknown.
     """
     if not isinstance(observation, dict):
         return observation
     observation = _upgraded(observation)
-    if observation.get("r") is not None or observation.get("pace") is not None:
-        return observation
     if observation.get("remaining_5h") is None and observation.get("remaining_weekly") is None:
         return observation
     out = dict(observation)
-    out.update(_combined(out.get("remaining_5h"), out.get("remaining_weekly"),
-                         out.get("reset_5h"), out.get("reset_weekly"), now=now))
+    derived = _combined(out.get("remaining_5h"), out.get("remaining_weekly"),
+                        out.get("reset_5h"), out.get("reset_weekly"), now=now)
+    for key, value in derived.items():
+        if out.get(key) is None:
+            out[key] = value
     note = out.get("note")
     for h in harnesses.REGISTRY:
         for old, new in h.note_renames:
@@ -327,7 +328,7 @@ def _parse(document):
             return None
         if not _valid_meter_number(observation.get("pace")):
             return None
-        for key in ("remaining_weekly", "remaining_5h", "remaining_weekly_model"):
+        for key in ("remaining_weekly", "remaining_5h", "remaining_weekly_model", "cycle_left"):
             if not _valid_meter_number(observation.get(key), fraction=True):
                 return None
         for key in ("reset_5h", "reset_weekly", "reset_binding"):
@@ -457,7 +458,7 @@ def _snapshot(document, *, path, holds, now):
         until = _hold_until(holds.get(name), r.get("reset_weekly"), now)
         if until is not None:
             held[name] = until
-    digest = hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(json.dumps(figures, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     return Snapshot(path=path, status="ok", detail=None, taken_at=taken_at,
                     signature=("ok", taken_at, digest, tuple(sorted(held.items()))),
                     _rows=figures, _held=held)

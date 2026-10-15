@@ -1768,6 +1768,38 @@ record("case 33e the highest Pace rank tries is usage.MAX_PACE",
        near33(raised33.get("pace_to_lead"), {"codex": 108.0}),
        facts33(raised33))
 
+# Accepted plan prices can overflow either the crossing's division or its
+# conversion to hundredths; neither makes an unreachable Meter lead.
+tiny_lanes33 = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
+tiny_routing33 = catalog.load_json(os.path.join(SAMPLES_DIR, "routing.json"))
+tiny_lanes33["lanes"]["terra-high@codex"]["order"] = 1
+tiny_lanes33["lanes"]["grok46-high@grok"]["order"] = 2
+tiny_lanes33["meters"]["codex"]["price_month"] = 20
+tiny_routing33["quota_unit"] = "plan_dollars"
+catalog.validate_routing(tiny_routing33)
+tiny_snap33 = usage.Snapshot.of({"probed_at": 1700000000, "lanes": [
+    meter("codex", weekly=0.5, pace=1.0),
+    meter("grok", weekly=0.5, pace=0.9),
+]})
+for price33 in (1e-308, 1e-305):
+    tiny_lanes33["meters"]["grok"]["price_month"] = price33
+    catalog.validate_lanes(tiny_lanes33)
+    tiny_cat33 = dict(samples33, meters=tiny_lanes33["meters"],
+                      lanes=tiny_lanes33["lanes"], routing=tiny_routing33)
+    tiny_rows33 = rank.rank("impl", tiny_cat33, tiny_snap33, ALL_HARNESSES)
+    name33 = "case 33e plan price %s gives an unreachable Pace to lead without overflow" % price33
+    try:
+        tiny_previews33 = rank.tier_leaders(tiny_cat33, tiny_snap33, ALL_HARNESSES)
+    except OverflowError as e:
+        record(name33, False, "%s: %s" % (type(e).__name__, e))
+    else:
+        record(name33, tiny_rows33[0]["lane"] == "terra-high@codex"
+               and tiny_rows33[0]["pick"] and len(tiny_previews33) == 4
+               and tiny_previews33[1]["leader"] == "terra-high@codex"
+               and tiny_previews33[1]["pace_to_lead"] == {"grok": None}
+               and bool(json.dumps(tiny_previews33, allow_nan=False)),
+               tiny_previews33[1])
+
 # The what-if substitutes Readouts: one tier_leaders call reads each Meter of
 # the Snapshot once, whatever it asks about.
 reads33 = []

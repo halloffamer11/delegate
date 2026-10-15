@@ -461,6 +461,28 @@ def case_settle_and_is_settled_notice_a_change_and_its_undo():
     return ok, f"seen={seen} undone={undone} settled={settled} left={left} back={back} other={other.tier_lanes(1)}"
 
 
+def case_settled_comparison_notices_materialized_order_without_a_sequence_change():
+    wrong = []
+    for old_orders in ((None, None), (7, 9), (1, 2)):
+        given = sample(**{GROK: {"order": old_orders[0]}, TERRA: {"order": old_orders[1]}})
+        draft = CatalogDraft(given, ROUTING, whole=False)
+        started_settled = draft.is_settled()
+        before = draft.tier_lanes(2)
+        draft.apply([(GROK, 2)], "keep")
+        expected = [Change(("lanes", lane, "order"), old, new)
+                    for lane, old, new in ((TERRA, old_orders[1], 2), (GROK, old_orders[0], 1))
+                    if old != new]
+        noticed = draft.is_settled() == (not expected)
+        written = draft.changes()
+        draft.settle()
+        settled = draft.is_settled()
+        draft.apply([(GROK, 2)], "keep")
+        if not (started_settled and before == draft.tier_lanes(2) == [GROK, TERRA]
+                and written == expected and noticed and settled and draft.is_settled()):
+            wrong.append((old_orders, written, noticed, settled, draft.is_settled()))
+    return not wrong, f"wrong={wrong}"
+
+
 def case_a_draft_compares_by_value_and_is_never_hashed():
     one, two = CatalogDraft(NUMBERED, ROUTING, whole=False), CatalogDraft(NUMBERED, ROUTING, whole=False)
     equal = one == two
@@ -541,6 +563,8 @@ for name, case in (
      case_changes_lists_exactly_the_fields_documents_changes),
     ("settle and is_settled notice a change and its undo",
      case_settle_and_is_settled_notice_a_change_and_its_undo),
+    ("settled comparison notices materialized Order without a sequence change",
+     case_settled_comparison_notices_materialized_order_without_a_sequence_change),
     ("a draft compares by value and is never hashed", case_a_draft_compares_by_value_and_is_never_hashed),
     ("the draft never mutates the documents it was given",
      case_the_draft_never_mutates_the_documents_it_was_given),

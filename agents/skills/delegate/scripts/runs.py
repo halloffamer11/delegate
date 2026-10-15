@@ -419,7 +419,7 @@ def _attempt(notes, what, write):
     try:
         write()
         return True
-    except Exception as e:
+    except BaseException as e:
         notes.append(f"{what}: {e}")
         return False
 
@@ -471,7 +471,10 @@ def _why(exc):
         return "dispatch terminated (SIGTERM)"
     if isinstance(exc, KeyboardInterrupt):
         return "dispatch interrupted"
-    return f"dispatch failed: {type(exc).__name__}: {exc}"
+    try:
+        return f"dispatch failed: {type(exc).__name__}: {exc}"
+    except BaseException:
+        return f"dispatch failed: {type(exc).__name__}: exception message unavailable"
 
 
 def _timeout_s(timeout):

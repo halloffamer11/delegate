@@ -205,7 +205,7 @@ class DashboardModel:
         self.global_routing_path = global_dir / "routing.json"
         self.meters_path = Path(
             usage.cache_path(None if meters_path is None else str(meters_path))
-        ).resolve()
+        ).absolute()
         self.project_policy_path = self.project_root / ".delegate" / "routing.json"
         # Ticket 32's project Lanes document; `move_lane_tier` is its only writer.
         self.project_lanes_path = self.project_root / ".delegate" / "lanes.json"

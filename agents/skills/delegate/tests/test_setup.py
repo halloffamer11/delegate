@@ -1274,6 +1274,30 @@ def refresh_catalog_in(cfg):
     return cfg
 
 
+def case_a_malformed_model_queue_does_not_stop_wizard_launch():
+    """An applied value that is not iterable counts as an empty Model queue;
+    the full wizard still opens its start screen and can quit without saving."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = sample_catalog(td)
+        queue_path = os.path.join(td, "new-models.json")
+        catalog.write_json(queue_path, {"models": [], "applied": 1})
+        before = open(queue_path, "rb").read()
+        screens = []
+        queues = []
+
+        def quit_at_start(wizard):
+            screens.append(wizard.screen)
+            queues.append((wizard.queued, wizard.applied))
+            return None
+
+        code, out, err = wizard_in_process(
+            td, ["--config-dir", cfg, "--no-discover", "--no-bench"], drive=quit_at_start)
+        ok = (code == 0 and screens == ["start"] and queues == [((), ())]
+              and "nothing written" in out
+              and open(queue_path, "rb").read() == before)
+        return ok, f"code={code} screens={screens} err={err!r}"
+
+
 def case_a_model_noticed_while_the_wizard_is_open_stays_queued():
     """Dispatch notes a model while the wizard is open; the save forgets the
     entry the start page named and keeps the one it never showed (deepening
@@ -1628,6 +1652,8 @@ for name, case in (
      case_the_plain_save_refuses_a_catalog_changed_while_it_asked),
     ("a model noticed while the wizard is open stays queued",
      case_a_model_noticed_while_the_wizard_is_open_stays_queued),
+    ("a malformed model queue does not stop wizard launch",
+     case_a_malformed_model_queue_does_not_stop_wizard_launch),
     ("a save gives every native Lane in the catalog its agent file",
      case_a_save_gives_every_native_lane_its_agent_file),
     ("a focused tier screen saves only the change made on it",

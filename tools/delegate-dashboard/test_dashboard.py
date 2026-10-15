@@ -249,6 +249,50 @@ class DashboardModelTest(ProjectFixture):
         self.assertEqual(grok["remaining"], 0.9)
         self.assertFalse(dashboard.refresh_if_changed())
 
+    def test_symlink_cache_hold_and_release_reload_beside_the_configured_path(self):
+        # B-3: holds belong beside the configured pathname, even through a link.
+        target = Path(self.temp.name) / "B" / "usage.json"
+        target.parent.mkdir()
+        shutil.copyfile(self.meters, target)
+        linked = Path(self.temp.name) / "A" / "usage.json"
+        linked.parent.mkdir()
+        linked.symlink_to(target)
+        usage.hold("grok", "limit", path=str(linked))
+        self.assertEqual(usage.read(None, usage.CACHED, path=str(linked)).readout("grok", None).remaining, 0.0)
+        self.assertEqual(usage.read(None, usage.CACHED, path=str(target)).readout("grok", None).remaining, 0.9)
+        configured = Path(os.path.relpath(linked))
+        dashboard = self.make_model(configured)
+        tier = dashboard.state["tiers"][3]
+        self.assertEqual(tier["rows"][0]["remaining"], 0.0)
+        self.assertIsNone(tier["leader"])
+        self.assertEqual(dashboard.meters_path, configured.absolute())
+        usage.release("grok", path=str(linked))
+        self.assertTrue(dashboard.refresh_if_changed())
+        self.assertEqual(dashboard.state["tiers"][3]["leader"], "grok46-high@grok")
+        self.assertEqual(dashboard.state["tiers"][3]["rows"][0]["remaining"], 0.9)
+        usage.hold("grok", "limit", path=str(linked))
+        self.assertTrue(dashboard.refresh_if_changed())
+        self.assertIsNone(dashboard.state["tiers"][3]["leader"])
+        self.assertFalse(dashboard.refresh_if_changed())
+
+    def test_legacy_pace_change_hot_reloads_the_leader(self):
+        # B-5: no cache bytes change while a legacy row's derived Pace changes.
+        taken_at = 1700000000
+        write_json(self.meters, {
+            "codex-a": {"r": 0.5, "remaining_weekly": 0.5,
+                        "reset_weekly": taken_at + 7 * 86400},
+            "codex-b": {"r": 0.5, "remaining_weekly": 0.5, "pace": 0.75},
+            "claude": {"r": 0.8, "pace": 0.7},
+            "grok": {"r": 0.9, "pace": 0.8},
+        })
+        with mock.patch.object(usage.time, "time", return_value=taken_at):
+            dashboard = self.make_model()
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "sol-high@codex")
+        with mock.patch.object(usage.time, "time", return_value=taken_at + 3.5 * 86400):
+            self.assertTrue(dashboard.refresh_if_changed())
+            self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+            self.assertFalse(dashboard.refresh_if_changed())
+
     def test_project_policy_byte_change_hot_reloads_gate_and_source(self):
         self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.6)
         dashboard = self.make_model()

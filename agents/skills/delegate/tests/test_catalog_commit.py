@@ -213,7 +213,9 @@ def case_a_dangling_link_is_refused_at_read_and_at_commit():
         through = refusal(catalog.write_json, routing_path, routing)
         ok = (at_read is not None and routing_path in str(at_read) and missing in str(at_read)
               and looped is not None and "loop" in str(looped)
-              and at_commit is not None and through is not None
+              and isinstance(at_commit, catalog_commit.CatalogChanged)
+              and at_commit.changed == ("routing",) and routing_path in str(at_commit)
+              and through is not None
               and not os.path.lexists(missing) and not os.path.isdir(os.path.dirname(missing)))
         return ok, f"read={at_read!r} loop={looped!r} commit={at_commit!r} write={through!r}"
 
@@ -299,6 +301,39 @@ def case_a_failed_write_puts_back_what_the_commit_wrote():
               and on_disk(target)[0] == before and os.path.islink(lanes_link)
               and first is not None and not os.path.lexists(os.path.join(fresh, "lanes.json")))
         return ok, f"{e!r} first={first!r}"
+
+
+def case_an_interrupted_second_write_restores_and_reraises():
+    """Ctrl-C on routing's write restores the lanes bytes through their
+    link, leaves routing alone, and passes the same interrupt to the caller."""
+    with temp_home() as home:
+        cfg, real = linked_config(home)
+        lanes_link, routing_link = paths(cfg)
+        before = {path: on_disk(path)[0] for path in paths(real)}
+        snap = catalog_commit.read(cfg)
+        routing = copy.deepcopy(snap.routing)
+        routing["gate"] = 0.2
+        interrupt = KeyboardInterrupt("cancelled during routing write")
+        real_write = catalog.write_json
+
+        def write(path, doc):
+            if path == routing_link:
+                raise interrupt
+            return real_write(path, doc)
+
+        caught = None
+        catalog.write_json = write
+        try:
+            catalog_commit.commit(snap,
+                                  {"lanes": with_tier(snap.lanes, "terra-high@codex", 1),
+                                   "routing": routing})
+        except KeyboardInterrupt as e:
+            caught = e
+        finally:
+            catalog.write_json = real_write
+        ok = (caught is interrupt and all(on_disk(path)[0] == data for path, data in before.items())
+              and os.path.islink(lanes_link) and os.path.islink(routing_link))
+        return ok, f"caught={caught!r} lanes_restored={on_disk(lanes_link)[0] == before[paths(real)[0]]}"
 
 
 def case_a_first_run_commits_onto_absent_documents():
@@ -618,6 +653,8 @@ for name, case in (
      case_a_commit_backs_up_what_it_replaces),
     ("a write that fails puts back what the commit already wrote",
      case_a_failed_write_puts_back_what_the_commit_wrote),
+    ("an interrupted second write restores and reraises",
+     case_an_interrupted_second_write_restores_and_reraises),
     ("a first run commits onto absent documents",
      case_a_first_run_commits_onto_absent_documents),
     ("native Lanes added and removed gain and lose their agent files",

@@ -575,6 +575,8 @@ def _pace_to_lead(cat, readouts, present, tier, rows, meter):
     top = math.floor(round(usage.MAX_PACE * 100, 9))
     steps = set()
     for crossing in crossings:
+        if not math.isfinite(crossing) or crossing > usage.MAX_PACE:
+            continue
         step = max(0, math.ceil(round(crossing * 100, 9)))
         steps.update(s for s in (step, step + 1) if s <= top)
     for step in sorted(steps):

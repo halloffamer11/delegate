@@ -189,6 +189,34 @@ def case_work_that_raises_ends_the_run_blocked():
            all(ok for _, ok, _, _ in seen), repr([s for s in seen if not s[1]]))
 
 
+def case_work_with_an_unprintable_exception_still_ends_the_run():
+    class UnprintableError(RuntimeError):
+        def __str__(self):
+            raise ValueError("cannot format exception")
+
+    with world() as w:
+        def work(run):
+            raise UnprintableError()
+
+        ended, raised = None, None
+        try:
+            ended = runs.execute(request(), b"p", work, w.root)
+        except BaseException as exc:
+            raised = type(exc).__name__
+        read = runs.Run(ended.run).read() if ended else {}
+        disp = read.get("dispatch", {})
+        lines = w.lines()
+        reason = "dispatch failed: UnprintableError: exception message unavailable"
+        record("2b. an unprintable work exception still ends the Run blocked",
+               raised is None and ended is not None and ended.status == "blocked"
+               and ended.exit_code == 1 and disp.get("reason") == reason
+               and disp.get("status") == "blocked" and disp.get("finished_at")
+               and read.get("return") == runs.blocked(reason).returned
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and lines[-1].get("status") == "blocked",
+               f"raised={raised} read={read} ledger={lines}")
+
+
 def case_sigterm_during_work_ends_the_run_blocked_as_terminated():
     with world() as w:
         def previous(signum, frame):
@@ -306,6 +334,36 @@ def case_a_return_json_that_cannot_be_written_still_ends_the_run():
                and len(ended.notes) == 1 and "return.json" in ended.notes[0]
                and "status=blocked secs=3" in ended.text(),
                f"ended={vars(ended)} dispatch={disp} ledger={lines}")
+
+
+def case_a_return_write_interrupted_still_ends_the_run():
+    class InterruptedEvidence(list):
+        def __iter__(self):
+            raise KeyboardInterrupt("return write interrupted")
+
+    with world() as w:
+        def work(run):
+            evidence = InterruptedEvidence([{"file": "f.py", "line": 1, "claim": "done"}])
+            return runs.Finish(dict(RETURNED, evidence=evidence), relay_status="completed",
+                               relay_exit=0, secs=3, session_id="s-4b")
+
+        ended, raised = None, None
+        try:
+            ended = runs.execute(request(), b"p", work, w.root)
+        except BaseException as exc:
+            raised = type(exc).__name__
+        disp = runs.Run(ended.run).read()["dispatch"] if ended else {}
+        lines = w.lines()
+        reason = "could not write return.json: return write interrupted"
+        record("4b. KeyboardInterrupt during return.json write still ends dispatch.json and the Ledger",
+               raised is None and ended is not None and ended.status == "blocked"
+               and ended.exit_code == 1 and disp.get("status") == "blocked"
+               and disp.get("reason") == reason and disp.get("finished_at")
+               and disp.get("relay_status") == "completed" and disp.get("session_id") == "s-4b"
+               and ended.notes == (reason,)
+               and [e.get("kind") for e in lines] == ["dispatch.start", "dispatch.finish"]
+               and lines[-1].get("status") == "blocked",
+               f"raised={raised} dispatch={disp} ledger={lines}")
 
 
 def case_a_ledger_that_cannot_be_written_never_stops_a_run_ending():
@@ -743,9 +801,11 @@ def case_parse_native_line():
 def main():
     case_a_run_that_returns()
     case_work_that_raises_ends_the_run_blocked()
+    case_work_with_an_unprintable_exception_still_ends_the_run()
     case_sigterm_during_work_ends_the_run_blocked_as_terminated()
     case_sigterm_inside_a_relay_adapters_run_ends_the_run_terminated()
     case_a_return_json_that_cannot_be_written_still_ends_the_run()
+    case_a_return_write_interrupted_still_ends_the_run()
     case_a_ledger_that_cannot_be_written_never_stops_a_run_ending()
     case_a_usage_limit_refusal_holds_the_lanes_meter()
     case_a_runs_root_that_cannot_be_made_starts_nothing()

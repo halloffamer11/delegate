@@ -275,7 +275,9 @@ class CatalogDraft:
                 self._start_seq, self._settled)
 
     def _decisions(self):
-        return copy.deepcopy((self._carried, self._tier, self._seq, self._routing))
+        orders = {name: record.get("order")
+                  for name, record in self.documents()["lanes"]["lanes"].items()}
+        return copy.deepcopy((self._carried, self._tier, self._seq, self._routing, orders))
 
     # the sequences
 

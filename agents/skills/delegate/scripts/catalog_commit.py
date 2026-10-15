@@ -226,7 +226,7 @@ def _read_queue():
     queue cannot be read."""
     try:
         return tuple(model_queue.pending()), tuple(model_queue.applied())
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError):
         return (), ()
 
 
@@ -282,8 +282,15 @@ def commit(read: CatalogRead, documents: Mapping[str, dict]) -> Committed:
     _validate(after, snap.files, names=tuple(documents))
     # every document the read saw, described again: bytes, link, resolved
     # path and presence
-    now = _describe_all(snap.files)
-    moved = [name for name in DOCUMENTS if now[name] != _seen(snap, name)]
+    moved = []
+    for name in DOCUMENTS:
+        try:
+            now = None if snap.files[name] is None else _describe(snap.files[name])
+        except catalog.CatalogError:
+            moved.append(name)
+        else:
+            if now != _seen(snap, name):
+                moved.append(name)
     if moved:
         raise CatalogChanged(moved, snap.files)
     changed = [name for name in DOCUMENTS
@@ -302,6 +309,9 @@ def commit(read: CatalogRead, documents: Mapping[str, dict]) -> Committed:
         except (OSError, catalog.CatalogError) as e:
             raise catalog.CatalogError(
                 f"{snap.files[name]}: cannot write: {e}; {_restore(snap, written)}") from e
+        except BaseException:
+            _restore(snap, written)
+            raise
         written.append(name)
     # The catalog is written: from here on a failure is a note line, never an
     # error, so these two steps catch any Exception (a machine-local profile

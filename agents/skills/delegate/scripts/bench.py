@@ -1219,7 +1219,12 @@ def inspect_model(query, lanes_doc, effort_rows=None, epoch_rows=None):
     targets = query_identity["lane_models"]
     lane_view = []
     for name, lane in (lanes_doc.get("lanes") or {}).items():
-        if not isinstance(lane, dict) or lane.get("model") not in targets:
+        if not isinstance(lane, dict):
+            continue
+        if model_key is None:
+            if lane.get("model") not in targets:
+                continue
+        elif lane_evidence.model_identity(lane) != model_key:
             continue
         own = {id(row) for row in accepted.lane_rows(name) + epoch.lane_rows(name)}
         lane_view.append({

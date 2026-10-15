@@ -248,6 +248,74 @@ def case_figures_derived_from_a_row_that_carries_only_windows():
            codex.remaining == 0.5 and codex.pace == 1.1, codex)
 
 
+def case_missing_combined_fields_are_derived_independently():
+    """B-1: one supplied figure must not hide the other missing figures."""
+    import rank
+    taken_at = 1700000000
+    reset = taken_at + 3.5 * 86400
+    no_remaining = row("codex", 0.05, 0.8, reset_weekly=reset, pace=1.0)
+    del no_remaining["r"]
+    cat = {"routing": {"gate": 0.1, "margin": 0.2}, "meters": {}, "lanes": {
+        "codex-low@codex": {"harness": "codex", "meter": "codex", "tier": 1}}}
+    from unittest.mock import patch
+    with patch.object(usage.time, "time", return_value=taken_at + 86400):
+        snap = usage.Snapshot.of({"probed_at": taken_at, "lanes": [
+            no_remaining,
+            row("missing-pace", 0.8, 0.5, reset_weekly=reset, r=0.4),
+            row("missing-cycle", 0.8, 0.5, reset_weekly=reset, pace=1.2),
+            row("supplied", 0.8, 0.5, reset_weekly=reset,
+                r=0.4, pace=1.2, cycle_left=0.25)]})
+    codex = snap.readout("codex", cat)
+    ranked = rank.rank_range(cat, snap, {"codex"})
+    record("B-1a. supplied Pace still derives Remaining and the Gate vetoes the Lane",
+           codex.remaining == 0.05 and codex.pace == 1.0 and codex.gated
+           and ranked[0]["cause"] == "gate" and not ranked[0]["pick"],
+           (codex, ranked))
+    missing_pace, missing_cycle = (snap.readout(m, None)
+                                   for m in ("missing-pace", "missing-cycle"))
+    record("B-1b. supplied Remaining still derives Pace and week_left at taken_at",
+           missing_pace.remaining == 0.4 and missing_pace.pace == 1.0
+           and missing_pace.week_left == 0.5, missing_pace)
+    record("B-1c. supplied Remaining and Pace still derive a missing week_left",
+           missing_cycle.remaining == 0.5 and missing_cycle.pace == 1.2
+           and missing_cycle.week_left == 0.5, missing_cycle)
+    supplied = snap.readout("supplied", None)
+    record("B-1d. deriving fields preserves every supplied figure",
+           supplied.remaining == 0.4 and supplied.pace == 1.2
+           and supplied.week_left == 0.25, supplied)
+
+
+def case_cycle_left_is_an_optional_finite_fraction():
+    """B-2: invalid divisors reject every Meter before rank can spend one."""
+    import rank
+    cat = {"routing": {"gate": 0.1, "margin": 0.2}, "meters": {}, "lanes": {
+        "codex-low@codex": {"harness": "codex", "meter": "codex", "tier": 1}}}
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "usage.json")
+        for bad in ("bad", True, False, -0.1, 1.1, float("nan"), float("inf"), -float("inf")):
+            rows = [row("codex", None, 0.5, pace=1.0, cycle_left=bad),
+                    row("grok", None, 0.9, pace=1.0)]
+            write_doc(cache, rows, taken_at=1700000000)
+            snapshots = [usage.read(None, usage.CACHED, path=cache),
+                         usage.Snapshot.of({"probed_at": 1700000000, "lanes": rows}),
+                         usage.Snapshot.of({r["meter"]: r for r in rows})]
+            record(f"B-2. cycle_left={bad!r} makes the whole document malformed",
+                   all(s.status == "malformed" and s.detail and s.names() == ()
+                       and s.readout("grok", None).remaining is None for s in snapshots),
+                   snapshots)
+            try:
+                rank.tier_leaders(cat, snapshots[0], {"codex"})
+                safe = True
+            except TypeError:
+                safe = False
+            record(f"B-2. cycle_left={bad!r} cannot crash a Tier preview", safe)
+    for good in (None, 0, 0.5, 1):
+        snap = usage.Snapshot.of({"probed_at": 1700000000, "lanes": [
+            row("codex", None, 0.5, pace=1.0, cycle_left=good)]})
+        record(f"B-2. optional cycle_left={good!r} remains valid",
+               snap.status == "ok" and snap.readout("codex", None).week_left == good, snap)
+
+
 def case_readout_invariants():
     def cat(gate=0.1, meters_on=True, **meter_defs):
         routing = {"gate": gate, "margin": 0.2}
@@ -322,6 +390,41 @@ def case_signature_follows_what_ranks():
         record("6. the signature is equal for two reads alike and changes with a hold, its release or a new reading",
                first == again and held != first and released == first and changed != first,
                (first, held, released, changed))
+
+
+def case_signature_follows_derived_figures_at_the_reading_time():
+    """B-5: legacy Pace changes rank and signature; envelopes stay pinned."""
+    import rank
+    from unittest.mock import patch
+    taken_at = 1700000000
+    rows = {"grok": row("grok", None, 0.5, reset_weekly=taken_at + 7 * 86400, r=None),
+            "codex": row("codex", None, 0.5, pace=0.75)}
+    cat = {"routing": {"gate": 0.1, "margin": 0.2}, "meters": {}, "lanes": {
+        "grok-high@grok": {"harness": "grok", "meter": "grok", "tier": 1},
+        "codex-low@codex": {"harness": "codex", "meter": "codex", "tier": 1}}}
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "usage.json")
+        with open(cache, "w", encoding="utf-8") as f:
+            json.dump(rows, f)
+        with patch.object(usage.time, "time", return_value=taken_at):
+            first = usage.read(None, usage.CACHED, path=cache)
+        with patch.object(usage.time, "time", return_value=taken_at + 3.5 * 86400):
+            later = usage.read(None, usage.CACHED, path=cache)
+        picks = [rank.rank_range(cat, s, {"grok", "codex"})[0]["lane"] for s in (first, later)]
+        record("B-5a. legacy derived Pace changes the signature when the Pick changes",
+               first.readout("grok", None).pace == 0.5 and later.readout("grok", None).pace == 1.0
+               and picks == ["codex-low@codex", "grok-high@grok"]
+               and first.signature != later.signature,
+               (picks, first.signature, later.signature))
+        write_doc(cache, list(rows.values()), taken_at=taken_at)
+        with patch.object(usage.time, "time", return_value=taken_at):
+            pinned = usage.read(None, usage.CACHED, path=cache)
+        with patch.object(usage.time, "time", return_value=taken_at + 3.5 * 86400):
+            pinned_later = usage.read(None, usage.CACHED, path=cache)
+        record("B-5b. enveloped derived figures and signature stay fixed at taken_at",
+               pinned.signature == pinned_later.signature
+               and pinned.readout("grok", None) == pinned_later.readout("grok", None),
+               (pinned.signature, pinned_later.signature))
 
 
 def case_cache_path():
@@ -642,8 +745,11 @@ def main():
     case_a_usage_limit_hold_ends_at_the_reset_a_new_reset_a_finished_run_or_a_day()
     case_validity_legacy_rows_and_the_bare_map()
     case_figures_derived_from_a_row_that_carries_only_windows()
+    case_missing_combined_fields_are_derived_independently()
+    case_cycle_left_is_an_optional_finite_fraction()
     case_readout_invariants()
     case_signature_follows_what_ranks()
+    case_signature_follows_derived_figures_at_the_reading_time()
     case_cache_path()
     case_spend_takes_quota_points_off_the_weekly_figure()
     sys.exit(1 if failures else 0)

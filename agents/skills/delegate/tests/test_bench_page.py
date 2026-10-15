@@ -1747,4 +1747,46 @@ try:
 except Exception as e:
     record("every Python function bench_page.js cites lives where it says", False, repr(e))
 
+# Review A-3: a majority verdict may switch off the better effort on one board.
+try:
+    rows = [{"source": "aa", "model": "gemini-3.8-flash", "effort": e, "benchmark": b,
+             "score": s, "cost_usd": c, "uncertain": False}
+            for b, high_score, high_cost in (("b1", 0.90, 1.0), ("b2", 0.50, 3.0), ("b3", 0.50, 3.0))
+            for e, s, c in (("medium", 0.80, 2.0), ("high", high_score, high_cost))]
+    data = bench_page.plot_data(rows, AGY_LANES)
+    board = board_named(data, "b1")
+    high = next(p for p in board["points"] if p["effort"] == "high")
+    record("a majority verdict describes each board's signed score and cost differences",
+           high["kind"] == "lane_off" and high["beatenBy"] == "medium"
+           and "high scores 0.1 more than medium and costs $1 less (−50%)" in board["finding"]
+           and "high scores 0.3 less than medium and costs $1 more (+50%)"
+           in board_named(data, "b2")["finding"], board["finding"])
+except Exception as e:
+    record("a majority verdict describes each board's signed score and cost differences", False, repr(e))
+
+# Review A-4: a shared point can have one off verdict from each source.
+try:
+    rows = [{"source": source, "model": "Claude Opus 5.5", "effort": e, "benchmark": "B",
+             "score": s, "cost_usd": c, "uncertain": False}
+            for source, sweep in (("aa", (("high", 0.70, 2.0), ("medium", 0.60, 1.0),
+                                           ("xhigh", 0.80, 1.5))),
+                                  ("tbench", (("high", 0.70, 2.0), ("medium", 0.80, 1.0))))
+            for e, s, c in sweep]
+    page = bench_page.render(None, OPUS_TWO_HARNESSES, rows)
+    table = re.search(r'<table class="rows">(.*?)</table>', page, re.S).group(1)
+    high_rows = [row for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", table, re.S)
+                 if "<td>high</td>" in row]
+    notes = {"aa": "beaten by xhigh (opus55-high@claude)",
+             "tbench": "beaten by medium (opus55-high@agy)"}
+    record("raw rows name every off Lane's verdict and scope single competitors to their Lanes",
+           len(high_rows) == 2 and all(
+               "proposed off: opus55-high@agy (medium wins on tbench), "
+               "opus55-high@claude (xhigh wins on aa)" in row
+               and notes[source] in row
+               and notes["tbench" if source == "aa" else "aa"] not in row
+               for source, row in zip(("aa", "tbench"), high_rows)), repr(high_rows))
+except Exception as e:
+    record("raw rows name every off Lane's verdict and scope single competitors to their Lanes",
+           False, repr(e))
+
 sys.exit(1 if fails else 0)
