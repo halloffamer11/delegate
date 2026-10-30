@@ -1,0 +1,418 @@
+<!doctype html>
+<!-- PROTOTYPE, throwaway. Six answers to "what should tier selection look like?"
+     A/B/C: the benchmark page. T1/T2/T3: the TUI tier screen nesting.
+     Switch with ?variant= or the bottom bar (or the arrow keys). Nothing is written anywhere. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tier Selection Prototype</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1f;--mute:#6b6b70;--line:#d9d6cf;--card:#fff;--hi:#fff3c4;
+  --t4:#6d28d9;--t3:#2563eb;--t2:#0d9488;--t1:#ca8a04;--off:#b4b4b4;
+  --claude:#c2410c;--codex:#047857;--agy:#1d4ed8;--grok:#3f3f46;--kiro:#9333ea;}
+:root[data-theme=dark]{--bg:#16161a;--fg:#e8e6e1;--mute:#9a9aa2;--line:#33333a;--card:#1e1e24;--hi:#4a3f12;
+  --claude:#fb923c;--codex:#34d399;--agy:#60a5fa;--grok:#d4d4d8;--kiro:#c084fc;--off:#5a5a60;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,system-ui,sans-serif}
+header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+header h1{font-size:16px;margin:0}
+.note{color:var(--mute);font-size:12px;max-width:1100px;padding:6px 16px 0}
+.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;cursor:pointer;user-select:none;background:var(--card)}
+.chip[aria-pressed=false]{opacity:.45;text-decoration:line-through}
+select,button{font:inherit}
+main{padding:12px 16px 80px}
+svg text{font-size:11px;fill:var(--fg)}
+.axis line,.axis path{stroke:var(--line)}
+.series{transition:opacity .12s}
+.dim .series{opacity:.12}
+.dim .series.hot{opacity:1}
+.series.hot polyline{stroke-width:4}
+.row.hot,.cell.hot,.pill.hot{background:var(--hi)}
+.flash{animation:flash 1s}
+@keyframes flash{0%{background:var(--hi)}100%{background:transparent}}
+.tier4{--tc:var(--t4)}.tier3{--tc:var(--t3)}.tier2{--tc:var(--t2)}.tier1{--tc:var(--t1)}.tieroff{--tc:var(--off)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:var(--card);color:var(--fg);padding:1px 7px;cursor:pointer;font-size:12px}
+.seg button.on{background:var(--tc);color:#fff}
+.badge{display:inline-block;min-width:26px;text-align:center;border-radius:4px;padding:0 4px;color:#fff;background:var(--tc);font-size:12px}
+.hn{font-weight:600}
+.mute{color:var(--mute)}
+pre.term{background:#111;color:#ddd;padding:12px;border-radius:6px;font:12.5px/1.35 ui-monospace,Menlo,monospace;overflow:auto}
+pre.term b{color:#fff}
+pre.term .c4{color:#c4b5fd}pre.term .c3{color:#93c5fd}pre.term .c2{color:#5eead4}pre.term .c1{color:#fde68a}pre.term .co{color:#666}
+pre.term .cur{background:#333}
+#switcher{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;color:#fff;border-radius:999px;padding:6px 10px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 16px #0005;z-index:20}
+#switcher button{background:#333;color:#fff;border:0;border-radius:999px;width:28px;height:28px;cursor:pointer}
+#state{position:fixed;right:14px;bottom:14px;width:300px;max-height:40vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font:11px/1.3 ui-monospace,Menlo,monospace;z-index:15}
+#state summary{cursor:pointer;font-family:system-ui;font-size:12px}
+/* A */
+.a-wrap{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px;align-items:start}
+.a-side{position:sticky;top:56px;max-height:calc(100vh - 140px);overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.a-side h3{margin:0;padding:6px 10px;font-size:13px;position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);z-index:2}
+.a-side .fam{padding:4px 10px 2px 18px;font-weight:600;display:flex;justify-content:space-between;cursor:default}
+.a-side .row{display:grid;grid-template-columns:52px 1fr auto;gap:6px;align-items:center;padding:2px 10px 2px 30px;cursor:pointer}
+.a-side .row .sc{font-size:12px;color:var(--mute)}
+.a-counts{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:6px 10px;display:flex;gap:8px;flex-wrap:wrap}
+/* B */
+.strip{display:grid;grid-template-columns:70px 1fr;gap:4px 10px;margin-top:10px;align-items:start}
+.strip .fams{display:flex;gap:10px;flex-wrap:wrap}
+.strip .famb{border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--card)}
+.strip .famb .t{font-size:11px;color:var(--mute)}
+.pill{display:inline-block;margin:1px;padding:0 5px;border-radius:4px;border:2px solid var(--tc);font-size:12px;cursor:pointer}
+.pill.on{background:var(--tc);color:#fff}
+.pill.pin{outline:2px dashed var(--fg);outline-offset:1px}
+.toolbar{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap}
+/* C */
+table.mx{border-collapse:collapse;margin-top:10px;width:100%}
+table.mx th,table.mx td{border:1px solid var(--line);padding:3px 6px;text-align:center;font-size:12px}
+table.mx th.fam{text-align:left;white-space:nowrap}
+table.mx tr.h th{background:var(--bg);text-align:left;font-size:13px}
+.cell{cursor:pointer;background:var(--card);min-width:84px}
+.cell .s{display:block;font-variant-numeric:tabular-nums}
+.cell.nolane{background:repeating-linear-gradient(45deg,transparent 0 4px,var(--line) 4px 5px);cursor:default;color:var(--mute)}
+.cell.on{box-shadow:inset 0 -4px 0 var(--tc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tier selection: prototype</h1>
+  <label>Board <select id="board"></select></label>
+  <span id="harnessChips"></span>
+  <label><input type="checkbox" id="showComp"> other models</label>
+  <label><input type="checkbox" id="showOff" checked> efforts not carried</label>
+  <button id="theme" type="button">dark</button>
+</header>
+<p class="note" id="note"></p>
+<main id="main"></main>
+<details id="state"><summary>State: tier lines (what the review page's <code>v</code> would paste)</summary><pre id="stateText"></pre></details>
+<div id="switcher"><button id="prev" type="button">←</button><span id="vlabel"></span><button id="next" type="button">→</button></div>
+<script type="application/json" id="data">/*DATA*/null</script>
+<script>
+(function(){
+const D = JSON.parse(document.getElementById("data").textContent);
+const VARIANTS = [
+  ["A","Plot + stable ladder sidebar"],["B","Plot with tier bands + ladder strip"],["C","Effort matrix + overview plot"],
+  ["T1","TUI: tree harness › model › effort"],["T2","TUI: model rows × effort columns"],["T3","TUI: one harness per page"]];
+const NOTES = {
+  A:"The plot is where you pick. Each model is one line through its efforts (L M H XH MX), so an effort level is never a loose dot. Click a dot, then press 1–4 or o. The sidebar keeps a fixed order (harness › model ladder › effort), so setting a tier never moves a row. Hover a row or a model to light its line.",
+  B:"The tier lines are the selector. Drag a dashed line: every carried lane takes the tier of the band its dot sits in. Click a dot to carry it or drop it. Drag a box over several dots, then press 1–4 to pin those dots, which stops the bands moving them. There is no sidebar; the strip under the plot keeps the ladder order and never reflows.",
+  C:"The matrix is where you pick. Each row is a model in ladder order and each column is an effort; click a cell to cycle off→1→2→3→4. The small plot above follows your hover. A cell with hatching has no lane, so a missing effort level is visible instead of absent.",
+  T1:"The TUI tier page as a tree. ←/→ folds a harness or model. The tier column is per effort row. It is drawn from your catalog, with the same keys as today (space carries, 1–4 sets the tier).",
+  T2:"The TUI tier page as a matrix: one line per model, one column per effort. It is the most compact (about 12 lines for your 3 harnesses), and the gaps show the efforts a model does not have.",
+  T3:"The TUI tier page split into one page per harness (tab/shift-tab), with the models in ladder order and their efforts indented. Each page is short, but you cannot compare across harnesses on one page."};
+const EFF = ["none","low","medium","high","xhigh","max","ultra"];
+const EAB = {none:"n",low:"L",medium:"M",high:"H",xhigh:"XH",max:"MX",ultra:"U"};
+const ei = e => { const i = EFF.indexOf(e); return i < 0 ? 99 : i; };
+const LANES = new Map(D.lanes.map(l => [l.name, l]));
+// in memory only: carried + tier per lane, pins for variant B
+const S = { tier:{}, carried:{}, pin:{}, sel:new Set(), hot:null, board:D.defaults[0]||D.boards[0].id,
+  harness:{}, comp:false, showOff:true, fold:{}, cursor:0, tab:0 };
+D.lanes.forEach(l => { S.carried[l.name] = l.carried; S.tier[l.name] = l.tier || 1; });
+// "used" harness = one that carries at least one lane on this machine
+const used = new Set(D.lanes.filter(l => l.carried).map(l => l.harness));
+D.harnesses.forEach(h => S.harness[h] = used.has(h));
+const HCOL = h => getComputedStyle(document.documentElement).getPropertyValue("--"+h).trim() || "#888";
+const tierClass = n => S.carried[n] ? "tier"+S.tier[n] : "tieroff";
+const tierText = n => S.carried[n] ? "T"+S.tier[n] : "off";
+
+// families: harness › model ladder › effort. Ladder = best score of the family on the
+// first board (data-driven: astra > sol > terra > luna falls out of the scores).
+const famKey = l => l.harness+"|"+(l.group||l.model);
+function boardById(id){ return D.boards.find(b => b.id === id); }
+function lanePoints(board){ const m = new Map(); board.points.forEach(p => p.lanes.forEach(l => m.set(l.name, p))); return m; }
+const rank0 = lanePoints(D.boards[0]);
+function families(){
+  const fam = new Map();
+  D.lanes.forEach(l => { if (l.effort === "ultra") return; const k = famKey(l);
+    if (!fam.has(k)) fam.set(k, {key:k, harness:l.harness, group:l.group||l.model, lanes:[]}); fam.get(k).lanes.push(l); });
+  fam.forEach(f => { f.lanes.sort((a,b) => ei(a.effort)-ei(b.effort));
+    f.best = Math.max(-1, ...f.lanes.map(l => (rank0.get(l.name)||{}).score ?? -1)); });
+  const byH = new Map();
+  [...fam.values()].sort((a,b) => b.best-a.best).forEach(f => { if (!byH.has(f.harness)) byH.set(f.harness, []); byH.get(f.harness).push(f); });
+  return [...byH.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+}
+const short = g => g;
+function visibleFamilies(){ return families().filter(([h]) => S.harness[h]); }
+
+// ---------- shared plot ----------
+function plot(host, opts){
+  opts = opts || {};
+  const W = opts.w || 860, H = opts.h || 560, M = {l:56,r:20,t:14,b:40};
+  const board = boardById(S.board), lp = lanePoints(board);
+  const series = [];
+  visibleFamilies().forEach(([h, fams]) => fams.forEach(f => {
+    const pts = f.lanes.map(l => ({lane:l, p:lp.get(l.name)})).filter(x => x.p && x.p.cost != null && x.p.score != null)
+      .filter(x => S.showOff || S.carried[x.lane.name]);
+    // efforts the board scores but the catalog has no lane for: hollow, on the same line
+    board.points.filter(p => !p.lanes.length && p.kind === "own_other" && (p.harness||[]).includes(h)
+        && p.model.replace(/-(low|medium|high|xhigh|max)$/,"") === f.group && p.cost != null)
+      .forEach(p => pts.push({lane:null, p}));
+    pts.sort((a,b) => ei(a.p.effort)-ei(b.p.effort));
+    if (pts.length) series.push({f, pts});
+  }));
+  const comps = S.comp ? board.points.filter(p => p.kind === "comparator" && p.cost != null) : [];
+  const all = series.flatMap(s => s.pts.map(x => x.p)).concat(comps);
+  if (!all.length){ host.innerHTML = "<p class=mute>No points for the chosen harnesses on this board.</p>"; return {}; }
+  const cs = all.map(p => p.cost).filter(c => c > 0), ss = all.map(p => p.score);
+  const x0 = Math.log10(Math.min(...cs)/1.5), x1 = Math.log10(Math.max(...cs)*1.5);
+  const pad = (Math.max(...ss)-Math.min(...ss))*0.08 || 1, y0 = Math.min(...ss)-pad, y1 = Math.max(...ss)+pad;
+  const X = c => M.l + (Math.log10(Math.max(c,1e-6))-x0)/(x1-x0)*(W-M.l-M.r);
+  const Y = s => H-M.b - (s-y0)/(y1-y0)*(H-M.t-M.b);
+  const Yinv = py => y0 + (H-M.b-py)/(H-M.t-M.b)*(y1-y0);
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns,"svg"); svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.style.width="100%"; svg.style.maxWidth=W+"px";
+  const mk = (t,a,par) => { const e = document.createElementNS(ns,t); for (const k in a) e.setAttribute(k,a[k]); (par||svg).appendChild(e); return e; };
+  const ax = mk("g",{class:"axis"});
+  for (let e = Math.ceil(x0); e <= Math.floor(x1); e++) for (const m of [1,2,5]) { const c = m*10**e; if (Math.log10(c) < x0 || Math.log10(c) > x1) continue;
+    mk("line",{x1:X(c),x2:X(c),y1:M.t,y2:H-M.b},ax); const t = mk("text",{x:X(c),y:H-M.b+14,"text-anchor":"middle"},ax); t.textContent = "$"+(c<1?c.toFixed(c<0.1?2:1):c); }
+  for (let i = 0; i <= 5; i++){ const s = y0+(y1-y0)*i/5; mk("line",{x1:M.l,x2:W-M.r,y1:Y(s),y2:Y(s)},ax); const t = mk("text",{x:M.l-6,y:Y(s)+4,"text-anchor":"end"},ax); t.textContent = s.toFixed(board.unit==="%"||s<2?2:0); }
+  const xl = mk("text",{x:(W+M.l)/2,y:H-6,"text-anchor":"middle",class:"mute"}); xl.textContent = "cost per task (log) → cheaper is left";
+  const yl = mk("text",{x:14,y:H/2,transform:`rotate(-90 14 ${H/2})`,"text-anchor":"middle"}); yl.textContent = board.benchmark + " ↑";
+  if (opts.bands) opts.bands(mk, X, Y, Yinv, W, H, M, svg);
+  comps.forEach(p => { const c = mk("circle",{cx:X(p.cost),cy:Y(p.score),r:3,fill:"var(--off)",opacity:.6}); const t = mk("title",{},c); t.textContent = `${p.published} ${p.effort}: ${p.score.toFixed(1)} $${p.cost.toFixed(2)}`; });
+  const layer = mk("g",{});
+  const dots = new Map();
+  series.forEach(s => {
+    const g = mk("g",{class:"series","data-fam":s.f.key},layer);
+    const col = HCOL(s.f.harness);
+    mk("polyline",{points:s.pts.map(x => X(x.p.cost)+","+Y(x.p.score)).join(" "),fill:"none",stroke:col,"stroke-width":2,"stroke-opacity":.7},g);
+    s.pts.forEach((x,i) => {
+      const cx = X(x.p.cost), cy = Y(x.p.score), n = x.lane && x.lane.name;
+      const d = mk("circle",{cx,cy,r:n?7:4,fill:n&&S.carried[n]?`var(--t${S.tier[n]})`:"var(--card)",stroke:col,"stroke-width":n&&S.carried[n]?2:1.5,"stroke-dasharray":n?"":"2 2",style:n?"cursor:pointer":""},g);
+      if (n && S.sel.has(n)) mk("circle",{cx,cy,r:11,fill:"none",stroke:"var(--fg)","stroke-width":2},g);
+      if (n && S.pin[n]) mk("rect",{x:cx+6,y:cy-11,width:5,height:5,fill:"var(--fg)"},g);
+      const t = mk("text",{x:cx+9,y:cy+4},g); t.textContent = EAB[x.p.effort]||x.p.effort;
+      if (i === s.pts.length-1){ const lab = mk("text",{x:cx+9,y:cy-8,"font-weight":"600",fill:col},g); lab.textContent = short(s.f.group); }
+      const tt = mk("title",{},d); tt.textContent = `${n||s.f.group+" (no lane)"} · ${x.p.effort} · ${x.p.score.toFixed(2)} · $${x.p.cost.toFixed(2)}${n?" · "+tierText(n):""}`;
+      if (n){ dots.set(n,{cx,cy});
+        d.addEventListener("click", e => { e.stopPropagation(); (opts.onDot||(()=>{}))(n, e); });
+        d.addEventListener("mouseenter", () => setHot(s.f.key, n)); d.addEventListener("mouseleave", () => setHot(null)); }
+    });
+    g.addEventListener("mouseenter", () => setHot(s.f.key)); g.addEventListener("mouseleave", () => setHot(null));
+  });
+  host.appendChild(svg);
+  return {svg, X, Y, Yinv, dots, W, H, M};
+}
+function setHot(fam, lane){
+  S.hot = fam;
+  document.querySelectorAll("svg").forEach(s => s.classList.toggle("dim", !!fam));
+  document.querySelectorAll(".series").forEach(g => g.classList.toggle("hot", g.dataset.fam === fam));
+  document.querySelectorAll("[data-lane],[data-famrow]").forEach(r => r.classList.toggle("hot",
+    lane ? r.dataset.lane === lane : (!!fam && (r.dataset.fam === fam || r.dataset.famrow === fam))));
+}
+function setTier(names, t){
+  names.forEach(n => { if (t === "o") S.carried[n] = false; else { S.carried[n] = true; S.tier[n] = t; } });
+  render();
+}
+
+// ---------- A: plot + stable ladder sidebar ----------
+function variantA(main){
+  main.innerHTML = '<div class="a-wrap"><div id="aplot"></div><aside class="a-side" id="aside"></aside></div>';
+  plot(document.getElementById("aplot"), {onDot:(n) => { S.sel = new Set([n]); render(); const r = document.querySelector(`[data-lane="${CSS.escape(n)}"]`); if (r){ r.scrollIntoView({block:"nearest"}); r.classList.add("flash"); } }});
+  const side = document.getElementById("aside"), lp = lanePoints(boardById(S.board));
+  visibleFamilies().forEach(([h, fams]) => {
+    const hh = document.createElement("h3"); hh.innerHTML = `<span style="color:${HCOL(h)}">●</span> ${h}`; side.appendChild(hh);
+    fams.forEach(f => {
+      const fr = document.createElement("div"); fr.className = "fam"; fr.dataset.famrow = f.key;
+      fr.innerHTML = `<span>${short(f.group)}</span><span class="mute">${f.best>=0?f.best.toFixed(1):"no rows"}</span>`;
+      fr.onmouseenter = () => setHot(f.key); fr.onmouseleave = () => setHot(null); side.appendChild(fr);
+      f.lanes.forEach(l => {
+        if (!S.showOff && !S.carried[l.name]) return;
+        const p = lp.get(l.name), r = document.createElement("div");
+        r.className = "row "+tierClass(l.name); r.dataset.lane = l.name; r.dataset.fam = f.key;
+        if (S.sel.has(l.name)) r.style.outline = "2px solid var(--fg)";
+        r.innerHTML = `<span>${l.effort}</span><span class="sc">${p?p.score.toFixed(1)+" · $"+p.cost.toFixed(2):"no rows"}</span>`;
+        const seg = document.createElement("span"); seg.className = "seg";
+        ["4","3","2","1","o"].forEach(t => { const b = document.createElement("button"); b.textContent = t === "o" ? "off" : t;
+          if ((t === "o" && !S.carried[l.name]) || (S.carried[l.name] && String(S.tier[l.name]) === t)) b.className = "on";
+          b.onclick = e => { e.stopPropagation(); setTier([l.name], t === "o" ? "o" : +t); }; seg.appendChild(b); });
+        r.appendChild(seg);
+        r.onmouseenter = () => setHot(f.key, l.name); r.onmouseleave = () => setHot(null);
+        r.onclick = () => { S.sel = new Set([l.name]); render(); };
+        side.appendChild(r);
+      });
+    });
+  });
+  const c = document.createElement("div"); c.className = "a-counts";
+  c.innerHTML = [4,3,2,1].map(t => `<span class="badge tier${t}">T${t} ${D.lanes.filter(l => S.harness[l.harness] && S.carried[l.name] && S.tier[l.name]===t).length}</span>`).join("") + '<span class="mute">selected: '+([...S.sel][0]||"none")+' · keys 1–4, o</span>';
+  side.appendChild(c);
+}
+
+// ---------- B: plot with tier bands + ladder strip ----------
+S.lines = null;
+function bandTier(score){ for (let t = 4; t >= 2; t--) if (score >= S.lines[t]) return t; return 1; }
+function applyBands(){
+  const lp = lanePoints(boardById(S.board));
+  D.lanes.forEach(l => { const p = lp.get(l.name); if (p && S.carried[l.name] && !S.pin[l.name]) S.tier[l.name] = bandTier(p.score); });
+}
+function variantB(main){
+  const board = boardById(S.board);
+  if (!S.lines || S.lines.board !== S.board){
+    const sc = board.points.filter(p => p.lanes.length).map(p => p.score).sort((a,b) => a-b), q = f => sc[Math.floor(f*(sc.length-1))];
+    S.lines = {board:S.board, 4:q(.8), 3:q(.55), 2:q(.3)}; applyBands();
+  }
+  main.innerHTML = '<div class="toolbar"><span class="mute">Drag a dashed line · click a dot to carry or drop it · drag a box, then 1–4 pins</span> <button id="unpin" type="button">clear pins</button></div><div id="bplot"></div><div class="strip" id="strip"></div>';
+  document.getElementById("unpin").onclick = () => { S.pin = {}; applyBands(); render(); };
+  let drag = null;
+  const P = plot(document.getElementById("bplot"), {
+    onDot:(n) => { S.carried[n] = !S.carried[n]; applyBands(); render(); },
+    bands:(mk, X, Y, Yinv, W, H, M, svg) => {
+      const top = M.t, bot = H-M.b, ys = [top, Y(S.lines[4]), Y(S.lines[3]), Y(S.lines[2]), bot];
+      [4,3,2,1].forEach((t,i) => { mk("rect",{x:M.l,width:W-M.l-M.r,y:Math.max(top,ys[i]),height:Math.max(0,Math.min(bot,ys[i+1])-Math.max(top,ys[i])),fill:`var(--t${t})`,opacity:.07});
+        const lab = mk("text",{x:W-M.r-4,y:Math.max(top,ys[i])+14,"text-anchor":"end","font-weight":"700",fill:`var(--t${t})`}); lab.textContent = "T"+t; });
+      [4,3,2].forEach(t => { const y = Y(S.lines[t]);
+        const ln = mk("line",{x1:M.l,x2:W-M.r,y1:y,y2:y,stroke:`var(--t${t})`,"stroke-width":2,"stroke-dasharray":"6 4",style:"cursor:ns-resize"});
+        const hit = mk("rect",{x:M.l,width:W-M.l-M.r,y:y-6,height:12,fill:"transparent",style:"cursor:ns-resize"});
+        hit.addEventListener("pointerdown", e => { e.stopPropagation(); drag = {t, svg, Yinv}; hit.setPointerCapture(e.pointerId); });
+        hit.addEventListener("pointermove", e => { if (!drag) return; const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+          const v = drag.Yinv(pt.matrixTransform(svg.getScreenCTM().inverse()).y); S.lines[t] = v; ln.setAttribute("y1",Y(v)); ln.setAttribute("y2",Y(v)); });
+        hit.addEventListener("pointerup", () => { drag = null; applyBands(); render(); });
+      });
+    }});
+  if (P.svg){ // box select
+    let box = null, start = null; const ns = "http://www.w3.org/2000/svg";
+    const at = e => { const pt = P.svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(P.svg.getScreenCTM().inverse()); };
+    P.svg.addEventListener("pointerdown", e => { if (drag) return; start = at(e); box = document.createElementNS(ns,"rect"); box.setAttribute("fill","var(--hi)"); box.setAttribute("opacity",".5"); P.svg.appendChild(box); });
+    P.svg.addEventListener("pointermove", e => { if (!box) return; const p = at(e); box.setAttribute("x",Math.min(p.x,start.x)); box.setAttribute("y",Math.min(p.y,start.y)); box.setAttribute("width",Math.abs(p.x-start.x)); box.setAttribute("height",Math.abs(p.y-start.y)); });
+    P.svg.addEventListener("pointerup", e => { if (!box) return; const p = at(e), x0 = Math.min(p.x,start.x), x1 = Math.max(p.x,start.x), y0 = Math.min(p.y,start.y), y1 = Math.max(p.y,start.y);
+      box = null; if (x1-x0 < 4 && y1-y0 < 4) { render(); return; }
+      S.sel = new Set([...P.dots].filter(([n,d]) => d.cx>=x0 && d.cx<=x1 && d.cy>=y0 && d.cy<=y1).map(([n]) => n)); render(); });
+  }
+  const strip = document.getElementById("strip");
+  visibleFamilies().forEach(([h, fams]) => {
+    const hl = document.createElement("div"); hl.className = "hn"; hl.style.color = HCOL(h); hl.textContent = h; strip.appendChild(hl);
+    const row = document.createElement("div"); row.className = "fams";
+    fams.forEach(f => { const b = document.createElement("div"); b.className = "famb"; b.dataset.famrow = f.key;
+      b.innerHTML = `<div class="t">${short(f.group)}</div>`;
+      f.lanes.forEach(l => { const p = document.createElement("span"); p.className = "pill "+tierClass(l.name)+(S.carried[l.name]?" on":"")+(S.pin[l.name]?" pin":"");
+        p.dataset.lane = l.name; p.dataset.fam = f.key; p.textContent = EAB[l.effort]+" "+tierText(l.name);
+        if (S.sel.has(l.name)) p.style.outline = "2px solid var(--fg)";
+        p.onmouseenter = () => setHot(f.key, l.name); p.onmouseleave = () => setHot(null);
+        p.onclick = () => { S.carried[l.name] = !S.carried[l.name]; applyBands(); render(); };
+        b.appendChild(p); });
+      b.onmouseenter = () => setHot(f.key); b.onmouseleave = () => setHot(null); row.appendChild(b); });
+    strip.appendChild(row);
+  });
+}
+
+// ---------- C: effort matrix + overview plot ----------
+function variantC(main){
+  main.innerHTML = '<div id="cplot"></div><table class="mx" id="mx"></table>';
+  plot(document.getElementById("cplot"), {w:1100, h:300, onDot:(n) => { const c = document.querySelector(`[data-lane="${CSS.escape(n)}"]`); if (c){ c.scrollIntoView({block:"center"}); c.classList.add("flash"); } }});
+  const lp = lanePoints(boardById(S.board)), cols = ["low","medium","high","xhigh","max"];
+  const t = document.getElementById("mx");
+  t.innerHTML = `<tr><th></th>${cols.map(c => `<th>${c}</th>`).join("")}<th>best</th></tr>`;
+  visibleFamilies().forEach(([h, fams]) => {
+    const hr = document.createElement("tr"); hr.className = "h"; hr.innerHTML = `<th colspan="${cols.length+2}" style="color:${HCOL(h)}">${h} <span class="mute">(ladder: ${fams.map(f => short(f.group)).join(" → ")})</span></th>`; t.appendChild(hr);
+    fams.forEach(f => {
+      const tr = document.createElement("tr"); tr.dataset.famrow = f.key;
+      tr.innerHTML = `<th class="fam">${short(f.group)}</th>`;
+      cols.forEach(c => { const l = f.lanes.find(x => x.effort === c), td = document.createElement("td");
+        if (!l){ td.className = "cell nolane"; td.textContent = "no lane"; }
+        else { const p = lp.get(l.name); td.className = "cell "+tierClass(l.name)+(S.carried[l.name]?" on":""); td.dataset.lane = l.name; td.dataset.fam = f.key;
+          td.innerHTML = `<span class="badge ${tierClass(l.name)}">${tierText(l.name)}</span><span class="s">${p?p.score.toFixed(1):"no rows"}</span><span class="s mute">${p?"$"+p.cost.toFixed(2):""}</span>`;
+          td.onclick = () => { const cur = S.carried[l.name] ? S.tier[l.name] : 0, nx = (cur+1)%5; setTier([l.name], nx === 0 ? "o" : nx); };
+          td.onmouseenter = () => setHot(f.key, l.name); td.onmouseleave = () => setHot(null); }
+        tr.appendChild(td); });
+      const bt = document.createElement("td"); bt.textContent = f.best >= 0 ? f.best.toFixed(1) : "—"; tr.appendChild(bt);
+      tr.onmouseenter = () => setHot(f.key); tr.onmouseleave = () => setHot(null);
+      t.appendChild(tr);
+    });
+  });
+}
+
+// ---------- TUI mocks (drawn from the catalog, same widths as a 120-col terminal) ----------
+const pad = (s,n) => (s+"").padEnd(n).slice(0,n);
+const tc = n => S.carried[n] ? "c"+S.tier[n] : "co";
+function laneCells(l){ const p = rank0.get(l.name); return p ? `${pad(p.score.toFixed(1),5)} $${pad(p.cost.toFixed(2),6)}` : pad("no rows",13); }
+function termFrame(title, lines, keys){
+  return `<pre class="term"><b>start · harnesses · carry · [${title}] · review · routing · confirm</b>\n${lines.join("\n")}\n\n<span class="co">Tier: capability 1-4. Hidden: ${D.harnesses.filter(h => !S.harness[h]).join(", ")||"none"} (not used on this machine; h shows them)</span>\n${keys}</pre>`;
+}
+function variantT1(main){
+  const out = [], rows = []; let i = 0;
+  visibleFamilies().forEach(([h, fams]) => {
+    const open = S.fold[h] !== false;
+    rows.push({k:h}); out.push(`<span${S.cursor===i++?' class=cur':''}>${open?"▾":"▸"} <b>${h}</b>  <span class=co>${fams.length} models · ${fams.reduce((a,f)=>a+f.lanes.filter(l=>S.carried[l.name]).length,0)} carried</span></span>`);
+    if (!open) return;
+    fams.forEach(f => { const fo = S.fold[f.key] !== false; rows.push({k:f.key});
+      out.push(`<span${S.cursor===i++?' class=cur':''}>  ${fo?"▾":"▸"} ${pad(short(f.group),24)} <span class=co>best ${f.best>=0?f.best.toFixed(1):"—"}</span></span>`);
+      if (!fo) return;
+      f.lanes.forEach(l => { rows.push({lane:l.name});
+        out.push(`<span${S.cursor===i++?' class=cur':''}>      ${S.carried[l.name]?"[x]":"[ ]"} ${pad(l.effort,7)} <span class=${tc(l.name)}>${pad(tierText(l.name),4)}</span> ${laneCells(l)} <span class=co>${l.name}</span></span>`); }); });
+  });
+  S.rows = rows;
+  main.innerHTML = termFrame("tiers", [`  <span class=co>${pad("",8)}effort  tier AA-II  $/task</span>`, ...out], "↑/↓ move  ←/→ fold  space carry  1-4 tier  h harnesses  enter next  q quit");
+}
+function variantT2(main){
+  const cols = ["low","medium","high","xhigh","max"], out = [`  ${pad("model",22)}${cols.map(c => pad(c,14)).join("")}`];
+  let i = 0; const rows = [];
+  visibleFamilies().forEach(([h, fams]) => {
+    out.push(`<b>${h}</b>`);
+    fams.forEach(f => { rows.push({k:f.key}); const cur = S.cursor === i++;
+      out.push(`<span${cur?' class=cur':''}>  ${pad(short(f.group),22)}${cols.map(c => { const l = f.lanes.find(x => x.effort === c);
+        if (!l) return `<span class=co>${pad("  ·",14)}</span>`; const p = rank0.get(l.name);
+        return `<span class=${tc(l.name)}>${pad((S.carried[l.name]?"T"+S.tier[l.name]:"--")+" "+(p?p.score.toFixed(0):"?"),14)}</span>`; }).join("")}</span>`); });
+  });
+  S.rows = rows;
+  main.innerHTML = termFrame("tiers", out, "↑/↓ model  1-4 tier on the cursor model  h harnesses  enter next  q quit");
+}
+function variantT3(main){
+  const vf = visibleFamilies(); if (!vf.length){ main.innerHTML = "<p>No harness chosen.</p>"; return; }
+  S.tab = (S.tab + vf.length) % vf.length; const [h, fams] = vf[S.tab];
+  const tabs = vf.map(([x],j) => j === S.tab ? `<b>[${x}]</b>` : x).join("  ");
+  const out = [tabs, ""]; let i = 0; const rows = [];
+  fams.forEach((f,fi) => { out.push(`${fi+1}. <b>${short(f.group)}</b> <span class=co>best ${f.best>=0?f.best.toFixed(1):"—"}${fi<fams.length-1?"  ↓ cheaper":""}</span>`);
+    f.lanes.forEach(l => { rows.push({lane:l.name});
+      out.push(`<span${S.cursor===i++?' class=cur':''}>     ${S.carried[l.name]?"[x]":"[ ]"} ${pad(l.effort,7)} <span class=${tc(l.name)}>${pad(tierText(l.name),4)}</span> ${laneCells(l)}</span>`); }); });
+  S.rows = rows;
+  main.innerHTML = termFrame("tiers: "+h, out, "tab/shift-tab harness  ↑/↓ move  space carry  1-4 tier  enter next  q quit");
+}
+
+// ---------- chrome ----------
+const sel = document.getElementById("board");
+D.boards.forEach(b => { const o = document.createElement("option"); o.value = b.id; o.textContent = `${b.sourceName}: ${b.benchmark}`; sel.appendChild(o); });
+sel.value = S.board; sel.onchange = () => { S.board = sel.value; render(); };
+document.getElementById("showComp").onchange = e => { S.comp = e.target.checked; render(); };
+document.getElementById("showOff").onchange = e => { S.showOff = e.target.checked; render(); };
+document.getElementById("theme").onclick = e => { const r = document.documentElement, d = r.dataset.theme !== "dark"; r.dataset.theme = d ? "dark" : "light"; e.target.textContent = d ? "light" : "dark"; render(); };
+function chips(){ const host = document.getElementById("harnessChips"); host.innerHTML = "";
+  D.harnesses.forEach(h => { const c = document.createElement("span"); c.className = "chip"; c.setAttribute("aria-pressed", S.harness[h]);
+    c.innerHTML = `<span style="color:${HCOL(h)}">●</span> ${h}${used.has(h)?"":" <span class=mute>(unused)</span>"}`; c.onclick = () => { S.harness[h] = !S.harness[h]; render(); }; host.appendChild(c); }); }
+function variant(){ const v = new URLSearchParams(location.search).get("variant"); return VARIANTS.some(x => x[0] === v) ? v : "A"; }
+function go(step){ const i = VARIANTS.findIndex(x => x[0] === variant()), n = VARIANTS[(i+step+VARIANTS.length)%VARIANTS.length][0];
+  const u = new URL(location.href); u.searchParams.set("variant", n); history.replaceState(null,"",u); S.cursor = 0; render(); }
+document.getElementById("prev").onclick = () => go(-1); document.getElementById("next").onclick = () => go(1);
+function render(){
+  const v = variant(), main = document.getElementById("main");
+  document.getElementById("vlabel").textContent = v+" ("+VARIANTS.find(x => x[0] === v)[1]+")";
+  document.getElementById("note").textContent = NOTES[v];
+  const isT = v.startsWith("T");
+  ["board","showComp","showOff"].forEach(id => document.getElementById(id).closest("label").style.display = isT ? "none" : "");
+  chips(); main.innerHTML = "";
+  ({A:variantA,B:variantB,C:variantC,T1:variantT1,T2:variantT2,T3:variantT3})[v](main);
+  document.getElementById("stateText").textContent = D.lanes.filter(l => S.harness[l.harness])
+    .map(l => `${l.name} ${S.carried[l.name] ? S.tier[l.name] : "off"}${S.pin[l.name]?"   # pinned":""}`).join("\n");
+}
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input,select,textarea,[contenteditable]")) return;
+  const v = variant(), isT = v.startsWith("T");
+  if (isT){
+    const rows = S.rows || [], r = rows[S.cursor];
+    if (e.key === "ArrowDown" || e.key === "j"){ S.cursor = Math.min(rows.length-1, S.cursor+1); render(); e.preventDefault(); return; }
+    if (e.key === "ArrowUp" || e.key === "k"){ S.cursor = Math.max(0, S.cursor-1); render(); e.preventDefault(); return; }
+    if (v === "T3" && e.key === "Tab"){ S.tab += e.shiftKey ? -1 : 1; S.cursor = 0; render(); e.preventDefault(); return; }
+    if (v === "T1" && r && r.k && (e.key === "ArrowLeft" || e.key === "ArrowRight")){ S.fold[r.k] = e.key === "ArrowRight"; render(); e.preventDefault(); return; }
+    if (r && r.lane && (e.key === " " || /^[1-4]$/.test(e.key))){ if (e.key === " ") S.carried[r.lane] = !S.carried[r.lane]; else setTier([r.lane], +e.key); render(); e.preventDefault(); return; }
+    if (e.key === "h"){ D.harnesses.forEach(x => S.harness[x] = !used.has(x) ? !S.harness[x] : S.harness[x]); render(); return; }
+  } else if (S.sel.size && (/^[1-4]$/.test(e.key) || e.key === "o")){
+    const t = e.key === "o" ? "o" : +e.key; if (v === "B" && t !== "o") S.sel.forEach(n => S.pin[n] = true); setTier([...S.sel], t); return;
+  }
+  if (e.key === "ArrowLeft" && !(v === "T1")) go(-1);
+  if (e.key === "ArrowRight" && !(v === "T1")) go(1);
+});
+render();
+})();
+</script>
+</body>
+</html>
