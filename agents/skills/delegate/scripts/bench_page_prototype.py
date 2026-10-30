@@ -32,6 +32,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config-dir", default="~/.config/delegate")
     parser.add_argument("--out", default="~/.cache/delegate/bench-prototype.html")
+    parser.add_argument("--template", default=TEMPLATE, help="the page to fill (its /*DATA*/null)")
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args(argv)
     config_dir = os.path.expanduser(args.config_dir)
@@ -48,7 +49,7 @@ def main(argv=None):
     installed = sorted(h for h, d in ((discovery or {}).get("harnesses") or {}).items()
                        if isinstance(d, dict) and d.get("installed", d.get("found")))
     data["installed"] = installed
-    with open(TEMPLATE, encoding="utf-8") as f:
+    with open(args.template, encoding="utf-8") as f:
         page = f.read().replace("/*DATA*/null", bench_page._json_for_script(data))
     out = os.path.expanduser(args.out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
