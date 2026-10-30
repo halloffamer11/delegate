@@ -1,0 +1,1241 @@
+<!doctype html>
+<!-- PROTOTYPE, round 2, throwaway. Tier selection: a score-against-cost plot beside a
+     resizable matrix panel (models x efforts), and a mock of the 80-column TUI tier screen.
+     ?view=page (default) or ?view=tui; ?theme=dark starts in the dark theme.
+     Tiers live in memory only; only the panel width is kept, in localStorage.
+     bench_page_prototype.py --template fills the data script near the end. -->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tier selection · prototype r2</title>
+<style>
+/* Colour system: hue says the harness (lines, rings, rails); lightness and a digit say
+   the tier (an ink ramp, T4 darkest in light, lightest in dark). No red/yellow/green. */
+:root{
+  color-scheme:light;
+  --bg:#F6F5F1;--surface:#FFFFFF;--sunk:#EFEDE7;--ink:#1B1E24;--ink-2:#4A505B;--mute:#7E848E;--faint:#A9AEB6;
+  --line:#E4E1DA;--line-2:#CFCBC2;--grid:#E8E6E0;--rowlit:#E9ECF1;--rowwarm:#F2F3F6;
+  --t4:#1F2531;--t3:#4E5768;--t2:#9AA3B3;--t1:#DDE1E8;
+  --t4-fg:#FFFFFF;--t3-fg:#FFFFFF;--t2-fg:#111520;--t1-fg:#2A303B;
+  --h-agy:#6A4BC4;--h-claude:#B4542B;--h-codex:#1F5EB0;--h-grok:#565C69;--h-kiro:#16788F;--h-x:#7A7F88;
+  --term-bg:#FCFBF8;--term-fg:#1B1E24;--term-dim:#8A9099;
+  --shadow:0 1px 2px rgba(20,22,28,.06),0 6px 20px rgba(20,22,28,.08);
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --cw:27px;
+}
+:root[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#111317;--surface:#171A1F;--sunk:#1E2128;--ink:#E7E9ED;--ink-2:#B2B8C3;--mute:#808794;--faint:#5C6370;
+  --line:#262A32;--line-2:#383E49;--grid:#1D2128;--rowlit:#262B35;--rowwarm:#1D2129;
+  --t4:#EEF1F6;--t3:#B1B9C7;--t2:#646D80;--t1:#333945;
+  --t4-fg:#101318;--t3-fg:#101318;--t2-fg:#F5F7FA;--t1-fg:#CBD0D9;
+  --h-agy:#A994F4;--h-claude:#EC9871;--h-codex:#72A9F4;--h-grok:#B4B9C5;--h-kiro:#5DC2D6;--h-x:#9AA0AA;
+  --term-bg:#0E1013;--term-fg:#DCDFE5;--term-dim:#7B828D;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit}
+code{font-family:var(--mono);font-size:.92em}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.mute{color:var(--mute)}
+.hx{--hc:var(--h-x)}.h-agy{--hc:var(--h-agy)}.h-claude{--hc:var(--h-claude)}.h-codex{--hc:var(--h-codex)}.h-grok{--hc:var(--h-grok)}.h-kiro{--hc:var(--h-kiro)}
+
+/* header */
+.top{flex:none;display:flex;align-items:center;gap:18px;flex-wrap:wrap;min-height:50px;padding:9px 18px;background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.brand .logo{width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,var(--t4) 0 50%,var(--t2) 50% 100%);box-shadow:inset 0 0 0 1px var(--line-2)}
+.brand b{font-size:14px;font-weight:650;letter-spacing:-.01em}
+.brand .sub{color:var(--mute);font-size:12px}
+.seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--sunk);border:1px solid var(--line)}
+.seg button{border:0;background:none;padding:4px 14px;border-radius:6px;font-size:12px;color:var(--ink-2);cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08),0 0 0 1px var(--line)}
+.spacer{flex:1}
+.chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chips .lbl{font-size:10.5px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;margin-right:4px}
+.chip{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface);font-size:12px;cursor:pointer;color:var(--ink)}
+.chip .sw{width:12px;height:3px;border-radius:2px;background:var(--hc)}
+.chip[aria-pressed=false]{border-style:dashed;color:var(--mute);background:transparent}
+.chip[aria-pressed=false] .sw{background:transparent;box-shadow:inset 0 0 0 1px var(--hc);height:5px}
+.chip[aria-pressed=false]::before{content:"+";margin-right:-3px}
+.chip:hover{border-color:var(--ink-2)}
+body[data-view=tui] .chips{display:none}
+.ghost{height:28px;padding:0 11px;border-radius:7px;border:1px solid var(--line-2);background:var(--surface);cursor:pointer;font-size:12px;color:var(--ink)}
+.ghost:hover:not(:disabled){border-color:var(--ink-2)}
+.ghost:disabled{opacity:.45;cursor:default}
+.ghost.small{height:24px;padding:0 9px;font-size:11.5px}
+
+/* page layout: main column, drag handle, side panel */
+.layout{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 11px var(--pw,360px);grid-template-rows:minmax(0,1fr)}
+.main{min-width:0;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:2px 22px 20px}
+.handle{position:relative;cursor:col-resize;touch-action:none;outline:none}
+.handle::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:1px;background:var(--line);transition:background .15s}
+.handle::after{content:"";position:absolute;top:50%;left:3px;width:5px;height:34px;margin-top:-17px;border-radius:3px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);opacity:0;transition:opacity .15s}
+.handle:hover::before,.handle:focus-visible::before,body.resizing .handle::before{background:var(--ink-2)}
+.handle:hover::after,.handle:focus-visible::after,body.resizing .handle::after{opacity:1}
+body.resizing{cursor:col-resize;user-select:none}
+
+/* board tabs and caption */
+.tabs{flex:none;display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.tab{border:0;background:none;padding:11px 12px 9px;margin-bottom:-1px;border-bottom:2px solid transparent;font-size:12.5px;color:var(--mute);white-space:nowrap;cursor:pointer}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+.tab .tag{margin-left:6px;padding:1px 5px;border-radius:4px;background:var(--sunk);color:var(--mute);font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;vertical-align:1px}
+.cap{flex:none;display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;padding:10px 0 0}
+.cap .src{font-size:12px;color:var(--mute)}
+.cap .src b{color:var(--ink);font-weight:600}
+.legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-left:auto;font-size:11.5px;color:var(--mute)}
+.legend>span{display:inline-flex;align-items:center;gap:3px}
+.legend svg{display:block}
+.legend .dot{cursor:default}
+.switch{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-2);cursor:pointer;user-select:none}
+.switch input{appearance:none;-webkit-appearance:none;position:relative;width:26px;height:15px;margin:0;border-radius:999px;background:var(--line-2);cursor:pointer;transition:background .15s}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:var(--surface);box-shadow:0 1px 1px rgba(0,0,0,.25);transition:transform .15s}
+.switch input:checked{background:var(--ink-2)}
+.switch input:checked::after{transform:translateX(11px)}
+
+/* plot */
+.plotbox{position:relative;flex:1 1 auto;min-height:380px;margin-top:2px}
+svg.plot{position:absolute;inset:0;display:block;overflow:visible;font-family:var(--sans)}
+.plot-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:var(--mute)}
+.grid line{stroke:var(--grid)}
+.axis text{font-size:10.5px;fill:var(--mute);font-variant-numeric:tabular-nums}
+.axis .ttl{font-size:11px;fill:var(--ink-2);font-weight:500}
+.axis .base{stroke:var(--line-2)}
+.line{fill:none;stroke:var(--hc);stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round;transition:opacity .15s,stroke-width .15s}
+.hit{fill:none;stroke:transparent;stroke-width:12;pointer-events:stroke}
+.dot{transform-box:fill-box;transform-origin:center;transition:transform .14s ease,opacity .15s}
+.dot.lane{cursor:pointer}
+.dot .c{stroke:var(--hc);stroke-width:2}
+.dot.t0 .c{fill:var(--surface);stroke-width:1.6}
+.dot.t1 .c{fill:var(--t1)}.dot.t2 .c{fill:var(--t2)}.dot.t3 .c{fill:var(--t3)}.dot.t4 .c{fill:var(--t4)}
+.dot .dg{font-size:9px;font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.dot.t1 .dg{fill:var(--t1-fg)}.dot.t2 .dg{fill:var(--t2-fg)}.dot.t3 .dg{fill:var(--t3-fg)}.dot.t4 .dg{fill:var(--t4-fg)}
+.dot.oo .c{fill:var(--surface);stroke-width:1.2;stroke-dasharray:2 1.7}
+.dot.cmp path{fill:none;stroke:var(--faint);stroke-width:1.6;stroke-linecap:round}
+.dot.cmp .hitc{fill:transparent;stroke:none}
+.elbl{font-size:9.5px;font-weight:600;fill:var(--ink-2);pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round;transition:opacity .15s}
+.elbl.off,.elbl.oo{fill:var(--mute);font-weight:500}
+.nlbl{font-size:11px;font-weight:650;fill:var(--hc);pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3.5px;stroke-linejoin:round;transition:opacity .15s}
+.plot.focus .line{opacity:.1}.plot.focus .line.warm{opacity:.45}.plot.focus .line.hot{opacity:1;stroke-width:3}
+.plot.focus .dot{opacity:.16}.plot.focus .dot.hot{opacity:1}
+.lead{stroke:var(--hc);stroke-width:.9;opacity:.55;transition:opacity .15s}
+.plot.focus .lead{opacity:.08}.plot.focus .lead.hot,.plot.focus .lead.warm{opacity:.9}
+.plot.focus .elbl,.plot.focus .nlbl{opacity:.12}
+.plot.focus .elbl.hot,.plot.focus .nlbl.hot,.plot.focus .nlbl.warm{opacity:1}
+.dot.grow{transform:scale(1.7)}
+.tip{position:absolute;z-index:6;pointer-events:none;min-width:190px;max-width:320px;padding:8px 11px 9px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface);box-shadow:var(--shadow);font-size:12px;line-height:1.45}
+.tip .tl{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:3px;font:600 11.5px/1.3 var(--mono)}
+.tip .sub{color:var(--ink-2)}
+.tip .hint{margin-top:4px;color:var(--mute);font-size:11px}
+
+/* tier marks, shared by panel cells, strip chips, counts and tooltips */
+.mk{position:relative;display:inline-flex;align-items:center;justify-content:center;width:23px;height:18px;border-radius:4px;font-size:10px;font-weight:650;letter-spacing:-.01em;font-variant-numeric:tabular-nums;transition:box-shadow .1s}
+[data-t="4"]>.mk{background:var(--t4);color:var(--t4-fg)}
+[data-t="3"]>.mk{background:var(--t3);color:var(--t3-fg)}
+[data-t="2"]>.mk{background:var(--t2);color:var(--t2-fg)}
+[data-t="1"]>.mk{background:var(--t1);color:var(--t1-fg)}
+[data-t="0"]>.mk{border:1px dashed var(--line-2);color:var(--mute);font-weight:500}
+.ultra[data-t="0"]>.mk{border-style:solid;border-color:var(--line);background:repeating-linear-gradient(135deg,transparent 0 3px,var(--line) 3px 4px)}
+.chg>.mk::after{content:"";position:absolute;top:-3px;right:-3px;width:6px;height:6px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 1.5px var(--surface)}
+.mk.bump{animation:bump .24s ease-out}
+@keyframes bump{40%{transform:scale(1.22)}}
+
+/* side panel: the TUI matrix */
+.panel{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--surface)}
+.phead{flex:none;padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+.ptitle{display:flex;align-items:baseline;gap:8px;white-space:nowrap;overflow:hidden}
+.ptitle b{font-size:13px;font-weight:650}
+.ptitle .mute{font-size:11.5px;overflow:hidden;text-overflow:ellipsis}
+.pbody{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding-bottom:12px}
+.cols,.mrow{display:grid;grid-template-columns:minmax(0,1fr) repeat(7,var(--cw));align-items:center}
+.cols{position:sticky;top:0;z-index:2;height:28px;padding:0 14px 0 26px;background:var(--surface);border-bottom:1px solid var(--line)}
+.cols span{text-align:center;font-size:10.5px;font-weight:650;color:var(--mute);letter-spacing:.03em}
+.cols span:first-child{text-align:left;font-weight:500;letter-spacing:0}
+.hhead{display:flex;align-items:center;gap:7px;height:30px;margin-top:4px;padding:0 14px 0 8px;font-size:12px;cursor:pointer;user-select:none}
+.hhead:hover,.hhead.lit{background:var(--rowlit)}
+.hhead .fold{width:14px;text-align:center;font-size:9px;color:var(--mute);transition:transform .15s}
+.hgrp.folded .fold{transform:rotate(-90deg)}
+.hhead .sw{width:14px;height:3px;border-radius:2px;background:var(--hc)}
+.hhead b{font-weight:650}
+.hhead .hmeta{margin-left:auto;font-size:11px;color:var(--mute);font-variant-numeric:tabular-nums}
+.hrows{margin:0 0 4px 14px;border-left:2px solid var(--line-2);border-left-color:color-mix(in srgb,var(--hc) 60%,transparent)}
+.hgrp.folded .hrows{display:none}
+.mrow{height:26px;padding:0 14px 0 10px}
+.mrow.warm{background:var(--rowwarm)}
+.mrow:hover,.mrow.lit{background:var(--rowlit)}
+.mname{min-width:0;padding-right:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px}
+.cell{height:26px;display:flex;align-items:center;justify-content:center;padding:0;border:0;background:none;cursor:pointer}
+.cell:focus-visible{outline:none}
+.cell.gap{cursor:default}
+.cell.gap>.mk{width:auto;color:var(--mute);font-size:12px;font-weight:400}
+.cell:not(.gap):hover>.mk{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--ink-2)}
+.cell.lit>.mk,.cell:focus-visible>.mk{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--ink)}
+.cell.gap.oo.lit>.mk{box-shadow:none;color:var(--ink);font-weight:700}
+.pfoot{flex:none;display:flex;flex-direction:column;gap:7px;padding:9px 14px 11px;border-top:1px solid var(--line)}
+.counts{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.counts .c{display:inline-flex;align-items:center;gap:4px}
+.counts .chgn{margin-left:auto;color:var(--mute)}
+.marks{display:flex;gap:4px 12px;flex-wrap:wrap;font-size:11px;color:var(--mute)}
+.marks span{display:inline-flex;align-items:center;gap:4px}
+.marks .dotc{width:6px;height:6px;border-radius:50%;background:var(--ink)}
+.marks .hatch{width:14px;height:10px;border-radius:2px;border:1px solid var(--line);background:repeating-linear-gradient(135deg,transparent 0 3px,var(--line) 3px 4px)}
+.insp{min-height:18px;font-size:11.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.insp code{color:var(--ink)}
+kbd{display:inline-block;min-width:15px;padding:1px 4px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;background:var(--surface);color:var(--ink-2);font:600 10px/1.2 var(--mono);text-align:center}
+
+/* not measured here */
+.strip{flex:none;margin-top:6px;padding-top:10px;border-top:1px solid var(--line)}
+.strip .sh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:7px}
+.strip .sh b{font-size:10.5px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.strip .sh span{font-size:11.5px;color:var(--mute)}
+.sgrps{display:flex;flex-wrap:wrap;gap:4px 16px}
+.sgrp{display:inline-flex;align-items:center;gap:2px;padding:2px 5px;border-radius:6px;font-size:12px}
+.sgrp.lit{background:var(--rowlit)}
+.sgrp .sw{width:10px;height:3px;margin-right:4px;border-radius:2px;background:var(--hc)}
+.sgrp .sn{margin-right:4px}
+.schip{display:inline-flex;align-items:center;gap:3px;padding:2px;border:0;border-radius:5px;background:none;cursor:pointer}
+.schip .se{min-width:12px;text-align:right;font-size:10px;font-weight:650;color:var(--mute)}
+.schip:hover>.mk{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--ink-2)}
+.schip.lit>.mk{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--ink)}
+
+/* tier lines */
+details.lines{flex:none;margin-top:14px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+details.lines>summary{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 12px;list-style:none;cursor:pointer;font-size:12.5px}
+details.lines>summary::-webkit-details-marker{display:none}
+details.lines>summary::before{content:"▸";display:inline-block;font-size:10px;color:var(--mute);transition:transform .15s}
+details.lines[open]>summary::before{transform:rotate(90deg)}
+details.lines .sum{font-size:12px;color:var(--mute)}
+details.lines .acts{display:flex;gap:6px;margin-left:auto}
+details.lines .note{margin:0;padding:8px 14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--mute)}
+details.lines pre{margin:0;max-height:300px;overflow:auto;padding:4px 14px 12px;font:11.5px/1.55 var(--mono);color:var(--ink)}
+
+/* TUI mock */
+.tuiview{flex:1 1 auto;min-height:0;overflow:auto;display:flex;justify-content:center;padding:26px 20px 40px}
+.tuibox{display:flex;flex-direction:column;gap:12px;max-width:100%}
+.tuihead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.tuihead b{font-size:14px;font-weight:650}
+.tuihead span{font-size:12px;color:var(--mute)}
+.twin{overflow:hidden;border:1px solid var(--line-2);border-radius:10px;background:var(--term-bg);box-shadow:var(--shadow)}
+.tbar{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;background:var(--sunk);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)}
+.tbar i{width:10px;height:10px;border-radius:50%;background:var(--line-2)}
+.tbar span{margin-left:8px}
+.term{width:calc(80ch + 32px);margin:0;padding:12px 16px 14px;overflow-x:auto;outline:none;white-space:pre;font:13px/1.5 var(--mono);color:var(--term-fg)}
+.term .dim{color:var(--term-dim)}
+.term .b{font-weight:700}
+.term .here{background:var(--term-fg);color:var(--term-bg);font-weight:700}
+.term .rule{color:var(--line-2)}
+.term .hd{font-weight:700;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.term .hname{color:var(--hc);font-weight:700}
+.term .gut{color:var(--hc)}
+.term .k{cursor:pointer}
+.term .k.t3,.term .k.t4{font-weight:700}
+.term .k.t0,.term .k.oo{color:var(--term-dim)}
+.term .cur,.term .curcol{background:var(--term-fg);color:var(--term-bg)}
+.term .k.cur{font-weight:700}
+.term .key{font-weight:700}
+.term .msg{font-weight:700}
+.tuinote{max-width:calc(80ch * .62 + 32px);margin:0;font-size:12px;color:var(--mute)}
+
+.toast{position:fixed;left:50%;bottom:18px;z-index:50;padding:7px 12px;border-radius:7px;background:var(--ink);color:var(--surface);font-size:12px;opacity:0;pointer-events:none;transform:translate(-50%,8px);transition:opacity .15s,transform .15s}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.nodata{flex:1;display:flex;align-items:center;justify-content:center;padding:40px;color:var(--ink-2)}
+.nodata div{max-width:520px}
+</style>
+</head>
+<body data-view="page">
+<header class="top">
+  <div class="brand"><span class="logo" aria-hidden="true"></span><b>Tier selection</b><span class="sub">delegate · prototype r2</span></div>
+  <div class="seg" id="viewSeg" role="group" aria-label="View">
+    <button type="button" data-view="page" aria-pressed="true">Page</button>
+    <button type="button" data-view="tui" aria-pressed="false">TUI</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips" role="group" aria-label="Harnesses"></div>
+  <button type="button" class="ghost" id="theme">◐ Dark</button>
+</header>
+
+<div class="layout" id="page">
+  <main class="main">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Boards"></nav>
+    <div class="cap">
+      <div class="src" id="src"></div>
+      <div class="legend" id="legend"></div>
+      <label class="switch"><input type="checkbox" id="comps"> other models</label>
+    </div>
+    <div class="plotbox" id="plotbox"><div class="tip" id="tip" hidden></div></div>
+    <section class="strip" id="strip" aria-label="Not measured here"></section>
+    <details class="lines" id="lines">
+      <summary><b>Tier lines</b><span class="sum" id="linesSum"></span><span class="acts"><button type="button" class="ghost small" id="copy">Copy</button><button type="button" class="ghost small" id="reset">Reset to catalog</button></span></summary>
+      <p class="note">What the review page's <code>v</code> pastes: <code>&lt;lane&gt; &lt;1-4|off&gt;</code>, one per line, placed lanes first. Every lane is named, because the review page turns off a carried lane that no line names.</p>
+      <pre id="linesText"></pre>
+    </details>
+  </main>
+  <div class="handle" id="handle" role="separator" aria-orientation="vertical" aria-label="Resize the tier panel" tabindex="0" title="Drag to resize · double-click to reset"></div>
+  <aside class="panel" id="panel" aria-label="Tiers">
+    <div class="phead"><div class="ptitle"><b>Tiers</b><span class="mute">models × efforts · dearest model first</span></div></div>
+    <div class="pbody" id="pbody"></div>
+    <div class="pfoot">
+      <div class="counts" id="counts"></div>
+      <div class="marks" id="marks"></div>
+      <div class="insp" id="insp"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="tuiview" id="tuiview" hidden>
+  <div class="tuibox">
+    <div class="tuihead"><b>TUI mock</b><span>the tier screen at 80 columns · keyboard only · shares its tiers with the page</span></div>
+    <div class="twin"><div class="tbar"><i></i><i></i><i></i><span>delegate setup — tiers</span></div><div class="term" id="term" tabindex="0" aria-label="TUI tier screen mock"></div></div>
+    <p class="tuinote">↑/↓ or j/k move between models, ←/→ between efforts. 1–4 set the tier, 0 turns the lane off, h shows the harnesses with no lane on. A click moves the cursor.</p>
+  </div>
+</div>
+
+<div class="nodata" id="nodata" hidden><div><b>No catalog data in this file.</b><p>This is the template. Fill it with <code>bench_page_prototype.py --template &lt;this file&gt; --out &lt;page&gt;</code> and open the page it writes.</p></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="application/json" id="data">/*DATA*/null</script>
+<script>
+(function () {
+  "use strict";
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  function el(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") e.className = v; else e.setAttribute(k, v === true ? "" : String(v));
+    }
+    for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+    return e;
+  }
+  const NS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) if (v != null) e.setAttribute(k, String(v));
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+  const trunc = (s, n) => { const a = Array.from(String(s)); return a.length > n ? a.slice(0, n - 1).join("") + "…" : a.join(""); };
+  const cap1 = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+
+  const Q = new URLSearchParams(location.search);
+  const root = document.documentElement;
+  function setTheme(dark) { root.dataset.theme = dark ? "dark" : "light"; $("#theme").textContent = dark ? "◑ Light" : "◐ Dark"; }
+  setTheme(Q.get("theme") === "dark");
+  $("#theme").addEventListener("click", () => setTheme(root.dataset.theme !== "dark"));
+
+  let D = null;
+  try { D = JSON.parse($("#data").textContent); } catch (_) { D = null; }
+  if (!D || !Array.isArray(D.boards) || !D.boards.length || !Array.isArray(D.lanes) || !D.lanes.length) {
+    $("#page").hidden = true; $("#tuiview").hidden = true; $("#viewSeg").hidden = true; $("#nodata").hidden = false;
+    return;
+  }
+
+  // ---------- data ----------
+  const EFF = ["none", "low", "medium", "high", "xhigh", "max", "ultra"];
+  const EAB = {none: "n", low: "L", medium: "M", high: "H", xhigh: "XH", max: "MX", ultra: "U"};
+  const ei = e => { const i = EFF.indexOf(e); return i < 0 ? 99 : i; };
+  const baseModel = m => String(m == null ? "" : m).replace(/-(none|minimal|low|medium|high|xhigh|max|ultra)$/, "");
+  const plottable = p => !!p && typeof p.score === "number" && isFinite(p.score) && typeof p.cost === "number" && isFinite(p.cost) && p.cost > 0;
+  const hc = h => "hx h-" + String(h).replace(/[^A-Za-z0-9_-]/g, "_");
+  const BOARDS = D.boards;
+  const LANES = new Map(D.lanes.map(l => [l.name, l]));
+  const COMPOSITE = BOARDS.find(b => b.composite) || BOARDS[0];
+  const bName = b => b.benchmark || b.sourceName || b.id;
+  const costWord = b => /per task/.test(b.basis || "") ? "per task" : /whole run/.test(b.basis || "") ? "for the whole run" : "";
+
+  // Families, as in round 1: harness › model › effort. The model is the lane's `group`,
+  // not its `model`, so agy's effort-suffixed ids (<model>-high, -medium, -low) join
+  // into one row and one line.
+  const famKey = l => l.harness + "|" + (l.group || l.model);
+  function lanePoints(board) { const m = new Map(); board.points.forEach(p => (p.lanes || []).forEach(l => m.set(l.name, p))); return m; }
+  const FAM = new Map();
+  D.lanes.forEach(l => {
+    const k = famKey(l);
+    if (!FAM.has(k)) FAM.set(k, {key: k, harness: l.harness, group: l.group || l.model || "?", lanes: [], byEff: new Map()});
+    const f = FAM.get(k);
+    f.lanes.push(l);
+    if (!f.byEff.has(l.effort)) f.byEff.set(l.effort, l);
+  });
+  FAM.forEach(f => f.lanes.sort((a, b) => ei(a.effort) - ei(b.effort)));
+  const LANE_FAM = new Map();
+  FAM.forEach(f => f.lanes.forEach(l => LANE_FAM.set(l.name, f)));
+  // "measured but no lane": own_other points, by family and effort
+  function ownOthers(board) {
+    const m = new Map();
+    board.points.forEach(p => {
+      if (p.kind !== "own_other" || (p.lanes && p.lanes.length) || typeof p.score !== "number") return;
+      (p.harness || []).forEach(h => {
+        const f = FAM.get(h + "|" + baseModel(p.model));
+        if (!f || f.byEff.has(p.effort)) return;
+        if (!m.has(f.key)) m.set(f.key, new Map());
+        if (!m.get(f.key).has(p.effort)) m.get(f.key).set(p.effort, p);
+      });
+    });
+    return m;
+  }
+  function famPoints(f, lp, oo) {
+    const pts = [];
+    f.lanes.forEach(l => { const p = lp.get(l.name); if (plottable(p)) pts.push({lane: l, p}); });
+    (oo.get(f.key) || new Map()).forEach(p => { if (plottable(p)) pts.push({lane: null, p}); });
+    return pts.sort((a, b) => ei(a.p.effort) - ei(b.p.effort));
+  }
+  // Order inside a harness, from the data: geometric-mean cost per task of the model's
+  // points on the composite board, dearest first. A model with no points goes last.
+  (function () {
+    const lp = lanePoints(COMPOSITE), oo = ownOthers(COMPOSITE);
+    FAM.forEach(f => {
+      const cs = famPoints(f, lp, oo).map(x => x.p.cost);
+      f.nPts = cs.length;
+      f.geo = cs.length ? Math.exp(cs.reduce((a, c) => a + Math.log(c), 0) / cs.length) : null;
+    });
+  })();
+  const FAMS = (function () {
+    const byH = new Map();
+    [...FAM.values()].sort((a, b) => (a.geo == null) - (b.geo == null) || (b.geo || 0) - (a.geo || 0) || a.group.localeCompare(b.group))
+      .forEach(f => { if (!byH.has(f.harness)) byH.set(f.harness, []); byH.get(f.harness).push(f); });
+    return [...byH.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  })();
+  const ORDER = FAMS.flatMap(([, fs]) => fs.flatMap(f => f.lanes.slice().reverse().map(l => l.name)));
+  const GROUP_HS = new Map();
+  FAM.forEach(f => { if (!GROUP_HS.has(f.group)) GROUP_HS.set(f.group, new Set()); GROUP_HS.get(f.group).add(f.harness); });
+  const famLabel = f => GROUP_HS.get(f.group).size > 1 ? `${f.group} · ${f.harness}` : f.group;
+
+  // ---------- state: in memory, except the panel width ----------
+  const S = {
+    tier: {}, base: {}, on: {}, folded: {},
+    board: (D.defaults || []).find(id => BOARDS.some(b => b.id === id)) || BOARDS[0].id,
+    comps: false, view: "page", hot: null, keyLane: null, tipFor: null, pw: 360,
+    tui: {row: 0, col: 3, showAll: false, msg: ""},
+  };
+  D.lanes.forEach(l => {
+    const t = l.carried && l.effort !== "ultra" ? (Number.isInteger(l.tier) && l.tier >= 1 && l.tier <= 4 ? l.tier : 1) : 0;
+    S.tier[l.name] = S.base[l.name] = t;
+  });
+  const USED = new Set(D.lanes.filter(l => l.carried).map(l => l.harness));
+  FAMS.forEach(([h]) => { S.on[h] = USED.size ? USED.has(h) : true; });
+  const curBoard = () => BOARDS.find(b => b.id === S.board) || BOARDS[0];
+  const tierWord = t => t ? "T" + t : "off";
+
+  // ---------- formatting ----------
+  function fmtMoney(v) {
+    if (v == null || !isFinite(v)) return "—";
+    const a = Math.abs(v);
+    if (a >= 100) return "$" + Math.round(v).toLocaleString("en-US");
+    if (a >= 10) return "$" + v.toFixed(1);
+    if (a >= 0.1) return "$" + v.toFixed(2);
+    if (a >= 0.01) return "$" + v.toFixed(3);
+    return "$" + v.toPrecision(2);
+  }
+  function fmtTick(v) {
+    if (v >= 1000) return "$" + +(v / 1000).toPrecision(3) + "k";
+    if (v >= 1) return "$" + +v.toPrecision(6);
+    return "$" + v.toFixed(Math.max(0, -Math.floor(Math.log10(v) + 1e-9)));
+  }
+  // a board that scores fractions of 1 needs two decimals to tell its points apart
+  const fracBoard = new Map(BOARDS.map(b => [b.id, b.points.every(p => typeof p.score !== "number" || Math.abs(p.score) < 2)]));
+  function fmtScore(v, unit, dec) {
+    if (v == null || !isFinite(v)) return "—";
+    const s = v.toFixed(dec != null ? dec : fracBoard.get(S.board) ? 2 : 1);
+    return unit === "%" ? s + "%" : s;
+  }
+  function niceTicks(lo, hi, n) {
+    const raw = (hi - lo || 1) / Math.max(1, n), mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag;
+    const step = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * mag, ticks = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) ticks.push(+v.toFixed(10));
+    return {ticks, step};
+  }
+  function logTicks(lo, hi) {
+    let out = [];
+    for (const ms of [[1, 2, 5], [1, 3], [1]]) {
+      out = [];
+      for (let e = Math.floor(lo) - 1; e <= Math.ceil(hi); e++) for (const m of ms) {
+        const v = +(m * Math.pow(10, e)).toPrecision(6), lv = Math.log10(v);
+        if (lv >= lo && lv <= hi) out.push(v);
+      }
+      if (out.length <= 8) break;
+    }
+    return out;
+  }
+  const MCTX = document.createElement("canvas").getContext("2d");
+  const SANS = getComputedStyle(root).getPropertyValue("--sans").trim() || "sans-serif";
+  function textW(t, px, weight) {
+    if (!MCTX) return Array.from(t).length * px * .62;
+    MCTX.font = `${weight} ${px}px ${SANS}`;
+    return MCTX.measureText(t).width;
+  }
+
+  // ---------- tiers ----------
+  function setTier(n, t, quiet) {
+    const l = LANES.get(n);
+    if (!l) return "none";
+    if (t > 0 && l.effort === "ultra") { if (!quiet) toast(`${n}: an ultra lane is never carried, so it stays off.`); bump(n); return "ultra"; }
+    if ((S.tier[n] || 0) !== t) { S.tier[n] = t; repaint(); }
+    bump(n);
+    return "ok";
+  }
+  const cycle = (n, dir) => setTier(n, ((S.tier[n] || 0) + (dir < 0 ? 4 : 1)) % 5);
+  function repaint() {
+    paintDots(); paintPanel(); paintStrip(); paintLines(); inspect();
+    if (S.tipFor && !$("#tip").hidden) S.tipFor();
+    if (S.view === "tui") renderTUI();
+  }
+  function bump(n) {
+    [CELL.get(n), SCHIP.get(n)].forEach(c => {
+      const m = c && c.querySelector(".mk");
+      if (!m) return;
+      m.classList.remove("bump"); void m.offsetWidth; m.classList.add("bump");
+    });
+  }
+  let toastT = 0;
+  function toast(msg) {
+    const t = $("#toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2400);
+  }
+  function markEl(t, lane) {
+    return el("span", {"data-t": String(t), class: lane && lane.effort === "ultra" ? "ultra" : null}, el("span", {class: "mk"}, tierWord(t)));
+  }
+
+  // ---------- linked hover (round 1's wiring, by lane, model line and own_other key) ----------
+  function setHot(h) {
+    if (S.hot && h && S.hot.sig === h.sig) return;
+    S.hot = h; S.keyLane = (h && h.lane) || null;
+    applyHot();
+  }
+  function clearHot() {
+    if (S.hot) { S.hot = null; S.keyLane = null; applyHot(); }
+    hideTip();
+  }
+  function applyHot() {
+    const h = S.hot, fams = h && h.fams, lanes = h && h.lanes, oos = h && h.oos;
+    const warm = new Set();
+    if (lanes) lanes.forEach(n => { const f = LANE_FAM.get(n); if (f) warm.add(f.key); });
+    if (oos) oos.forEach(k => warm.add(k.slice(0, k.lastIndexOf("|"))));
+    const svg = PLOT.svg;
+    if (svg) {
+      let any = false;
+      const dots = $$(".dot", svg).map(d => {
+        const ln = d.dataset.lane, ok = d.dataset.oo, f = d.dataset.fam;
+        const direct = !!((lanes && ln && lanes.has(ln)) || (oos && ok && oos.has(ok)));
+        const hot = direct || !!(fams && f && fams.has(f));
+        any = any || hot;
+        return [d, hot, direct];
+      });
+      svg.classList.toggle("focus", any);
+      dots.forEach(([d, hot, direct]) => { d.classList.toggle("hot", hot); d.classList.toggle("grow", direct); });
+      $$(".line, .nlbl, .lead", svg).forEach(e => {
+        e.classList.toggle("hot", !!(fams && fams.has(e.dataset.fam)));
+        e.classList.toggle("warm", warm.has(e.dataset.fam));
+      });
+      $$(".elbl", svg).forEach(e => {
+        const ls = (e.dataset.lanes || "").split(" "), ok = e.dataset.oo;
+        e.classList.toggle("hot", !!((lanes && ls.some(n => lanes.has(n))) || (oos && ok && oos.has(ok)) || (fams && fams.has(e.dataset.fam))));
+      });
+    }
+    CELL.forEach((c, n) => c.classList.toggle("lit", !!(lanes && lanes.has(n))));
+    GAP.forEach(g => g.classList.toggle("lit", !!(oos && oos.has(g.dataset.ook))));
+    $$("#pbody .mrow").forEach(r => {
+      r.classList.toggle("lit", !!(fams && fams.has(r.dataset.fam)));
+      r.classList.toggle("warm", warm.has(r.dataset.fam));
+    });
+    $$("#pbody .hgrp").forEach(s => {
+      const folded = s.classList.contains("folded"), hh = s.dataset.h;
+      s.firstElementChild.classList.toggle("lit", !!(h && (h.harness === hh || (folded && [...warm].some(k => FAM.get(k).harness === hh)))));
+    });
+    SCHIP.forEach((c, n) => c.classList.toggle("lit", !!(lanes && lanes.has(n))));
+    $$("#strip .sgrp").forEach(g => g.classList.toggle("lit", !!(fams && fams.has(g.dataset.fam))));
+    inspect();
+  }
+  function revealCell(n) {
+    const c = CELL.get(n), sec = c && c.closest(".hgrp");
+    if (!sec || sec.hidden || sec.classList.contains("folded")) return;
+    const body = $("#pbody"), head = $(".cols", body), r = c.getBoundingClientRect(), b = body.getBoundingClientRect();
+    const top = b.top + (head ? head.offsetHeight : 0) + 6, bot = b.bottom - 6;
+    if (r.top < top) body.scrollTop -= top - r.top;
+    else if (r.bottom > bot) body.scrollTop += r.bottom - bot;
+  }
+
+  // ---------- plot ----------
+  const R_ON = 7.5, R_OFF = 4.5, R_OO = 3.5;
+  const PLOT = {svg: null};
+  let plotQueued = false;
+  function requestPlot() {
+    if (plotQueued) return;
+    plotQueued = true;
+    requestAnimationFrame(() => { plotQueued = false; if (S.view === "page") buildPlot(); });
+  }
+  function placer(bounds) {
+    const boxes = [];
+    const hit = (a, b) => a.x < b.x + b.w + 1 && b.x < a.x + a.w + 1 && a.y < b.y + b.h + 1 && b.y < a.y + a.h + 1;
+    const inside = c => c.x >= bounds.x && c.y >= bounds.y && c.x + c.w <= bounds.x + bounds.w && c.y + c.h <= bounds.y + bounds.h;
+    return {
+      block(b) { boxes.push(b); },
+      // the first free place, or null
+      free(cands) {
+        const c = cands.find(c => inside(c) && !boxes.some(b => hit(b, c)));
+        if (c) boxes.push(c);
+        return c || null;
+      },
+      // in a crowd: the place that covers the fewest others
+      least(cands) {
+        let best = null, fewest = Infinity;
+        for (const c of cands) {
+          if (!inside(c)) continue;
+          const n = boxes.reduce((a, b) => a + (hit(b, c) ? 1 : 0), 0);
+          if (n < fewest) { best = c; fewest = n; }
+        }
+        const c = best || cands[0];
+        boxes.push(c);
+        return c;
+      },
+      pick(cands) { return this.free(cands) || this.least(cands); },
+    };
+  }
+  const around = (cx, cy, r) => ({x: cx - r, y: cy - r, w: 2 * r, h: 2 * r});
+
+  function buildPlot() {
+    const box = $("#plotbox");
+    $$("svg.plot, .plot-empty", box).forEach(n => n.remove());
+    hideTip();
+    PLOT.svg = null;
+    const W = Math.floor(box.clientWidth), H = Math.floor(box.clientHeight);
+    if (W < 60 || H < 60) return;
+    const board = curBoard(), lp = lanePoints(board), oo = ownOthers(board);
+    const series = [];
+    FAMS.forEach(([h, fams]) => { if (S.on[h]) fams.forEach(f => { const pts = famPoints(f, lp, oo); if (pts.length) series.push({f, pts}); }); });
+    const comps = S.comps ? board.points.filter(p => p.kind === "comparator" && plottable(p)) : [];
+    const all = series.flatMap(s => s.pts.map(x => x.p)).concat(comps);
+    if (!all.length) {
+      box.append(el("div", {class: "plot-empty"}, `${bName(board)} has no plotted row for any lane of the shown harnesses. Their lanes are under “Not measured here”.`));
+      return;
+    }
+    const M = {l: 50, r: 16, t: 28, b: 44}, pw = W - M.l - M.r, ph = H - M.t - M.b;
+    const cs = all.map(p => p.cost), ss = all.map(p => p.score);
+    let x0 = Math.log10(Math.min(...cs)), x1 = Math.log10(Math.max(...cs));
+    const xp = Math.max(0.12, (x1 - x0) * 0.05); x0 -= xp; x1 += xp;
+    let y0 = Math.min(...ss), y1 = Math.max(...ss);
+    const yp = Math.max((y1 - y0) * 0.08, 1); y0 -= yp; y1 += yp;
+    const X = c => M.l + (Math.log10(c) - x0) / (x1 - x0) * pw;
+    const Y = s => M.t + ph - (s - y0) / (y1 - y0) * ph;
+    const svg = sv("svg", {class: "plot", width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
+      "aria-label": `${bName(board)}: score against ${board.basis || "cost"}, one line per model`});
+    const grid = sv("g", {class: "grid"}, svg), axis = sv("g", {class: "axis"}, svg);
+    logTicks(x0, x1).forEach(v => {
+      const x = X(v);
+      sv("line", {x1: x, x2: x, y1: M.t, y2: M.t + ph}, grid);
+      sv("text", {x, y: M.t + ph + 16, "text-anchor": "middle"}, axis).textContent = fmtTick(v);
+    });
+    const yt = niceTicks(y0, y1, Math.max(3, Math.round(ph / 64))), yd = Math.max(0, -Math.floor(Math.log10(yt.step) + 1e-9));
+    yt.ticks.forEach(v => {
+      const y = Y(v);
+      if (y < M.t - .5 || y > M.t + ph + .5) return;
+      sv("line", {x1: M.l, x2: M.l + pw, y1: y, y2: y}, grid);
+      sv("text", {x: M.l - 8, y: y + 3.5, "text-anchor": "end"}, axis).textContent = fmtScore(v, board.unit, yd);
+    });
+    sv("line", {class: "base", x1: M.l, x2: M.l + pw, y1: M.t + ph, y2: M.t + ph}, axis);
+    sv("text", {class: "ttl", x: 8, y: M.t - 13}, axis).textContent = `↑ ${bName(board)}${board.unit === "%" ? " (%)" : ""}`;
+    sv("text", {class: "ttl", x: M.l, y: H - 8}, axis).textContent = "← cheaper";
+    sv("text", {class: "ttl", x: M.l + pw, y: H - 8, "text-anchor": "end"}, axis).textContent = `${cap1(board.basis || "cost")}, USD, log scale`;
+
+    const linesG = sv("g", {class: "lines"}, svg), dotsG = sv("g", {class: "dots"}, svg), lblG = sv("g", {class: "labels"}, svg);
+    const P = placer({x: 2, y: 2, w: W - 4, h: M.t + ph - 2});
+    const efforts = [], names = [];
+    series.forEach(s => {
+      const f = s.f, cls = hc(f.harness), xy = s.pts.map(x => [X(x.p.cost), Y(x.p.score)]);
+      if (xy.length > 1) {
+        const pts = xy.map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ");
+        sv("polyline", {class: "line " + cls, points: pts, "data-fam": f.key}, linesG);
+        const hit = sv("polyline", {class: "hit", points: pts}, linesG);
+        hit.addEventListener("mouseenter", () => setHot({fams: new Set([f.key]), sig: "line:" + f.key}));
+        hit.addEventListener("mouseleave", clearHot);
+      }
+      s.pts.forEach((x, i) => {
+        const [cx, cy] = xy[i], text = EAB[x.p.effort] || x.p.effort;
+        if (x.lane) {
+          const n = x.lane.name, d = sv("g", {class: "dot lane " + cls, "data-lane": n, "data-fam": f.key}, dotsG);
+          sv("circle", {class: "c", cx: cx.toFixed(1), cy: cy.toFixed(1), r: R_ON}, d);
+          sv("text", {class: "dg", x: cx.toFixed(1), y: (cy + .5).toFixed(1)}, d);
+          d.addEventListener("mouseenter", () => dotEnter(n, x.p, f, cx, cy));
+          d.addEventListener("mouseleave", clearHot);
+          d.addEventListener("click", e => cycle(n, e.shiftKey ? -1 : 1));
+          P.block(around(cx, cy, R_ON));
+          efforts.push({cx, cy, r: R_ON, text, fam: f.key, lane: n});
+        } else {
+          const k = f.key + "|" + x.p.effort, d = sv("g", {class: "dot oo " + cls, "data-oo": k, "data-fam": f.key}, dotsG);
+          sv("circle", {class: "c", cx: cx.toFixed(1), cy: cy.toFixed(1), r: R_OO}, d);
+          d.addEventListener("mouseenter", () => {
+            setHot({oos: new Set([k]), sig: "oo:" + k});
+            S.tipFor = () => tipOO(f, x.p); S.tipFor(); placeTip(cx, cy);
+          });
+          d.addEventListener("mouseleave", clearHot);
+          P.block(around(cx, cy, R_OO));
+          efforts.push({cx, cy, r: R_OO + 1, text, fam: f.key, oo: k});
+        }
+      });
+      const [lx, ly] = xy[xy.length - 1];
+      names.push({cx: lx, cy: ly, r: R_ON, text: famLabel(f), fam: f.key, cls});
+    });
+    comps.forEach(p => {
+      const cx = X(p.cost), cy = Y(p.score), d = sv("g", {class: "dot cmp"}, dotsG);
+      sv("circle", {class: "hitc", cx, cy, r: 6}, d);
+      sv("path", {d: `M${cx - 3},${cy - 3}L${cx + 3},${cy + 3}M${cx - 3},${cy + 3}L${cx + 3},${cy - 3}`}, d);
+      d.addEventListener("mouseenter", () => { S.tipFor = () => tipCmp(p); S.tipFor(); placeTip(cx, cy); });
+      d.addEventListener("mouseleave", hideTip);
+      P.block(around(cx, cy, 3.5));
+    });
+    // every dot gets its effort, then every line its model, at its last effort
+    const seen = new Map();
+    efforts.forEach(it => {
+      const key = Math.round(it.cx) + "," + Math.round(it.cy) + "," + it.text;
+      if (seen.has(key)) { const t = seen.get(key); if (it.lane) t.dataset.lanes = (t.dataset.lanes ? t.dataset.lanes + " " : "") + it.lane; return; }
+      const w = textW(it.text, 9.5, 600), h = 7, r = it.r, g = 2.5;
+      const c = P.pick([
+        [it.cx + r + g, it.cy - h / 2, "start"], [it.cx - r - g - w, it.cy - h / 2, "end"],
+        [it.cx + r * .75, it.cy - r - h, "start"], [it.cx + r * .75, it.cy + r, "start"],
+        [it.cx - r * .75 - w, it.cy - r - h, "end"], [it.cx - r * .75 - w, it.cy + r, "end"],
+        [it.cx - w / 2, it.cy - r - g - h, "middle"], [it.cx - w / 2, it.cy + r + g, "middle"],
+        [it.cx + r + g + 7, it.cy - h / 2, "start"], [it.cx - r - g - 7 - w, it.cy - h / 2, "end"],
+        [it.cx - w / 2, it.cy - r - g - h - 7, "middle"], [it.cx - w / 2, it.cy + r + g + 7, "middle"],
+      ].map(([x, y, a]) => ({x, y, w, h, a})));
+      const tx = c.a === "start" ? c.x : c.a === "end" ? c.x + w : c.x + w / 2;
+      const t = sv("text", {class: "elbl" + (it.oo ? " oo" : ""), x: tx.toFixed(1), y: (c.y + h).toFixed(1), "text-anchor": c.a, "data-fam": it.fam}, lblG);
+      if (it.lane) t.dataset.lanes = it.lane;
+      if (it.oo) t.dataset.oo = it.oo;
+      t.textContent = it.text;
+      seen.set(key, t);
+    });
+    // a model name sits by its line's last dot; in a crowd it moves out on a leader line
+    const leadG = sv("g", {class: "leads"});
+    lblG.parentNode.insertBefore(leadG, lblG);
+    names.forEach(it => {
+      const w = textW(it.text, 11, 650), h = 8, r = it.r, box = ([x, y]) => ({x, y, w, h: h + 3});
+      const near = [
+        [it.cx + r + 2, it.cy - r - h - 2], [it.cx - w / 2, it.cy - r - h - 6], [it.cx - r - 2 - w, it.cy - r - h - 2],
+        [it.cx + r + 24, it.cy - h / 2], [it.cx + r + 2, it.cy + r + 3], [it.cx - r - 2 - w, it.cy + r + 3],
+        [it.cx - r - 26 - w, it.cy - h / 2], [it.cx + r + 2, it.cy - r - 2 * h - 9], [it.cx - w / 2, it.cy + r + h + 7],
+        [it.cx - r - 2 - w, it.cy - r - 2 * h - 9],
+      ].map(box);
+      const far = [];
+      [34, 52, 72].forEach(dist => [[1, -1], [0, -1], [-1, -1], [1, 0], [-1, 0], [1, 1], [0, 1], [-1, 1]].forEach(([dx, dy]) => {
+        const ax = it.cx + dx * dist, ay = it.cy + dy * dist * .7;
+        far.push(box([dx > 0 ? ax : dx < 0 ? ax - w : ax - w / 2, dy < 0 ? ay - h - 3 : dy > 0 ? ay : ay - h / 2]));
+      }));
+      let c = P.free(near), led = false;
+      if (!c) { c = P.free(far); led = !!c; }
+      if (!c) c = P.least(near);
+      if (led) {
+        const tx = Math.max(c.x, Math.min(c.x + c.w, it.cx)), ty = Math.max(c.y, Math.min(c.y + c.h, it.cy));
+        const a = Math.atan2(ty - it.cy, tx - it.cx);
+        sv("line", {class: "lead " + it.cls, x1: (it.cx + Math.cos(a) * (r + 1.5)).toFixed(1), y1: (it.cy + Math.sin(a) * (r + 1.5)).toFixed(1),
+          x2: tx.toFixed(1), y2: ty.toFixed(1), "data-fam": it.fam}, leadG);
+      }
+      sv("text", {class: "nlbl " + it.cls, x: c.x.toFixed(1), y: (c.y + h).toFixed(1), "data-fam": it.fam}, lblG).textContent = it.text;
+    });
+    box.insertBefore(svg, box.firstChild);
+    PLOT.svg = svg;
+    paintDots();
+    applyHot();
+  }
+  // tier-dependent marks, painted in place so a tier change never moves a label
+  function paintDots() {
+    const svg = PLOT.svg;
+    if (!svg) return;
+    const layer = $(".dots", svg);
+    $$(".dot.lane", layer).forEach(d => {
+      const t = S.tier[d.dataset.lane] || 0;
+      for (let i = 0; i <= 4; i++) d.classList.toggle("t" + i, i === t);
+      d.firstChild.setAttribute("r", t ? R_ON : R_OFF);
+      d.lastChild.textContent = t ? String(t) : "";
+    });
+    $$(".elbl[data-lanes]", svg).forEach(e => e.classList.toggle("off", e.dataset.lanes.split(" ").every(n => !(S.tier[n] > 0))));
+    const z = d => d.classList.contains("cmp") ? 0 : d.classList.contains("oo") ? 1 : 2 + (S.tier[d.dataset.lane] || 0);
+    $$(".dot", layer).map((d, i) => [d, z(d), i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).forEach(([d]) => layer.appendChild(d));
+  }
+  function dotEnter(n, p, f, cx, cy) {
+    const ls = new Set([n]);
+    (p.lanes || []).forEach(q => { const l = LANES.get(q.name); if (l && S.on[l.harness]) ls.add(q.name); });
+    setHot({lanes: ls, lane: n, sig: "dot:" + n});
+    revealCell(n);
+    S.tipFor = () => tipLane(n, p, f);
+    S.tipFor();
+    placeTip(cx, cy);
+  }
+
+  // ---------- tooltip ----------
+  const tip = $("#tip");
+  function hideTip() { tip.hidden = true; S.tipFor = null; }
+  function placeTip(x, y) {
+    const box = $("#plotbox");
+    tip.hidden = false;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = x + 16, top = y - th - 12;
+    if (left + tw > box.clientWidth - 4) left = x - tw - 16;
+    if (top < 4) top = y + 16;
+    tip.style.left = Math.max(4, left) + "px";
+    tip.style.top = Math.max(4, Math.min(box.clientHeight - th - 4, top)) + "px";
+  }
+  function tipLane(n, p, f) {
+    const board = curBoard(), t = S.tier[n] || 0;
+    tip.textContent = "";
+    tip.append(el("div", {class: "tl"}, el("span", {}, n), markEl(t, LANES.get(n))));
+    tip.append(el("div", {class: "sub"}, `${f.group} · ${p.effort} · ${f.harness}`));
+    tip.append(el("div", {}, `${fmtScore(p.score, board.unit)} at ${fmtMoney(p.cost)} ${costWord(board)}`));
+    const others = (p.lanes || []).map(q => q.name).filter(x => x !== n && LANES.has(x));
+    if (others.length) tip.append(el("div", {class: "sub"}, "Also at this point: " + others.map(x => `${x} ${tierWord(S.tier[x])}`).join(", ")));
+    tip.append(el("div", {class: "hint"}, "Click: next tier · 1–4 set it · 0 off"));
+  }
+  function tipOO(f, p) {
+    const board = curBoard();
+    tip.textContent = "";
+    tip.append(el("div", {class: "tl"}, el("span", {}, `${f.group} ${p.effort}`), el("span", {class: "mute"}, "○")));
+    tip.append(el("div", {class: "sub"}, `Measured on ${f.harness}'s model; no lane runs this effort.`));
+    tip.append(el("div", {}, `${fmtScore(p.score, board.unit)} at ${fmtMoney(p.cost)} ${costWord(board)}`));
+  }
+  function tipCmp(p) {
+    const board = curBoard();
+    tip.textContent = "";
+    tip.append(el("div", {class: "tl"}, el("span", {}, p.published || p.name || p.model), el("span", {class: "mute"}, "×")));
+    tip.append(el("div", {class: "sub"}, `${p.effort} · not in the catalog`));
+    tip.append(el("div", {}, `${fmtScore(p.score, board.unit)} at ${fmtMoney(p.cost)} ${costWord(board)}`));
+  }
+
+  // ---------- side panel: rows are models under a harness, columns are efforts ----------
+  const CELL = new Map(), GAP = [], HMETA = new Map(), SCHIP = new Map();
+  const nameTitle = f => `${f.group} on ${f.harness} · ` + (f.geo != null
+    ? `geometric-mean cost ${fmtMoney(f.geo)} per task over ${f.nPts} point${f.nPts === 1 ? "" : "s"} on ${bName(COMPOSITE)}`
+    : `no point on ${bName(COMPOSITE)}, so it is listed last`);
+  function buildPanel() {
+    const body = $("#pbody");
+    body.textContent = ""; CELL.clear(); GAP.length = 0; HMETA.clear();
+    const cols = el("div", {class: "cols"}, el("span", {}, "model"));
+    EFF.forEach(e => cols.append(el("span", {title: e === "ultra" ? "ultra: never carried" : e}, EAB[e])));
+    body.append(cols);
+    FAMS.forEach(([h, fams]) => {
+      const sec = el("section", {class: "hgrp " + hc(h), "data-h": h});
+      sec.hidden = !S.on[h];
+      const meta = el("span", {class: "hmeta"});
+      HMETA.set(h, meta);
+      sec.append(el("div", {class: "hhead", "data-h": h, role: "button", tabindex: "0", "aria-expanded": "true", title: "Click to fold"},
+        el("span", {class: "fold", "aria-hidden": "true"}, "▾"), el("i", {class: "sw"}), el("b", {}, h), meta));
+      const rows = el("div", {class: "hrows"});
+      fams.forEach(f => {
+        const r = el("div", {class: "mrow", "data-fam": f.key}, el("div", {class: "mname", title: nameTitle(f)}, f.group));
+        EFF.forEach(e => {
+          const l = f.byEff.get(e);
+          if (l) { const c = el("button", {class: "cell", type: "button", "data-lane": l.name}, el("span", {class: "mk"})); CELL.set(l.name, c); r.append(c); }
+          else { const g = el("span", {class: "cell gap", "data-ook": f.key + "|" + e}, el("span", {class: "mk"})); GAP.push(g); r.append(g); }
+        });
+        rows.append(r);
+      });
+      sec.append(rows);
+      body.append(sec);
+    });
+    paintPanel();
+  }
+  function paintMark(c, n, lp, board) {
+    const t = S.tier[n] || 0, l = LANES.get(n), p = lp.get(n);
+    c.dataset.t = String(t);
+    c.querySelector(".mk").textContent = tierWord(t);
+    c.classList.toggle("chg", t !== S.base[n]);
+    c.classList.toggle("ultra", l.effort === "ultra");
+    c.title = `${n} · ${tierWord(t)} · ` + (l.effort === "ultra" ? "ultra: never carried"
+      : plottable(p) ? `${fmtScore(p.score, board.unit)} at ${fmtMoney(p.cost)} on ${bName(board)}` : `not measured on ${bName(board)}`);
+  }
+  function paintPanel() {
+    const board = curBoard(), lp = lanePoints(board), oo = ownOthers(board);
+    CELL.forEach((c, n) => paintMark(c, n, lp, board));
+    GAP.forEach(g => {
+      const k = g.dataset.ook, i = k.lastIndexOf("|"), q = oo.get(k.slice(0, i)), e = k.slice(i + 1), p = q && q.get(e);
+      g.classList.toggle("oo", !!p);
+      g.firstChild.textContent = p ? "○" : "";
+      if (p) g.title = `${bName(board)} measures ${FAM.get(k.slice(0, i)).group} at ${e}: ${fmtScore(p.score, board.unit)}${plottable(p) ? " at " + fmtMoney(p.cost) : ""}. No lane runs it.`;
+      else g.removeAttribute("title");
+    });
+    FAMS.forEach(([h, fams]) => {
+      const on = fams.reduce((a, f) => a + f.lanes.filter(l => S.tier[l.name] > 0).length, 0);
+      HMETA.get(h).textContent = `${fams.length} model${fams.length === 1 ? "" : "s"} · ${on} on`;
+    });
+    const counts = $("#counts");
+    counts.textContent = "";
+    [4, 3, 2, 1, 0].forEach(t => counts.append(el("span", {class: "c", "data-t": String(t)}, el("span", {class: "mk"}, tierWord(t)),
+      String(D.lanes.filter(l => (S.tier[l.name] || 0) === t).length))));
+    const chg = D.lanes.filter(l => S.tier[l.name] !== S.base[l.name]).length;
+    counts.append(el("span", {class: "chgn"}, chg ? `${chg} changed` : "as the catalog"));
+  }
+  function buildMarks() {
+    $("#marks").append(
+      el("span", {}, "○ measured, no lane"), el("span", {}, "blank: no lane"),
+      el("span", {}, el("i", {class: "dotc"}), "changed"), el("span", {}, el("i", {class: "hatch"}), "ultra: never carried"));
+  }
+  function toggleFold(h) {
+    S.folded[h] = !S.folded[h];
+    const sec = $$("#pbody .hgrp").find(s => s.dataset.h === h);
+    if (sec) { sec.classList.toggle("folded", S.folded[h]); sec.firstElementChild.setAttribute("aria-expanded", String(!S.folded[h])); }
+  }
+  function kbd(t) { return el("kbd", {}, t); }
+  function inspect() {
+    const box = $("#insp"), h = S.hot, board = curBoard();
+    box.textContent = "";
+    if (!h) { box.append("Click a cell to step its tier, or hover it and press ", kbd("1"), "–", kbd("4"), " · ", kbd("0"), " off"); return; }
+    if (h.lane) {
+      const n = h.lane, t = S.tier[n] || 0, p = lanePoints(board).get(n), l = LANES.get(n);
+      box.append(el("code", {}, n), ` · ${tierWord(t)} · `,
+        l.effort === "ultra" ? "ultra: never carried" : plottable(p) ? `${fmtScore(p.score, board.unit)} at ${fmtMoney(p.cost)} ${costWord(board)}` : `not measured on ${bName(board)}`);
+    } else if (h.oos) {
+      const k = [...h.oos][0], i = k.lastIndexOf("|"), f = FAM.get(k.slice(0, i)), e = k.slice(i + 1), q = ownOthers(board).get(f.key), p = q && q.get(e);
+      box.append(el("b", {}, `${f.group} ${e}`), ` · measured ${p ? fmtScore(p.score, board.unit) + (plottable(p) ? " at " + fmtMoney(p.cost) : "") : ""} · no lane runs it`);
+    } else if (h.harness) {
+      const fs = (FAMS.find(([x]) => x === h.harness) || [null, []])[1], on = fs.reduce((a, f) => a + f.lanes.filter(l => S.tier[l.name] > 0).length, 0);
+      box.append(el("b", {}, h.harness), ` · ${fs.length} models · ${on} lanes on`);
+    } else if (h.fams && h.fams.size === 1) {
+      const f = FAM.get([...h.fams][0]), on = f.lanes.filter(l => S.tier[l.name] > 0).length;
+      box.append(el("b", {}, f.group), ` on ${f.harness} · ${f.lanes.length} lanes, ${on} on · ` + (f.geo != null ? `geo-mean ${fmtMoney(f.geo)} per task` : "no composite point"));
+    }
+  }
+  const pbody = $("#pbody");
+  pbody.addEventListener("mouseover", e => {
+    const c = e.target.closest(".cell[data-lane]");
+    if (c) { setHot({lanes: new Set([c.dataset.lane]), lane: c.dataset.lane, sig: "cell:" + c.dataset.lane}); return; }
+    const g = e.target.closest(".cell.oo");
+    if (g) { setHot({oos: new Set([g.dataset.ook]), sig: "gap:" + g.dataset.ook}); return; }
+    const r = e.target.closest(".mrow");
+    if (r) { setHot({fams: new Set([r.dataset.fam]), sig: "row:" + r.dataset.fam}); return; }
+    const hh = e.target.closest(".hhead");
+    if (hh) {
+      const fs = (FAMS.find(([x]) => x === hh.dataset.h) || [null, []])[1];
+      setHot({fams: new Set(fs.map(f => f.key)), harness: hh.dataset.h, sig: "head:" + hh.dataset.h});
+      return;
+    }
+    clearHot();
+  });
+  pbody.addEventListener("mouseleave", clearHot);
+  pbody.addEventListener("click", e => {
+    const hh = e.target.closest(".hhead");
+    if (hh) { toggleFold(hh.dataset.h); return; }
+    const c = e.target.closest(".cell[data-lane]");
+    if (c) cycle(c.dataset.lane, e.shiftKey ? -1 : 1);
+  });
+  pbody.addEventListener("keydown", e => {
+    const hh = e.target.closest(".hhead");
+    if (hh && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleFold(hh.dataset.h); }
+  });
+
+  // ---------- not measured here ----------
+  function buildStrip() {
+    const host = $("#strip"), board = curBoard(), lp = lanePoints(board);
+    host.textContent = ""; SCHIP.clear();
+    const groups = [];
+    FAMS.forEach(([h, fams]) => {
+      if (!S.on[h]) return;
+      fams.forEach(f => { const miss = f.lanes.filter(l => !plottable(lp.get(l.name))); if (miss.length) groups.push({f, miss}); });
+    });
+    const n = groups.reduce((a, g) => a + g.miss.length, 0);
+    host.append(el("div", {class: "sh"}, el("b", {}, "Not measured here"),
+      el("span", {}, n ? `${n} lane${n === 1 ? "" : "s"} of the shown harnesses with no plotted row on ${bName(board)}. They keep their tier.`
+        : `${bName(board)} plots every lane of the shown harnesses.`)));
+    if (!n) return;
+    const wrap = el("div", {class: "sgrps"});
+    groups.forEach(({f, miss}) => {
+      const g = el("div", {class: "sgrp " + hc(f.harness), "data-fam": f.key}, el("i", {class: "sw"}), el("span", {class: "sn"}, famLabel(f)));
+      miss.forEach(l => {
+        const why = l.effort === "ultra" ? "no board scores ultra" : lp.get(l.name) ? "the row has no cost, so it cannot be plotted" : "no row on this board";
+        const c = el("button", {class: "schip", type: "button", "data-lane": l.name, title: `${l.name}: ${why}`},
+          el("span", {class: "se"}, EAB[l.effort] || l.effort), el("span", {class: "mk"}));
+        SCHIP.set(l.name, c);
+        g.append(c);
+      });
+      wrap.append(g);
+    });
+    host.append(wrap);
+    paintStrip();
+  }
+  function paintStrip() {
+    SCHIP.forEach((c, n) => {
+      const t = S.tier[n] || 0;
+      c.dataset.t = String(t);
+      c.querySelector(".mk").textContent = tierWord(t);
+      c.classList.toggle("chg", t !== S.base[n]);
+      c.classList.toggle("ultra", LANES.get(n).effort === "ultra");
+    });
+  }
+  const strip = $("#strip");
+  strip.addEventListener("mouseover", e => {
+    const c = e.target.closest(".schip");
+    if (c) { setHot({lanes: new Set([c.dataset.lane]), lane: c.dataset.lane, sig: "strip:" + c.dataset.lane}); revealCell(c.dataset.lane); return; }
+    const g = e.target.closest(".sgrp");
+    if (g) { setHot({fams: new Set([g.dataset.fam]), sig: "sgrp:" + g.dataset.fam}); return; }
+    clearHot();
+  });
+  strip.addEventListener("mouseleave", clearHot);
+  strip.addEventListener("click", e => { const c = e.target.closest(".schip"); if (c) cycle(c.dataset.lane, e.shiftKey ? -1 : 1); });
+
+  // ---------- tier lines ----------
+  function linesText() {
+    const idx = new Map(ORDER.map((n, i) => [n, i]));
+    const on = ORDER.filter(n => S.tier[n] > 0).sort((a, b) => S.tier[b] - S.tier[a] || idx.get(a) - idx.get(b));
+    return on.map(n => `${n} ${S.tier[n]}`).concat(ORDER.filter(n => !(S.tier[n] > 0)).map(n => `${n} off`)).join("\n");
+  }
+  function paintLines() {
+    $("#linesText").textContent = linesText();
+    const on = D.lanes.filter(l => S.tier[l.name] > 0).length, chg = D.lanes.filter(l => S.tier[l.name] !== S.base[l.name]).length;
+    $("#linesSum").textContent = `${D.lanes.length} lines · ${on} placed · ${chg} changed from the catalog`;
+    $("#reset").disabled = !chg;
+  }
+  $("#copy").addEventListener("click", async e => {
+    e.preventDefault(); e.stopPropagation();
+    const text = linesText();
+    let ok = false;
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); ok = true; } } catch (_) { ok = false; }
+    if (!ok) {
+      try {
+        const ta = el("textarea", {style: "position:fixed;left:-9999px;top:0"});
+        ta.value = text; document.body.append(ta); ta.select(); ok = document.execCommand("copy"); ta.remove();
+      } catch (_) { ok = false; }
+    }
+    toast(ok ? "Copied the tier lines." : "Copy failed: open the box and select the lines.");
+  });
+  $("#reset").addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation();
+    Object.keys(S.base).forEach(n => { S.tier[n] = S.base[n]; });
+    repaint();
+    toast("Tiers reset to the catalog.");
+  });
+
+  // ---------- header: board tabs, caption, legend, harness chips ----------
+  function buildTabs() {
+    const host = $("#tabs");
+    host.textContent = "";
+    BOARDS.forEach(b => {
+      const t = el("button", {class: "tab", type: "button", role: "tab", "aria-selected": String(b.id === S.board), title: `${b.sourceName || b.source} · ${bName(b)} · ${b.basis || ""}`},
+        bName(b), b.composite ? el("span", {class: "tag"}, "index") : null);
+      t.addEventListener("click", () => { if (S.board !== b.id) { S.board = b.id; onBoard(); } });
+      host.append(t);
+    });
+  }
+  function onBoard() {
+    $$("#tabs .tab").forEach((t, i) => t.setAttribute("aria-selected", String(BOARDS[i].id === S.board)));
+    clearHot(); buildCaption(); buildPlot(); buildStrip(); paintPanel();
+    if (S.view === "tui") renderTUI();
+  }
+  function buildCaption() {
+    const b = curBoard(), host = $("#src"), lanePts = b.points.filter(p => (p.lanes || []).length).length;
+    host.textContent = "";
+    host.append(el("b", {}, b.sourceName || b.source || ""), bName(b) !== b.sourceName ? ` · ${bName(b)}` : "",
+      ` · ${b.basis || "cost"} · ${b.points.length} rows, ${lanePts} at a lane`, b.when ? ` · ${b.when}` : "");
+  }
+  function buildLegend() {
+    const host = $("#legend");
+    const g = draw => { const s = sv("svg", {width: 18, height: 18, viewBox: "0 0 18 18", class: "hx", "aria-hidden": "true"}); draw(s); return s; };
+    const tierDot = t => g(s => {
+      const d = sv("g", {class: "dot lane t" + t}, s);
+      sv("circle", {class: "c", cx: 9, cy: 9, r: 7}, d);
+      sv("text", {class: "dg", x: 9, y: 9.5}, d).textContent = String(t);
+    });
+    host.append(el("span", {}, tierDot(4), tierDot(3), tierDot(2), tierDot(1), " tier"),
+      el("span", {}, g(s => sv("circle", {class: "c", cx: 9, cy: 9, r: 4.5}, sv("g", {class: "dot lane t0"}, s))), "off"),
+      el("span", {}, g(s => sv("circle", {class: "c", cx: 9, cy: 9, r: 3.5}, sv("g", {class: "dot oo"}, s))), "measured, no lane"),
+      el("span", {class: "lg-cmp", hidden: true}, g(s => sv("path", {d: "M6,6L12,12M6,12L12,6"}, sv("g", {class: "dot cmp"}, s))), "other model"));
+  }
+  function buildChips() {
+    const host = $("#chips");
+    host.textContent = "";
+    host.append(el("span", {class: "lbl"}, "Harnesses"));
+    FAMS.forEach(([h, fams]) => {
+      const lanes = fams.reduce((a, f) => a + f.lanes.length, 0), carried = fams.reduce((a, f) => a + f.lanes.filter(l => l.carried).length, 0);
+      const c = el("button", {class: "chip " + hc(h), type: "button", "aria-pressed": String(!!S.on[h]),
+        title: `${h}: ${lanes} lanes, ${carried} carried in the catalog`}, el("i", {class: "sw"}), h);
+      c.addEventListener("click", () => { S.on[h] = !S.on[h]; c.setAttribute("aria-pressed", String(S.on[h])); onHarness(); });
+      host.append(c);
+    });
+  }
+  function onHarness() {
+    $$("#pbody .hgrp").forEach(s => { s.hidden = !S.on[s.dataset.h]; });
+    clearHot(); buildPlot(); buildStrip();
+    if (S.view === "tui") renderTUI();
+  }
+  $("#comps").addEventListener("change", e => { S.comps = e.target.checked; $(".lg-cmp").hidden = !S.comps; buildPlot(); });
+
+  // ---------- panel width: drag handle, kept in localStorage ----------
+  const PW_KEY = "delegate.tierPrototype.r2.panelWidth", PW_DEFAULT = 360, PW_MIN = 280;
+  const pwMax = () => Math.max(PW_MIN, Math.min(760, Math.round(window.innerWidth * 0.62)));
+  function setPW(w) {
+    S.pw = Math.round(Math.max(PW_MIN, Math.min(pwMax(), w)));
+    $("#page").style.setProperty("--pw", S.pw + "px");
+    $("#handle").setAttribute("aria-valuenow", String(S.pw));
+  }
+  function loadPW() { try { const v = parseInt(localStorage.getItem(PW_KEY), 10); return Number.isFinite(v) ? v : null; } catch (_) { return null; } }
+  function savePW() { try { localStorage.setItem(PW_KEY, String(S.pw)); } catch (_) { /* width is a nicety */ } }
+  const handle = $("#handle");
+  let dragging = false;
+  handle.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault(); dragging = true;
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+  });
+  handle.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    setPW($("#page").getBoundingClientRect().right - e.clientX - handle.offsetWidth / 2);
+  });
+  const endDrag = () => { if (!dragging) return; dragging = false; document.body.classList.remove("resizing"); savePW(); };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+  handle.addEventListener("dblclick", () => { setPW(PW_DEFAULT); savePW(); });
+  handle.addEventListener("keydown", e => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault(); e.stopPropagation();
+    setPW(S.pw + (e.key === "ArrowLeft" ? 16 : -16)); savePW();
+  });
+  window.addEventListener("resize", () => setPW(S.pw));
+
+  // ---------- TUI mock: 80 columns, same tiers ----------
+  function Ln() { this.s = []; this.n = 0; }
+  Ln.prototype.add = function (t, cls, at) { t = String(t); this.s.push([t, cls || "", at || null]); this.n += Array.from(t).length; return this; };
+  Ln.prototype.to = function (col) { if (this.n < col) this.add(" ".repeat(col - this.n)); return this; };
+  Ln.prototype.html = function () {
+    return this.s.map(([t, c, at]) => (c || at)
+      ? `<span${c ? ` class="${c}"` : ""}${at ? ` data-r="${at.r}" data-c="${at.c}"` : ""}>${esc(t)}</span>` : esc(t)).join("");
+  };
+  const TUI_W = 75, NAME_W = 28;
+  function tuiRows() {
+    const shown = FAMS.filter(([h]) => S.on[h] || S.tui.showAll);
+    return {shown, rows: shown.flatMap(([, fs]) => fs), hidden: FAMS.filter(([h]) => !S.on[h]).map(([h]) => h)};
+  }
+  function tuiDescribe(f, ci, board, lp, oo) {
+    if (!f) return "";
+    const e = EFF[ci], l = f.byEff.get(e);
+    if (l) {
+      const p = lp.get(l.name);
+      return `${l.name} · ${tierWord(S.tier[l.name])} · ` + (e === "ultra" ? "ultra: never carried"
+        : plottable(p) ? `${fmtScore(p.score, board.unit)} at ${fmtMoney(p.cost)} ${costWord(board)}` : "not measured on this board");
+    }
+    const q = oo.get(f.key), p = q && q.get(e);
+    if (p) return `${f.group} ${e} · measured ${fmtScore(p.score, board.unit)}${plottable(p) ? " at " + fmtMoney(p.cost) : ""} · no lane runs it`;
+    return `${f.group} · no lane at ${e}`;
+  }
+  function renderTUI() {
+    const T = S.tui, board = curBoard(), lp = lanePoints(board), oo = ownOthers(board), {shown, rows, hidden} = tuiRows();
+    T.row = Math.max(0, Math.min(rows.length - 1, T.row));
+    T.col = Math.max(0, Math.min(EFF.length - 1, T.col));
+    const L = [];
+    const trail = new Ln().add(" ");
+    ["start", "harnesses", "carry", "tiers", "review", "routing", "confirm"].forEach((s, i) => {
+      if (i) trail.add(" · ", "dim");
+      trail.add(s === "tiers" ? " tiers " : s, s === "tiers" ? "here" : i > 3 ? "dim" : "");
+    });
+    L.push(trail, new Ln().add("─".repeat(80), "rule"));
+    const counts = [4, 3, 2, 1].map(t => `T${t} ${D.lanes.filter(l => S.tier[l.name] === t).length}`).join("  ");
+    L.push(new Ln().add(" Tiers", "b").add("  one row per model · dearest first", "dim").to(TUI_W - counts.length).add(counts, "dim"));
+    const onN = D.lanes.filter(l => S.tier[l.name] > 0).length, onTxt = `${onN} lanes on`;
+    L.push(new Ln().add(" board ", "dim").add(trunc(bName(board) + (board.composite ? " (composite)" : ""), 52)).to(TUI_W - onTxt.length).add(onTxt, "dim"));
+    L.push(new Ln());
+    const hd = new Ln().add("   ").add("model".padEnd(NAME_W), "hd");
+    EFF.forEach((e, i) => hd.add(" ", "hd").add((" " + EAB[e]).padEnd(4), i === T.col ? "hd curcol" : "hd"));
+    L.push(hd.add(" ", "hd").add("$/task".padStart(8), "hd"));
+    let ri = 0;
+    shown.forEach(([h, fams]) => {
+      const on = fams.reduce((a, f) => a + f.lanes.filter(l => S.tier[l.name] > 0).length, 0), tail = ` ${on} on`;
+      const hl = new Ln().add(" ").add(h, "hname " + hc(h));
+      if (!S.on[h]) hl.add(" (hidden)", "dim");
+      hl.add(" ").add("─".repeat(Math.max(2, TUI_W - hl.n - 1 - tail.length)), "rule").add(tail, "dim");
+      L.push(hl);
+      fams.forEach(f => {
+        const cur = ri === T.row, live = f.lanes.some(l => S.tier[l.name] > 0), q = oo.get(f.key);
+        const ln = new Ln().add(" ").add("▎", "gut " + hc(h)).add(cur ? "▸" : " ", "b").add(trunc(f.group, NAME_W - 1).padEnd(NAME_W), cur ? "b" : live ? "" : "dim");
+        EFF.forEach((e, ci) => {
+          const l = f.byEff.get(e), at = {r: ri, c: ci}, isCur = cur && ci === T.col;
+          let txt = "    ", cls = "k gap";
+          if (l) { const t = S.tier[l.name] || 0; txt = t ? ` T${t} ` : " off"; cls = "k t" + t; }
+          else if (q && q.has(e)) { txt = " ○  "; cls = "k oo"; }
+          ln.add(" ").add(txt, cls + (isCur ? " cur" : ""), at);
+        });
+        L.push(ln.add(" ").add((f.geo != null ? fmtMoney(f.geo) : "—").padStart(8), "dim"));
+        ri++;
+      });
+    });
+    if (!rows.length) L.push(new Ln().add(" No harness is shown. Press h.", "dim"));
+    L.push(new Ln());
+    if (hidden.length) L.push(new Ln().add(" " + trunc(T.showAll ? `showing the hidden harnesses: ${hidden.join(", ")} · h hides them`
+      : `hidden, no lane on: ${hidden.join(", ")} · h shows them`, 79), "dim"));
+    L.push(new Ln().add("─".repeat(80), "rule"));
+    L.push(new Ln().add(" ").add(trunc(T.msg || tuiDescribe(rows[T.row], T.col, board, lp, oo), 79), T.msg ? "msg" : ""));
+    L.push(new Ln().add(" ").add("T4", "k t4").add(" ").add("T3", "k t3").add(" ").add("T2", "k t2").add(" ").add("T1", "k t1").add(" tier", "dim")
+      .add("  ·  ", "dim").add("off", "k t0").add(" lane off", "dim").add("  ·  ", "dim").add("○", "k oo").add(" measured, no lane", "dim")
+      .add("  ·  ", "dim").add("blank: no lane", "dim"));
+    const ft = new Ln().add(" ");
+    [["↑/↓", "model"], ["←/→", "effort"], ["1-4", "tier"], ["0", "off"], ["h", "hidden"], ["enter", "next"], ["q", "quit"]]
+      .forEach(([k, a], i) => { if (i) ft.add("  "); ft.add(k + ":", "key").add(" " + a); });
+    L.push(ft);
+    $("#term").innerHTML = L.map(l => l.html()).join("\n");
+  }
+  function tuiKey(e) {
+    const T = S.tui, rows = tuiRows().rows, f = rows[T.row], k = e.key;
+    T.msg = "";
+    if (k === "ArrowUp" || k === "k") T.row = Math.max(0, T.row - 1);
+    else if (k === "ArrowDown" || k === "j") T.row = Math.min(rows.length - 1, T.row + 1);
+    else if (k === "ArrowLeft") T.col = Math.max(0, T.col - 1);
+    else if (k === "ArrowRight") T.col = Math.min(EFF.length - 1, T.col + 1);
+    else if (/^[0-4]$/.test(k)) {
+      const l = f && f.byEff.get(EFF[T.col]), want = +k;
+      if (!l) T.msg = f ? `${f.group} has no lane at ${EFF[T.col]}, so there is no tier to set.` : "";
+      else if (want > 0 && l.effort === "ultra") T.msg = `${l.name}: an ultra lane is never carried, so it stays off.`;
+      else { T.msg = `${l.name}: ${tierWord(S.tier[l.name])} → ${tierWord(want)}`; setTier(l.name, want, true); }
+    } else if (k === "h") {
+      const key = f && f.key;
+      T.showAll = !T.showAll;
+      const i = tuiRows().rows.findIndex(x => x.key === key);
+      T.row = i >= 0 ? i : 0;
+      T.msg = T.showAll ? "h: the hidden harnesses are shown" : "h: the harnesses with no lane on are hidden";
+    } else if (k === "Enter") T.msg = "enter: next page, review (mock: nothing is written)";
+    else if (k === "q" || k === "Escape") T.msg = "q: quit (mock)";
+    else return;
+    e.preventDefault();
+    renderTUI();
+  }
+  $("#term").addEventListener("click", e => {
+    const s = e.target.closest("[data-r]");
+    if (!s) return;
+    S.tui.row = +s.dataset.r; S.tui.col = +s.dataset.c; S.tui.msg = "";
+    renderTUI();
+  });
+
+  // ---------- views, keys, start ----------
+  function setView(v, write) {
+    S.view = v === "tui" ? "tui" : "page";
+    document.body.dataset.view = S.view;
+    $("#page").hidden = S.view !== "page";
+    $("#tuiview").hidden = S.view !== "tui";
+    $$("#viewSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === S.view)));
+    clearHot();
+    if (write) {
+      try { const u = new URL(location.href); u.searchParams.set("view", S.view); history.replaceState(null, "", u.href); } catch (_) { /* file:// may refuse */ }
+    }
+    if (S.view === "tui") { renderTUI(); $("#term").focus({preventScroll: true}); } else requestPlot();
+  }
+  $$("#viewSeg button").forEach(b => b.addEventListener("click", () => { setView(b.dataset.view, true); b.blur(); }));
+  document.addEventListener("keydown", e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (S.view === "tui") { tuiKey(e); return; }
+    if (/^[0-4]$/.test(e.key)) {
+      const a = document.activeElement, n = S.keyLane || (a && a.dataset && a.dataset.lane);
+      if (n && LANES.has(n)) { e.preventDefault(); setTier(n, +e.key); }
+    } else if (e.key === "Escape") clearHot();
+  });
+
+  setPW(loadPW() || PW_DEFAULT);
+  buildTabs(); buildCaption(); buildLegend(); buildChips(); buildPanel(); buildMarks(); buildStrip(); paintLines(); inspect();
+  setView(Q.get("view") === "tui" ? "tui" : "page", false);
+  if (window.ResizeObserver) new ResizeObserver(requestPlot).observe($("#plotbox"));
+  else window.addEventListener("resize", requestPlot);
+})();
+</script>
+</body>
+</html>
