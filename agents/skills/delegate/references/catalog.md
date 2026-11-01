@@ -64,7 +64,7 @@ never declares a floor or a ceiling.
   with where each value comes from.
 - `delegate catalog check <file>`: validates one file. It refuses a lane whose
   meter its harness's probe does not report (`codex`, `grok`, `agy-gemini`,
-  `agy-claude-gpt`, `claude-general` or `claude-<model word>`), since that
+  `agy-claude-gpt`, `agy-<group>`, `claude-general` or `claude-<model word>`), since that
   meter's remaining stays unknown and the gate never vetoes it. On stderr, without
   failing, it warns when one meter serves every carried lane of a tier, since
   that meter under the gate takes the whole tier with it.
@@ -116,7 +116,16 @@ Each harness offers its own vendor's models, with one exception: agy also
 offers Opus. Its lanes go on `agy-claude-gpt`, the pool agy shares between
 Claude Opus, Claude Sonnet and GPT-OSS, which is separate from `agy-gemini`
 and from Claude Code's meters; the wizard adds that meter when the catalog
-lacks it. Sonnet and GPT-OSS on agy get no lane. An agy Opus lane competes on
+lacks it.
+
+Each group agy's `/usage` reports is one meter, named for the group:
+`Gemini Models` is `agy-gemini`, `Claude and GPT models` is `agy-claude-gpt`,
+and a group beyond those is `agy-<group words>`. On a plan that bills Gemini 4
+Argon apart, `/usage` reports a `Gemini 4 Argon` group with a weekly limit
+only, so Argon lanes go on `agy-gemini-4-argon`. A model goes on the group
+that names it (the group's `Models within this group:` list, else the group's
+own name), read from the last probe; with no probe read, or no group naming
+it, a Gemini model goes on `agy-gemini` and any other on `agy-claude-gpt`. Sonnet and GPT-OSS on agy get no lane. An agy Opus lane competes on
 the carry page only with agy's own Opus efforts. A lane on it reads:
 
     "opus55-high@agy": {
