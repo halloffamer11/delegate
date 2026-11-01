@@ -20,10 +20,11 @@ its ticket, where the reason is.
   tests check the rule on fixtures, never his tiers (ticket 22).
 - The Delegation section of `~/.claude/CLAUDE.md` is gone (2026-09-11); the skill is
   the only routing rule, and "Fable never runs as a worker" went with it.
-- One decision per line on each page, with the same `[x]`/`[ ]` marker on every
-  page: the carry page selects a model at an effort, the tier pages assign a tier,
-  and no page asks a question another page already asked (the user, 2026-09-10). TUI
-  work goes to a Claude Opus agent under `/frontend-design:frontend-design`.
+- The carry page selects a model at an effort with an `[x]`/`[ ]` box; tiers are set
+  on one matrix of models by efforts, where each cell is a lane's tier, 1-4 or off
+  (the user, 2026-11-01, replacing the four one-question tier pages of 2026-09-10).
+  The benchmark page draws the same matrix beside its plot and is linked live to the
+  wizard. TUI work goes to a Claude Opus agent under `/frontend-design:frontend-design`.
 - `ultra` lanes are generated disabled: no source scores them, and automatic task
   delegation contradicts the worker preamble (ticket 15).
 - The carry page proposes a lane off when another effort of the same model, for no

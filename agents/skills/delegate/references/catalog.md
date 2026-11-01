@@ -93,11 +93,10 @@ from cached meters. Apply the same operation with `--apply --expect
 both; do not ask again. If a source changed since the preview, preview again.
 Apply preserves stow links and writes only the chosen document.
 
-`delegate setup --screen carry|tier1|tier2|tier3|tier4|review|routing` opens
-one wizard screen on the current catalog. Its confirm lists only the changes
-made, and a save with none writes nothing. On a focused tier screen,
-unmarking moves a lane down one tier; turn a tier 1 lane off on the carry
-screen. Use the CLI commands above where there is no terminal.
+`delegate setup --screen carry|tiers|review|routing` opens one wizard screen
+on the current catalog (`tier1`-`tier4` still open the tiers page). Its
+confirm lists only the changes made, and a save with none writes nothing. On
+the tiers page, space steps a lane through 1-4 and off, and 0-4 set it. Use the CLI commands above where there is no terminal.
 
 ## The wizard
 
@@ -136,8 +135,8 @@ the carry page only with agy's own Opus efforts. A lane on it reads:
     }
 
 The pages then decide, in order: which lanes to carry, each lane's tier (the
-tier pages show a proposed tier from the benchmark bands in `tier_proposal`;
-`p` takes them), the order inside each tier, and the routing values. Nothing
+tiers page, a matrix of models by efforts; `p` takes the tiers the benchmark
+bands in `tier_proposal` propose), the order inside each tier, and the routing values. Nothing
 is written until the confirm page, and quitting writes nothing. The save also
 writes the agent file of each new native lane where the orchestrator profile
 keeps them, and removes superseded ones.
