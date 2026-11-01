@@ -19,6 +19,34 @@ _EFFORT_WORDS = "|".join(EFFORTS_LONGEST_FIRST)
 _SUFFIX = re.compile(rf"^(.+)-({_EFFORT_WORDS})$")
 # `Gemini 3.8 Flash (High)` -> `Gemini 3.8 Flash`
 _DISPLAY_SUFFIX = re.compile(rf"\s*\((?:{_EFFORT_WORDS})\)\s*$", re.I)
+# `Models within this group: Gemini Flash, Gemini Pro` in a `/usage` group's
+# description names the models that share the group's limits.
+_MEMBERS = re.compile(r"models within this group:\s*(.+)", re.I)
+# Words of a group name that name no model: `Claude and GPT models`.
+_FILLER = {"models", "model", "and"}
+
+
+def _words(text):
+    """`gemini-4-argon-high` and `Gemini 4 Argon` -> their lower-case words."""
+    return re.findall(r"[a-z0-9.]+", (text or "").lower())
+
+
+def group_key(name):
+    """The Meter word for a `/usage` group name: `Gemini Models` -> `gemini`,
+    `Claude and GPT models` -> `claude-gpt`, `Gemini 4 Argon` ->
+    `gemini-4-argon`. The first two are the names the catalog's agy Meters
+    already carry."""
+    return "-".join(word for word in _words(name) if word not in _FILLER)
+
+
+def group_members(group):
+    """The model names a `/usage` group's limits cover: the ones its
+    description lists, else the group's own name (`Gemini 4 Argon` lists none,
+    and is named for its one model)."""
+    found = _MEMBERS.search(group.get("description") or "")
+    if found:
+        return [item.strip().rstrip(".") for item in found.group(1).split(",") if item.strip()]
+    return [" ".join(word for word in _words(group.get("name")) if word not in _FILLER)]
 
 
 class Agy(Harness):
@@ -34,7 +62,10 @@ class Agy(Harness):
     list_command = ["agy", "models"]
     note_renames = ((SUPERSEDED_NOTE, COMBINED_NOTE),)
     # `agy /usage` reports one group for Gemini models and one for the
-    # Claude and GPT models it serves.
+    # Claude and GPT models it serves. These two are the fallback when no
+    # probe has been read; a probe names each group it reports, and a group
+    # beyond these (`Gemini 4 Argon`, on a plan that bills Argon apart) is a
+    # Meter of its own (`group_key`).
     meter_groups = ("gemini", "claude-gpt")
     fixture_file = "agy-models.txt"
     # The one other vendor's model the refresh offers a Lane on. agy also
@@ -47,14 +78,43 @@ class Agy(Harness):
         text = slug or ""
         return super().owns(text) or text.startswith(self.other_vendor_prefixes)
 
-    def lane_meter(self, slug):
-        """`agy-gemini` for a Gemini model, `agy-claude-gpt` for any other. agy
-        bills the two groups `/usage` reports separately, and every model of
-        the second shares its 5h and weekly limits, so Opus on agy drains the
-        pool Sonnet and GPT-OSS do, not Claude Code's Meters."""
+    def lane_meter(self, slug, rows=None):
+        """The Meter of the `/usage` group whose models include this one. agy
+        bills each group separately, and every model of a group shares its
+        limits, so Opus on agy drains the pool Sonnet and GPT-OSS do, not
+        Claude Code's Meters, and Argon drains its own where the plan bills it
+        apart.
+
+        The groups come from the last probe's rows (`rows`, else the usage
+        cache); the group whose member name has the most words, every one of
+        them in the slug, wins. With no probe read, or no group naming the
+        model, `agy-gemini` for a Gemini model and `agy-claude-gpt` for any
+        other."""
         import usage
+        if rows is None:
+            rows = usage.load_cached().get("lanes") or []
+        words, best, size = set(_words(slug)), None, 0
+        for row in rows:
+            if not isinstance(row, dict) or row.get("harness") != self.name:
+                continue
+            for member in row.get("models") or ():
+                need = set(_words(member))
+                if need and need <= words and len(need) > size:
+                    best, size = row.get("meter"), len(need)
+        if best:
+            return best
         gemini = (slug or "").split("-")[0] == self.vendor
         return usage.meter_name(self.name, self.meter_groups[0 if gemini else 1])
+
+    def meter_names(self):
+        return tuple(f"{self.name}-{group}" for group in self.meter_groups) + (f"{self.name}-<group>",)
+
+    def reports_meter(self, name, models=()):
+        """A fallback group's Meter, or the Meter `lane_meter` gives a model
+        the catalog runs on it: one a probe reported for that model's group."""
+        if name in tuple(f"{self.name}-{group}" for group in self.meter_groups):
+            return True
+        return any(self.lane_meter(slug) == name for slug in models)
 
     def family(self, slug):
         """The agy slug family a model slug belongs to: (base, effort).
@@ -130,14 +190,18 @@ class Agy(Harness):
             return [usage.meter_row(self.name, None, note=f"unexpected output: {e}")]
         out = []
         for g in groups:
-            meter = self.meter_groups[0] if "gemini" in g["name"].lower() else self.meter_groups[1]
+            # Each group is its own Meter, named for the group (`group_key`).
+            meter = group_key(g.get("name")) or None
             f5 = fw = r5 = rw = None
             for b in g.get("buckets", []):
                 if b.get("window") == "5h": f5, r5 = b.get("remaining_fraction"), usage.iso(b.get("reset_time", ""))
                 elif b.get("window") == "weekly": fw, rw = b.get("remaining_fraction"), usage.iso(b.get("reset_time", ""))
             # No vendor bound joins the two windows, so the note says what the
             # combined figure is: the lower window, an assumption (ticket 31).
-            out.append(usage.meter_row(self.name, meter, f5, fw, r5, rw, note=COMBINED_NOTE))
+            row = usage.meter_row(self.name, meter, f5, fw, r5, rw, note=COMBINED_NOTE)
+            # The models this Meter covers, which `lane_meter` matches a slug to.
+            row["models"] = group_members(g)
+            out.append(row)
         return out or [usage.meter_row(self.name, None, note="no groups")]
 
     def run_args(self, effort, timeout, write_dir):

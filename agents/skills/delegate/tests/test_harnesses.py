@@ -327,7 +327,7 @@ def test_meter_identity():
            claude.reports_meter("claude-fable", ["claude-fable-5-1"])
            and not claude.reports_meter("claude-fabel", ["claude-fable-5-1"])
            and not claude.reports_meter("claude-generl")
-           and harnesses.get("agy").meter_names() == ("agy-gemini", "agy-claude-gpt")
+           and harnesses.get("agy").meter_names() == ("agy-gemini", "agy-claude-gpt", "agy-<group>")
            and harnesses.get("codex").meter_names() == ("codex",))
     agy = harnesses.get("agy")
     listing = {"command": {"data": {"groups": [{"name": "Gemini Models", "buckets": []},
@@ -337,7 +337,7 @@ def test_meter_identity():
              returncode=0, stdout=json.dumps(listing))):
         rows = agy.meters()
     record("agy's probe rows are the Meters it declares, under `meter`",
-           tuple(r["meter"] for r in rows) == agy.meter_names()
+           tuple(r["meter"] for r in rows) == agy.meter_names()[:2]
            and [r["group"] for r in rows] == ["gemini", "claude-gpt"], repr(rows))
 
 
@@ -379,6 +379,56 @@ def test_agy_opus_pool():
            and rows["agy-claude-gpt"]["remaining_weekly"] == 0.6, repr(rows))
 
 
+def test_agy_argon_pool():
+    """A `/usage` group beyond the two agy always had is a Meter of its own,
+    named for the group, and a model its name covers goes on it. The shape of
+    the user's `agy --print /usage --output-format json`, 2026-11-01: a Pro
+    plan bills Gemini 4 Argon apart, with a weekly limit only."""
+    import json
+    import types
+    import usage
+    from unittest import mock
+    agy = harnesses.get("agy")
+    listing = {"command": {"data": {"groups": [
+        {"name": "Gemini Models", "description": "Models within this group: Gemini Flash, Gemini Pro",
+         "buckets": [
+            {"window": "weekly", "remaining_fraction": 0.99, "reset_time": "2026-11-05T23:33:17Z"},
+            {"window": "5h", "remaining_fraction": 1, "reset_time": "2026-11-02T02:51:10Z"}]},
+        {"name": "Claude and GPT models",
+         "description": "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+         "buckets": [
+            {"window": "weekly", "remaining_fraction": 1, "reset_time": "2026-11-08T21:51:10Z"},
+            {"window": "5h", "remaining_fraction": 1, "reset_time": "2026-11-02T02:51:10Z"}]},
+        {"name": "Gemini 4 Argon",
+         "description": "For paid Pro plans, Argon quota is separate.",
+         "buckets": [
+            {"window": "weekly", "remaining_fraction": 0.47, "reset_time": "2026-11-05T23:19:49Z"}]}]}}}
+    with mock.patch.object(agy, "installed", return_value=True), \
+         mock.patch.object(usage, "run", return_value=types.SimpleNamespace(
+             returncode=0, stdout=json.dumps(listing))):
+        rows = agy.meters()
+    by_meter = {r["meter"]: r for r in rows}
+    record("agy's Argon group is its own Meter, not a second agy-gemini row",
+           [r["meter"] for r in rows] == ["agy-gemini", "agy-claude-gpt", "agy-gemini-4-argon"]
+           and by_meter["agy-gemini"]["remaining_weekly"] == 0.99
+           and by_meter["agy-gemini-4-argon"]["r"] == 0.47
+           and by_meter["agy-gemini-4-argon"]["remaining_5h"] is None, repr(rows))
+    record("each agy model goes on the Meter of the group that names it",
+           agy.lane_meter("gemini-4-argon-high", rows) == "agy-gemini-4-argon"
+           and agy.lane_meter("gemini-3.8-flash-low", rows) == "agy-gemini"
+           and agy.lane_meter("gemini-3.1-pro-high", rows) == "agy-gemini"
+           and agy.lane_meter("claude-opus-5-5-high", rows) == "agy-claude-gpt"
+           and agy.lane_meter("gpt-oss-120b-medium", rows) == "agy-claude-gpt")
+    record("an agy model no group names falls back to its vendor's pool",
+           agy.lane_meter("gemini-9-nova-high", rows) == "agy-gemini"
+           and agy.lane_meter("gemini-4-argon-high", []) == "agy-gemini")
+    with mock.patch.object(usage, "load_cached", return_value={"lanes": rows}):
+        record("catalog check takes the Argon Meter for an Argon lane, and only for one",
+               agy.reports_meter("agy-gemini-4-argon", ["gemini-4-argon-high"])
+               and not agy.reports_meter("agy-gemini-4-argon", ["gemini-3.8-flash-high"])
+               and not agy.reports_meter("agy-gemini-4-argn", ["gemini-4-argon-high"]))
+
+
 def test_usage_limit():
     """Ticket 43: grok's free-tier refusal is a usage limit; other text is not."""
     grok = harnesses.get("grok")
@@ -393,6 +443,7 @@ def test_usage_limit():
 
 if __name__ == "__main__":
     test_agy_opus_pool()
+    test_agy_argon_pool()
     test_meter_identity()
     test_registry_is_the_list()
     test_lane_name()
