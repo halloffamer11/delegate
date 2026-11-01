@@ -23,12 +23,23 @@ import setup_tui
 from catalog import CatalogError, load_json, validate_lanes, validate_routing, write_json
 from harnesses import NAMES as HARNESSES
 
-# The wizard refreshes the Artificial Analysis rows itself, so that one command
-# is one command (ticket 33). The fetch goes where `effort.py aa` would put it.
-AA_CACHE_DIR = os.path.expanduser("~/.cache/delegate/bench/aa")
+# The wizard refreshes the benchmark rows itself, so that one command is one
+# command (ticket 33). Each source's fetch goes where `effort.py <source>`
+# would put it, under one cache directory per source.
+BENCH_CACHE_DIR = os.path.expanduser("~/.cache/delegate/bench")
+AA_CACHE_DIR = os.path.join(BENCH_CACHE_DIR, "aa")
 AA_MAX_AGE = 24 * 60 * 60
 # The rows a fixture run reads instead of fetching, beside the harness fixtures.
 AA_FIXTURE = "aa-accepted.json"
+# Every source the wizard refreshes, in the order the note names them: (source,
+# the name the note prints, whether a launch without its rows gains them). The
+# SWE Refactor rows stay evidence the wizard reads only when it is given them
+# (the Makefile's DELEGATE_ROWS), so a refresh replaces them and never adds them.
+REFRESHED_SOURCES = (
+    (effort.AA_SOURCE, "Artificial Analysis", True),
+    (effort.TBENCH_SOURCE, "Terminal-Bench", True),
+    (effort.SWERB_SOURCE, "SWE Refactor Bench", False),
+)
 
 # A native Lane runs in-process in its orchestrator, so the Lane is not live
 # until its agent file is (ticket 22). Which orchestrators run Lanes natively,
@@ -293,8 +304,8 @@ def ask_routing(routing_doc):
             routing_doc["meters"] = True
 
 
-def aa_rows_path(paths):
-    """The `--effort-rows` file that holds Artificial Analysis rows, or None."""
+def source_rows_path(paths, source):
+    """The `--effort-rows` file that holds `source`'s rows, or None."""
     for path in paths or ():
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -302,63 +313,111 @@ def aa_rows_path(paths):
         except (OSError, json.JSONDecodeError):
             continue
         if isinstance(data, list) and any(
-            isinstance(row, dict) and row.get("source") == effort.AA_SOURCE for row in data
+            isinstance(row, dict) and row.get("source") == source for row in data
         ):
             return path
     return None
 
 
-def _with_aa_rows(paths, refreshed):
-    """`paths` with the Artificial Analysis file replaced by `refreshed`."""
-    here = aa_rows_path(paths)
+def aa_rows_path(paths):
+    """The `--effort-rows` file that holds Artificial Analysis rows, or None."""
+    return source_rows_path(paths, effort.AA_SOURCE)
+
+
+def _with_source_rows(paths, source, refreshed, append=True):
+    """`paths` with `source`'s file replaced by `refreshed`; a list without
+    one gains it when `append`."""
+    here = source_rows_path(paths, source)
     if here is None:
-        return list(paths) + [refreshed]
+        return list(paths) + [refreshed] if append else list(paths)
     return [refreshed if path == here else path for path in paths]
 
 
-def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
-                        max_age=AA_MAX_AGE, fetch=None, force=False, fallback=None):
-    """(the `--effort-rows` list with the Artificial Analysis rows refreshed,
-    one line saying where they came from).
+def _with_aa_rows(paths, refreshed):
+    """`paths` with the Artificial Analysis file replaced by `refreshed`."""
+    return _with_source_rows(paths, effort.AA_SOURCE, refreshed)
 
-    `make delegate-wizard` is the one command (ticket 33), so the wizard reads
-    the rows itself rather than asking for `effort.py aa` first. A fetch from
-    the last 24 hours is reused, unless `force` — the harnesses page's `r`,
-    which asks for the rows as they are now — and a fetch that fails keeps
-    the repo's rows and says why: a leaderboard that is down must never stop
-    a catalog edit. `fallback` is the paths launch used, which the `r` passes:
-    a rescan whose fetch fails keeps the rows the pages already show, not the
-    repo's, which may be older than the cache launch read. Terminal-Bench rows
-    stay as they are, because extracting them needs a worker. `fixture_dir`
-    reads a saved rows file beside the harness fixtures, so a test and a
-    fixture run touch no network and no cache.
+
+def refresh_source_rows(source, paths, cache_dir=None, fixture_dir=None, now=None,
+                        max_age=AA_MAX_AGE, fetch=None, force=False, fallback=None,
+                        label=None, append=True):
+    """(the `--effort-rows` list with `source`'s rows refreshed, one line
+    saying where they came from).
+
+    A fetch from the last 24 hours is reused, unless `force` — the harnesses
+    page's `r`, which asks for the rows as they are now — and a fetch that
+    fails keeps the rows given and says why: a leaderboard that is down must
+    never stop a catalog edit. `fallback` is the paths launch used, which the
+    `r` passes: a rescan whose fetch fails keeps the rows the pages already
+    show, not the repo's, which may be older than the cache launch read.
+    `fixture_dir` reads `<source>-accepted.json` beside the harness fixtures,
+    so a test and a fixture run touch no network and no cache.
     """
     paths = list(paths or [])
+    label = label or source
     if fixture_dir is not None:
-        fixture = os.path.join(fixture_dir, AA_FIXTURE)
+        fixture = os.path.join(fixture_dir, f"{source}-accepted.json")
         if not os.path.isfile(fixture):
-            return paths, f"Benchmark rows: repo rows; no {AA_FIXTURE} in {fixture_dir}"
-        return _with_aa_rows(paths, fixture), f"Benchmark rows: Artificial Analysis from {fixture}"
-    cache_dir = cache_dir or AA_CACHE_DIR
+            return paths, f"{label}: repo rows; no {os.path.basename(fixture)} in {fixture_dir}"
+        return _with_source_rows(paths, source, fixture, append), f"{label} from {fixture}"
+    cache_dir = cache_dir or os.path.join(BENCH_CACHE_DIR, source)
     accepted = os.path.join(cache_dir, "accepted.json")
     now = time.time() if now is None else now
     if os.path.isfile(accepted) and not force:
         age = now - os.path.getmtime(accepted)
         if 0 <= age < max_age:
-            return (_with_aa_rows(paths, accepted),
-                    f"Benchmark rows: Artificial Analysis fetched {int(age // 3600)}h ago, "
-                    "still fresh")
+            return (_with_source_rows(paths, source, accepted, append),
+                    f"{label} fetched {int(age // 3600)}h ago, still fresh")
     try:
-        (fetch or effort.run_aa)(cache_dir, quiet=True)
+        (fetch or (lambda out_dir, **kw: effort.run_source(source, out_dir, **kw)))(
+            cache_dir, quiet=True)
     except Exception as e:
         # Every failure here is the same failure to the operator: the rows are
         # the repo's, or on a rescan launch's, and the reason is on the start
         # page.
         if fallback is not None:
-            return (list(fallback),
-                    f"Benchmark rows: the rows launch used; the Artificial Analysis fetch failed: {e}")
-        return paths, f"Benchmark rows: repo rows; the Artificial Analysis fetch failed: {e}"
-    return _with_aa_rows(paths, accepted), "Benchmark rows: Artificial Analysis fetched just now"
+            kept = source_rows_path(fallback, source)
+            if kept is not None:
+                paths = _with_source_rows(paths, source, kept, append)
+            return paths, f"{label}: the rows launch used; the fetch failed: {e}"
+        return paths, f"{label}: repo rows; the fetch failed: {e}"
+    return _with_source_rows(paths, source, accepted, append), f"{label} fetched just now"
+
+
+def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
+                        max_age=AA_MAX_AGE, fetch=None, force=False, fallback=None):
+    """`refresh_source_rows` for Artificial Analysis alone. `fetch` defaults
+    to `effort.run_aa`."""
+    paths, note = refresh_source_rows(
+        effort.AA_SOURCE, paths, cache_dir=cache_dir or AA_CACHE_DIR, fixture_dir=fixture_dir,
+        now=now, max_age=max_age, fetch=fetch or effort.run_aa, force=force,
+        fallback=fallback, label="Artificial Analysis")
+    return paths, f"Benchmark rows: {note}"
+
+
+def refresh_all_rows(paths, fixture_dir=None, force=False, fallback=None, cache_root=None,
+                     fetchers=None, now=None, sources=REFRESHED_SOURCES):
+    """(the `--effort-rows` list with every source in REFRESHED_SOURCES
+    refreshed, one line naming where each source's rows came from).
+
+    Each source refreshes on its own: one leaderboard that is down keeps its
+    own rows and leaves the others fresh. `fetchers` maps a source to the
+    fetch a test stands in for it; `cache_root` holds one directory per
+    source. A fixture run reads only the rows files beside the harness
+    fixtures, and names Artificial Analysis even when it has none."""
+    paths = list(paths or [])
+    notes = []
+    for source, label, append in sources:
+        if (fixture_dir is not None and source != effort.AA_SOURCE
+                and not os.path.isfile(os.path.join(fixture_dir, f"{source}-accepted.json"))):
+            continue
+        paths, note = refresh_source_rows(
+            source, paths,
+            cache_dir=os.path.join(cache_root, source) if cache_root else None,
+            fixture_dir=fixture_dir, now=now, fetch=(fetchers or {}).get(source),
+            force=force, fallback=fallback, label=label, append=append)
+        notes.append(note)
+    return paths, "Benchmark rows: " + "; ".join(notes)
 
 
 def scan(args, lanes_doc, force=False, fallback=None):
@@ -382,8 +441,8 @@ def scan(args, lanes_doc, force=False, fallback=None):
         try:
             rows_box["value"] = (
                 (list(args.effort_rows or []), "") if args.no_discover
-                else refresh_effort_rows(args.effort_rows, fixture_dir=args.fixture_dir,
-                                         force=force, fallback=fallback)
+                else refresh_all_rows(args.effort_rows, fixture_dir=args.fixture_dir,
+                                      force=force, fallback=fallback)
             )
         except Exception as e:
             # a thread that raises would print a traceback over the wizard

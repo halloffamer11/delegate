@@ -1119,6 +1119,11 @@ except Exception as e:
 try:
     with open(os.path.join(FIXTURES, "real_aa_model_page_sample.html"), "rb") as f:
         _packet, AA_ROWS = effort.aa_extract(f.read(), observed="2026-09-11")
+    # the eight components the 2026-09 reader took off this page; the reader
+    # now takes every score the page holds, and more boards move the majority
+    AA_ROWS = [r for r in AA_ROWS if r["benchmark"] in (
+        "Terminal-Bench 2.1", "AutomationBench", "AA-LCR", "IFBench", "Omniscience",
+        "GPQA Diamond", "GDPval", "MMMU-Pro", "Artificial Analysis Intelligence Index")]
     doc = astra_lanes()
     lane_models = {lane["model"] for lane in doc["lanes"].values()}
     resolved = {(r["model"], published_names.resolve_published_model(r["model"], doc)) for r in AA_ROWS}

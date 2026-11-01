@@ -88,7 +88,7 @@ PROVENANCE_STEMS = {
     "verified": ("verif", "official"),
     "self-reported": ("self-report", "submitt", "communit"),
 }
-NUMERIC_FIELDS = ("score", "cost_usd", "tokens")
+NUMERIC_FIELDS = ("score", "cost_usd", "tokens", "index_cost_usd")
 CLIENT_RENDERED_MSG = "no static tabular data; page is likely client-rendered"
 SR_CLASSES = frozenset({"sr-only", "visually-hidden", "screen-reader-text"})
 VOID_TAGS = frozenset({
@@ -1165,23 +1165,66 @@ SOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "assets", "sources.json")
 # Every variant object carries this key, and nothing else on the page does.
 AA_MARKER_KEY = "intelligenceIndexCostPerTask"
-# payload field -> the benchmark the row names.
+# Each variant lists the Intelligence Index's evaluations, each with its own
+# score, cost per task and output tokens per task. The list is read as the page
+# gives it, so an evaluation Artificial Analysis adds reaches the rows the day
+# it appears, named by its slug until this table gives it a display name.
+AA_EVALUATIONS_KEY = "intelligenceIndexEvaluations"
+AA_EVALUATION_NAMES = {
+    "aa-briefcase": "AA-Briefcase",
+    "automationbench-aa": "AutomationBench",
+    "gdp-pdf": "GDP.pdf",
+    "terminalbench-4-0": "Terminal-Bench 4.0",
+    "frontiercode-2-0": "FrontierCode 2.0",
+    "critpt-v2-hard": "CritPt v2 Hard",
+    "terminal-bench-science": "Terminal-Bench-Science",
+    "omniscience": "Omniscience",
+    "hle-diamond": "HLE-Diamond",
+}
+# Scores that sit on the variant itself: payload field -> the benchmark the row
+# names. Index evaluations appear here too, so a payload without the
+# evaluations list still yields them; a benchmark the list already gave is not
+# written twice. The rest are Artificial Analysis' standalone and legacy
+# evaluations, which it runs on fewer models; a field the page drops yields no
+# row, and a renamed one keeps its old spelling here so an older saved page
+# still reads (terminalbenchV21 and gdpvalNormalized are the 2026-09 names).
 AA_COMPONENTS = (
-    ("terminalbenchV21", "Terminal-Bench 2.1"),
+    ("terminalBench40", "Terminal-Bench 4.0"),
+    ("frontierCode20", "FrontierCode 2.0"),
     ("automationBenchPartialScore", "AutomationBench"),
-    ("lcr", "AA-LCR"),
-    ("ifbench", "IFBench"),
+    ("gdpPdfAllPass", "GDP.pdf"),
+    ("critptAgenticHard", "CritPt v2 Hard"),
+    ("terminalBenchScience", "Terminal-Bench-Science"),
     ("omniscience", "Omniscience"),
-    ("gpqa", "GPQA Diamond"),
+    ("hleDiamond", "HLE-Diamond"),
+    ("gdpval", "GDPval"),
     ("gdpvalNormalized", "GDPval"),
+    ("harveyLab", "Harvey LAB"),
+    ("analystAgent", "AA-AnalystAgent"),
+    ("enterpriseOpsGym", "EnterpriseOps-Gym"),
+    ("apexAgents", "APEX-Agents"),
+    ("itBenchSre", "ITBench"),
+    ("scicode", "SciCode"),
+    ("terminalBench21", "Terminal-Bench 2.1"),
+    ("terminalbenchV21", "Terminal-Bench 2.1"),
+    ("lcr", "AA-LCR"),
+    ("mlcrOverall", "MLCR"),
+    ("critpt", "CritPt"),
+    ("hle", "Humanity's Last Exam"),
+    ("gpqa", "GPQA Diamond"),
+    ("ifbench", "IFBench"),
     ("mmmuPro", "MMMU-Pro"),
+    ("tauBanking", "tau3-Banking"),
 )
+# The unit a field's score is printed in, where it is not a share or index.
+AA_SCORE_UNITS = {"gdpval": "Elo", "aa-briefcase": "Elo"}
 # The composite is emitted so a reader can see it, flagged `composite` so the
 # carry page never decides on it: the sources file says its weighting is not
 # published.
 AA_COMPOSITE = ("intelligenceIndex", "Artificial Analysis Intelligence Index")
-# The index's cost and output tokens per task: one figure per variant, the same
-# on every benchmark row of that variant.
+# The index's cost and output tokens per task: one figure per variant, the
+# figure a standalone evaluation's row carries, since the page gives no cost of
+# its own for those.
 AA_COST_FIELD = "intelligenceIndexCostPerTask.cost.total"
 AA_TOKENS_FIELD = "intelligenceIndexOutputTokensPerTask.output"
 AA_EFFORT_WORDS = tuple(e for e in EFFORT_VALUES if e not in ("none", "unspecified"))
@@ -1273,31 +1316,81 @@ def _number(value):
     return value
 
 
-def aa_rows(variants, url, observed):
-    """One row per variant per component score it has.
+def _variant_effort(variant):
+    """The effort the variant states: its `effort.slug` field when the page
+    gives one, else the word in its name."""
+    slug = _dig(variant, "effort.slug")
+    if isinstance(slug, str) and slug.strip().lower() in AA_EFFORT_WORDS:
+        return slug.strip().lower()
+    return _aa_effort(variant["name"])
 
-    `model` is the release name (`GPT-5.6 Sol`) and `effort` the word in the
-    variant name, so the catalog resolves the row the way it resolves any other
-    source's. Beyond the worker row schema each row keeps `variant`, the name
-    the page printed, and `fields`, the payload field behind each number.
+
+def _aa_scores(variant):
+    """(benchmark, score, cost, tokens, fields) for each score the variant
+    holds: the Index evaluations first, each with its own cost and tokens,
+    then each field in AA_COMPONENTS whose benchmark the list did not give,
+    which carries the Index's cost and tokens, and last the composite."""
+    cost = _number(_dig(variant, AA_COST_FIELD))
+    tokens = _number(_dig(variant, AA_TOKENS_FIELD))
+    index_fields = {"cost_usd": AA_COST_FIELD, "tokens": AA_TOKENS_FIELD}
+    seen = set()
+    evaluations = variant.get(AA_EVALUATIONS_KEY)
+    for entry in evaluations if isinstance(evaluations, list) else ():
+        if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str):
+            continue
+        slug = entry["slug"]
+        score = _number(entry.get("score"))
+        benchmark = AA_EVALUATION_NAMES.get(slug, slug)
+        if score is None or benchmark in seen:
+            continue
+        seen.add(benchmark)
+        where = f"{AA_EVALUATIONS_KEY}[{slug}]"
+        each_cost = _number(entry.get("costPerTask"))
+        each_tokens = _number(entry.get("outputTokensPerTask"))
+        yield (benchmark, score,
+               each_cost if each_cost is not None else cost,
+               each_tokens if each_tokens is not None else tokens,
+               {"score": f"{where}.score",
+                "cost_usd": f"{where}.costPerTask" if each_cost is not None else AA_COST_FIELD,
+                "tokens": (f"{where}.outputTokensPerTask" if each_tokens is not None
+                           else AA_TOKENS_FIELD)},
+               AA_SCORE_UNITS.get(slug))
+    for field, benchmark in AA_COMPONENTS:
+        score = _number(variant.get(field))
+        if score is None or benchmark in seen:
+            continue
+        seen.add(benchmark)
+        yield benchmark, score, cost, tokens, dict(index_fields, score=field), AA_SCORE_UNITS.get(field)
+
+
+def aa_rows(variants, url, observed):
+    """One row per variant per score it has.
+
+    `model` is the release name (`GPT-5.6 Sol`) and `effort` the variant's
+    stated effort, so the catalog resolves the row the way it resolves any
+    other source's. Beyond the worker row schema each row keeps `variant`, the
+    name the page printed, and `fields`, the payload field behind each number.
     """
     rows = []
     for variant in variants:
         name = variant["name"]
-        effort = _aa_effort(name)
+        effort = _variant_effort(variant)
         if effort is None:
             continue
         release = _dig(variant, "release.name")
         model = release if isinstance(release, str) and release.strip() else name.split(" (")[0]
-        cost = _number(_dig(variant, AA_COST_FIELD))
-        tokens = _number(_dig(variant, AA_TOKENS_FIELD))
-        for field, benchmark in AA_COMPONENTS + (AA_COMPOSITE,):
-            score = _number(variant.get(field))
-            if score is None:
-                continue
+        index_cost = _number(_dig(variant, AA_COST_FIELD))
+        scores = list(_aa_scores(variant))
+        composite = _number(variant.get(AA_COMPOSITE[0]))
+        if composite is not None:
+            scores.append((AA_COMPOSITE[1], composite, _number(_dig(variant, AA_COST_FIELD)),
+                           _number(_dig(variant, AA_TOKENS_FIELD)),
+                           {"score": AA_COMPOSITE[0], "cost_usd": AA_COST_FIELD,
+                            "tokens": AA_TOKENS_FIELD}, None))
+        for benchmark, score, cost, tokens, fields, unit in scores:
             row = {
                 "source": AA_SOURCE, "url": url, "model": model, "effort": effort,
-                "benchmark": benchmark, "score": score, "score_unit": None,
+                "benchmark": benchmark, "score": score, "score_unit": unit,
                 "cost_usd": cost, "tokens": tokens, "observed": observed,
                 # The page has no per-row badge to read, so nothing here can
                 # claim `verified`; that AA runs every model itself is a fact
@@ -1306,9 +1399,13 @@ def aa_rows(variants, url, observed):
                 # No lane runs at `none`, and ticket 15 keeps it uncertain.
                 "uncertain": effort == "none",
                 "variant": name,
-                "fields": {"score": field, "cost_usd": AA_COST_FIELD, "tokens": AA_TOKENS_FIELD},
+                "fields": fields,
             }
-            if (field, benchmark) == AA_COMPOSITE:
+            if index_cost is not None:
+                # what running the whole Index costs this variant per task, the
+                # model-level figure, beside the board's own cost
+                row["index_cost_usd"] = index_cost
+            if benchmark == AA_COMPOSITE[1]:
                 row["composite"] = True
             rows.append(row)
     return rows
@@ -1335,6 +1432,136 @@ def aa_extract(raw_bytes, url=None, observed=None):
     return "\n".join(lines) + "\n", aa_rows(variants, url, observed)
 
 
+# --- Terminal-Bench: the leaderboard rows the page embeds --------------------
+# tbench.ai renders its leaderboard from rows in the Next.js flight payload:
+# one object per agent-model-effort run with `metadata` and `metrics`. The
+# reader copies the numbers out and `check` verifies them, as for AA.
+
+TBENCH_SOURCE = "tbench"
+TBENCH_ROWS = re.compile(r'"rows":\[')
+TBENCH_TITLE = re.compile(r'"title":"([^"\\]+)"')
+
+
+def _tbench_model(label, url):
+    """The model a Terminal-Bench row names: the slug its model link ends in
+    when that slug ends in the printed label (`Opus 5.5` links to
+    .../claude-opus-5-5), else the label. The board prints short names a
+    catalog cannot match by formatting, and the link is the source's own
+    statement of which model it ran, so no name is guessed here."""
+    if not isinstance(url, str):
+        return label
+    slug = url.split("?")[0].split("#")[0].rstrip("/").rsplit("/", 1)[-1]
+    norm = lambda v: re.sub(r"[-_. ]+", "-", v.strip().lower()).strip("-")
+    if slug and re.search(r"\d", slug) and (norm(slug) == norm(label)
+                                            or norm(slug).endswith("-" + norm(label))):
+        return slug
+    return label
+
+
+def tbench_rows(payload, observed):
+    """One row per leaderboard row: the model and effort the run names, the
+    leaderboard's title as the benchmark, the whole run's cost and tokens.
+    Rows come in rank order, so where two agents ran one model at one effort
+    the first, the higher scoring, is the one de-duplication keeps."""
+    decoder = json.JSONDecoder()
+    rows = []
+    for m in TBENCH_ROWS.finditer(payload):
+        # the leaderboard's title is the last one printed before its rows
+        titles = TBENCH_TITLE.findall(payload, max(0, m.start() - 20000), m.start())
+        if not titles:
+            continue
+        try:
+            board, _end = decoder.raw_decode(payload, m.end() - 1)
+        except json.JSONDecodeError:
+            continue
+        for item in board if isinstance(board, list) else ():
+            meta = item.get("metadata") if isinstance(item, dict) else None
+            metrics = item.get("metrics") if isinstance(item, dict) else None
+            if not isinstance(meta, dict) or not isinstance(metrics, dict):
+                continue
+            model = _dig(meta, "model_display.label")
+            score = _number(metrics.get("accuracy"))
+            if not isinstance(model, str) or not model.strip() or score is None:
+                continue
+            effort = str(meta.get("reasoning_effort") or "").strip().lower()
+            if effort not in EFFORT_VALUES:
+                effort = "unspecified"
+            url = _dig(meta, "model_display.url")
+            rows.append({
+                "source": TBENCH_SOURCE, "url": url,
+                "model": _tbench_model(model.strip(), url), "label": model.strip(),
+                "effort": effort, "benchmark": titles[-1],
+                "score": score, "score_unit": "%",
+                "cost_usd": _number(metrics.get("total_cost_usd")),
+                "tokens": _number(metrics.get("total_tokens")),
+                "observed": observed, "submitted": meta.get("date"),
+                "agent": _dig(meta, "agent_display.label"),
+                "provenance": "unlabelled", "uncertain": False,
+            })
+    return deduplicate_rows(rows)
+
+
+def tbench_extract(raw_bytes, url=None, observed=None):
+    """(packet, rows) for the Terminal-Bench leaderboard page."""
+    observed = observed or utc_today()
+    html_text = raw_bytes.decode("utf-8", errors="replace")
+    payload = flight_payload(html_text)
+    rows = tbench_rows(payload, observed)
+    if not rows:
+        raise EffortError("the page payload holds no leaderboard rows; the site layout may have changed")
+    title_match = HTML_TITLE.search(html_text)
+    title = collapse_ws(html.unescape(title_match.group(1))) if title_match else ""
+    lines = packet_header(TBENCH_SOURCE, url, title, hashlib.sha256(raw_bytes).hexdigest(), observed)
+    lines += ["## payload", payload.rstrip("\n")]
+    return "\n".join(lines) + "\n", rows
+
+
+# --- SWE Refactor Bench: the per-effort summaries the page prints -------------
+# The leaderboard is static HTML; each model-effort bar carries one summary
+# line ("claude-opus-5 · high — score 34.5, 4 accepted / 4 broken / 2 blind of
+# 20 runs, $55.7 per task"). Those lines are the packet.
+
+SWERB_SOURCE = "swerb"
+SWERB_BENCHMARK = "SWE Refactor Bench"
+SWERB_LINE = re.compile(
+    r"([A-Za-z0-9][A-Za-z0-9._-]*) · ([a-z]+) — score ([0-9.]+), [^\"<]*?"
+    r"of ([0-9]+) runs, \$([0-9.]+) per task")
+
+
+def swerb_extract(raw_bytes, url=None, observed=None):
+    """(packet, rows) for the SWE Refactor Bench leaderboard page."""
+    observed = observed or utc_today()
+    text = html.unescape(raw_bytes.decode("utf-8", errors="replace"))
+    lines, rows = [], []
+    for m in SWERB_LINE.finditer(text):
+        model, effort, score, _runs, cost = m.groups()
+        if effort not in EFFORT_VALUES:
+            continue
+        lines.append(m.group(0))
+        rows.append({
+            "source": SWERB_SOURCE, "url": url, "model": model, "effort": effort,
+            "benchmark": SWERB_BENCHMARK, "score": float(score), "score_unit": None,
+            "cost_usd": float(cost), "tokens": None, "observed": observed,
+            "provenance": "unlabelled", "uncertain": False,
+        })
+    rows = deduplicate_rows(rows)
+    if not rows:
+        raise EffortError("the page holds no per-effort summaries; the site layout may have changed")
+    title_match = HTML_TITLE.search(text)
+    title = collapse_ws(title_match.group(1)) if title_match else ""
+    header = packet_header(SWERB_SOURCE, url, title, hashlib.sha256(raw_bytes).hexdigest(), observed)
+    packet = header + ["## summaries"] + sorted(set(lines))
+    return "\n".join(packet) + "\n", rows
+
+
+# Each source a page reader serves: source id -> extract(raw, url, observed).
+READERS = {
+    AA_SOURCE: aa_extract,
+    TBENCH_SOURCE: tbench_extract,
+    SWERB_SOURCE: swerb_extract,
+}
+
+
 def source_url(source_id):
     """The page the sources file approves for `source_id`."""
     try:
@@ -1357,11 +1584,13 @@ def fetch_page(url):
         raise EffortError(f"{url}: cannot fetch: {e}")
 
 
-def run_aa(out_dir, url=None, html_file=None, quiet=False):
-    """Read one Artificial Analysis model page, write packet.txt and rows.json,
+def run_source(source, out_dir, url=None, html_file=None, quiet=False):
+    """Read one source's page with its reader, write packet.txt and rows.json,
     then check them. `html_file` reads a saved page instead of fetching; its
     `url` is then only what the rows record. `quiet` leaves the lines to a
     caller that prints its own, as the wizard's refresh does (ticket 33)."""
+    if source not in READERS:
+        raise EffortError(f"no page reader for source {source}")
     if html_file:
         try:
             with open(html_file, "rb") as f:
@@ -1369,9 +1598,9 @@ def run_aa(out_dir, url=None, html_file=None, quiet=False):
         except OSError as e:
             raise EffortError(f"{html_file}: cannot read: {e}")
     else:
-        url = url or source_url(AA_SOURCE)
+        url = url or source_url(source)
         raw = fetch_page(url)
-    packet_text, rows = aa_extract(raw, url=url)
+    packet_text, rows = READERS[source](raw, url=url)
     os.makedirs(out_dir, exist_ok=True)
     packet_path = os.path.join(out_dir, "packet.txt")
     rows_path = os.path.join(out_dir, "rows.json")
@@ -1380,8 +1609,25 @@ def run_aa(out_dir, url=None, html_file=None, quiet=False):
     with open(rows_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(format_json(rows))
     if not quiet:
-        print(f"aa: {len({r['variant'] for r in rows})} variants with an effort, {len(rows)} rows")
+        boards = len({r["benchmark"] for r in rows})
+        print(f"{source}: {len({(r['model'], r['effort']) for r in rows})} model-efforts, "
+              f"{boards} boards, {len(rows)} rows")
     return check_files(rows_path, packet_path, out_dir=out_dir, quiet=quiet)
+
+
+def run_aa(out_dir, url=None, html_file=None, quiet=False):
+    """`run_source` for Artificial Analysis."""
+    return run_source(AA_SOURCE, out_dir, url=url, html_file=html_file, quiet=quiet)
+
+
+def run_tbench(out_dir, url=None, html_file=None, quiet=False):
+    """`run_source` for Terminal-Bench."""
+    return run_source(TBENCH_SOURCE, out_dir, url=url, html_file=html_file, quiet=quiet)
+
+
+def run_swerb(out_dir, url=None, html_file=None, quiet=False):
+    """`run_source` for SWE Refactor Bench."""
+    return run_source(SWERB_SOURCE, out_dir, url=url, html_file=html_file, quiet=quiet)
 
 
 def main(argv=None):
@@ -1438,15 +1684,16 @@ def main(argv=None):
         help=f"maximum byte size per packet chunk (default {DEFAULT_BUDGET})",
     )
 
-    p_aa = sub.add_parser(
-        "aa", help="read an Artificial Analysis model page's own dataset, then check",
-    )
-    p_aa.add_argument("--out-dir", required=True, help="output directory")
-    p_aa.add_argument(
-        "--url", default=None,
-        help="model page to fetch (default: the page sources.json approves)",
-    )
-    p_aa.add_argument("--html", default=None, help="saved page to read instead of fetching")
+    for source, what in ((AA_SOURCE, "an Artificial Analysis model page's own dataset"),
+                         (TBENCH_SOURCE, "the Terminal-Bench leaderboard's own rows"),
+                         (SWERB_SOURCE, "the SWE Refactor Bench per-effort summaries")):
+        p_src = sub.add_parser(source, help=f"read {what}, then check")
+        p_src.add_argument("--out-dir", required=True, help="output directory")
+        p_src.add_argument(
+            "--url", default=None,
+            help="page to fetch (default: the page sources.json approves)",
+        )
+        p_src.add_argument("--html", default=None, help="saved page to read instead of fetching")
 
     args = parser.parse_args(argv)
 
@@ -1468,9 +1715,9 @@ def main(argv=None):
             )
             if rejected:
                 sys.exit(1)
-        elif args.cmd == "aa":
-            _checked, _accepted, rejected = run_aa(
-                args.out_dir, url=args.url, html_file=args.html,
+        elif args.cmd in READERS:
+            _checked, _accepted, rejected = run_source(
+                args.cmd, args.out_dir, url=args.url, html_file=args.html,
             )
             if rejected:
                 sys.exit(1)

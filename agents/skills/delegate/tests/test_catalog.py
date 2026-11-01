@@ -791,10 +791,13 @@ _denotes = {
     "Claude Opus 5": "claude-opus-5", "Opus 5": "claude-opus-5",
     "claude-opus-5": "claude-opus-5",
     # "Opus 5.5", the short form, is deliberately absent: the opus55 lanes carry
-    # no `published_as` for it, so it resolves to nothing. No rows file prints it
-    # yet, and the `_seen` check below fails the day one does, which is when
-    # someone has to decide whether the catalog should claim it.
-    "Claude Opus 5.5": "claude-opus-5-5",
+    # no `published_as` for it, so it resolves to nothing. Terminal-Bench prints
+    # it, and its reader writes the slug the board links to instead
+    # (`effort._tbench_model`), so the rows carry `claude-opus-5-5`.
+    "Claude Opus 5.5": "claude-opus-5-5", "claude-opus-5-5": "claude-opus-5-5",
+    "Claude Sonnet 5.5": "claude-sonnet-5-5", "claude-sonnet-5-5": "claude-sonnet-5-5",
+    "Claude Haiku 5.5": "claude-haiku-5-5",
+    "claude-opus-4-8": "claude-opus-4-8",
     "Claude Opus 4.8": "claude-opus-4-8", "Opus 4.8": "claude-opus-4-8",
     "Claude Sonnet 5": "claude-sonnet-5", "Sonnet 5": "claude-sonnet-5",
     "claude-sonnet-5": "claude-sonnet-5",

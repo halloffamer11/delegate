@@ -932,8 +932,10 @@ try:
            len(composite) == len(CATALOG_VARIANTS | STRANGERS)
            and {r["benchmark"] for r in composite} == {"Artificial Analysis Intelligence Index"}
            and {r["fields"]["score"] for r in composite} == {"intelligenceIndex"}
-           and sol_parts == ["AA-LCR", "AutomationBench", "GDPval", "GPQA Diamond",
-                             "IFBench", "MMMU-Pro", "Omniscience", "Terminal-Bench 2.1"]
+           and sol_parts == ["AA-LCR", "AutomationBench", "CritPt", "GDP.pdf", "GDPval",
+                             "GPQA Diamond", "Humanity's Last Exam", "IFBench", "MLCR",
+                             "MMMU-Pro", "Omniscience", "SciCode", "Terminal-Bench 2.1",
+                             "tau3-Banking"]
            and len(sol_index) == 1 and sol_index[0]["score"] == 42.4991760420519
            and all("composite" not in r for r in aa_rows if r["benchmark"] != sol_index[0]["benchmark"]),
            f"composite={len(composite)} sol_parts={sol_parts} sol_index={sol_index[:1]}")
@@ -990,6 +992,117 @@ try:
                f"rc={res.returncode} stderr={res.stderr!r}")
 except Exception as e:
     record("aa CLI: one command writes the packet, the rows and check's verdict", False, repr(e))
+
+
+# --- every board a source page carries (refresh-all-benchmarks) ----------------
+# The 2026-11-01 fixture is four variant objects copied verbatim from the live
+# /models page: Artificial Analysis Index v5.0 lists its evaluations per variant
+# and renamed the 2026-09 fields (terminalbenchV21, gdpvalNormalized), which had
+# silently stopped the Terminal-Bench and GDPval rows.
+AA_PAGE_V5 = fixture("real_aa_model_page_2026-11-01.html")
+with open(AA_PAGE_V5, "rb") as f:
+    aa_page_v5 = f.read()
+
+try:
+    v5_packet, v5_rows = effort.aa_extract(aa_page_v5, url=AA_URL, observed="2026-11-01")
+    opus = {r["benchmark"]: r for r in v5_rows if (r["model"], r["effort"]) == ("Claude Opus 5.5", "high")}
+    tb = opus.get("Terminal-Bench 4.0") or {}
+    gdpval = opus.get("GDPval") or {}
+    index = opus.get("Artificial Analysis Intelligence Index") or {}
+    pairs = {(r["model"], r["effort"]) for r in v5_rows}
+    ok_rows, bad_rows = effort.check_rows(v5_rows, v5_packet)
+    record("aa v5: every Index evaluation is a row with its own cost and tokens",
+           {"AA-Briefcase", "AutomationBench", "GDP.pdf", "Terminal-Bench 4.0", "FrontierCode 2.0",
+            "CritPt v2 Hard", "Terminal-Bench-Science", "Omniscience", "HLE-Diamond"} <= set(opus)
+           and tb.get("score") == 0.565656565656566 and tb.get("cost_usd") == 5.118905183990514
+           and tb.get("tokens") == 100178.16666666667
+           and tb.get("fields", {}).get("score") == "intelligenceIndexEvaluations[terminalbench-4-0].score"
+           and tb.get("index_cost_usd") == index.get("cost_usd") == 3.4646622820973185,
+           f"boards={sorted(opus)} tb={tb}")
+    record("aa v5: standalone boards read their renamed fields, at the Index's cost",
+           gdpval.get("score") == 1713.6 and gdpval.get("score_unit") == "Elo"
+           and gdpval.get("fields", {}).get("score") == "gdpval"
+           and gdpval.get("cost_usd") == 3.4646622820973185
+           and {"SciCode", "AA-LCR", "MMMU-Pro"} <= set(opus)
+           and "Terminal-Bench 2.1" not in opus,
+           f"gdpval={gdpval} boards={sorted(opus)}")
+    record("aa v5: the effort comes from the variant's effort field when its name has none",
+           pairs == {("Claude Opus 5.5", "high"), ("GPT-6.1 Sol", "high"),
+                     ("GPT-6.1 Terra", "none"), ("Kimi K3.1 Pro", "max")},
+           f"pairs={sorted(pairs)}")
+    record("aa v5: check accepts every row, the Index cost included",
+           len(ok_rows) == len(v5_rows) and not bad_rows,
+           f"accepted={len(ok_rows)}/{len(v5_rows)} first_reject={bad_rows[:1]}")
+    payload = effort.flight_payload(aa_page_v5.decode("utf-8"))
+    variants = effort.aa_variants(payload)
+    for v in variants:
+        v["intelligenceIndexEvaluations"] = list(v["intelligenceIndexEvaluations"]) + [
+            {"slug": "new-board-9", "score": 0.5, "costPerTask": 1.25, "outputTokensPerTask": 900}]
+    added = [r for r in effort.aa_rows(variants, AA_URL, "2026-11-01") if r["benchmark"] == "new-board-9"]
+    record("aa v5: an evaluation the page adds becomes a row the day it appears, named by its slug",
+           len(added) == len(variants) and {r["cost_usd"] for r in added} == {1.25},
+           f"added={added[:1]}")
+except Exception as e:
+    record("aa v5: every Index evaluation is a row with its own cost and tokens", False, repr(e))
+
+def _same_rows(rows, accepted_path, keys, renamed=None):
+    renamed = renamed or {}
+    want = sorted(tuple(r.get(k) for k in keys) for r in load_json(accepted_path))
+    have = sorted(tuple(r.get(renamed.get(k, k)) for k in keys) for r in rows)
+    return want == have, f"missing={sorted(set(want) - set(have))[:3]} extra={sorted(set(have) - set(want))[:3]}"
+
+
+try:
+    with open(fixture("real_tbench_sample.html"), "rb") as f:
+        tb_packet, tb_rows = effort.tbench_extract(f.read(), url="https://www.tbench.ai/", observed="2026-09-12")
+    same, why = _same_rows(tb_rows, fixture("tbench-accepted.json"),
+                           ("model", "effort", "benchmark", "score", "cost_usd", "tokens", "url"),
+                           renamed={"model": "label"})
+    ok_rows, bad_rows = effort.check_rows(tb_rows, tb_packet)
+    # tbench-accepted.json and swerb-accepted.json are the rows a worker
+    # extracted from these pages in 2026-09, before the readers existed
+    record("tbench: the reader gives the rows the worker once extracted, with no worker",
+           same and len(ok_rows) == len(tb_rows) == 18, why)
+    with open(fixture("real_tbench_2026-11-01.html"), "rb") as f:
+        tb_packet, tb_rows = effort.tbench_extract(f.read(), url="https://www.tbench.ai/", observed="2026-11-01")
+    ok_rows, bad_rows = effort.check_rows(tb_rows, tb_packet)
+    opus = [r for r in tb_rows if (r["label"], r["effort"]) == ("Opus 5.5", "max")]
+    fable = {r["model"] for r in tb_rows if r["label"] == "Fable 5.1"}
+    record("tbench: the 2026-11 board gives every run, agent and submission date kept",
+           len(tb_rows) == 35 and not bad_rows
+           and len(opus) == 1 and opus[0]["score"] == 64.85 and opus[0]["cost_usd"] == 4718.65
+           and opus[0]["agent"] == "Claude Code" and opus[0]["submitted"] == "2026-09-22"
+           # the model is the slug its link spells; a link that spells none keeps the label
+           and opus[0]["model"] == "claude-opus-5-5" and fable == {"Fable 5.1"}
+           and opus[0]["benchmark"] == "Terminal-Bench 4.0" and opus[0]["observed"] == "2026-11-01",
+           f"rows={len(tb_rows)} rejected={bad_rows[:1]} opus={opus}")
+except Exception as e:
+    # tbench-accepted.json and swerb-accepted.json are the rows a worker
+    # extracted from these pages in 2026-09, before the readers existed
+    record("tbench: the reader gives the rows the worker once extracted, with no worker", False, repr(e))
+
+try:
+    with open(fixture("real_swerb_sample.html"), "rb") as f:
+        sw_packet, sw_rows = effort.swerb_extract(
+            f.read(), url="https://lab.einsia.ai/swe-refactor-bench/leaderboard/", observed="2026-09-10")
+    same, why = _same_rows(sw_rows, fixture("swerb-accepted.json"),
+                           ("model", "effort", "benchmark", "score", "cost_usd"))
+    ok_rows, bad_rows = effort.check_rows(sw_rows, sw_packet)
+    record("swerb: the reader gives the rows the worker once extracted, with no worker",
+           same and len(ok_rows) == len(sw_rows) == 26 and not bad_rows, why)
+except Exception as e:
+    record("swerb: the reader gives the rows the worker once extracted, with no worker", False, repr(e))
+
+try:
+    with tempfile.TemporaryDirectory() as td:
+        res = run_cli("tbench", "--html", fixture("real_tbench_2026-11-01.html"),
+                      "--url", "https://www.tbench.ai/", "--out-dir", td)
+        acc = load_json(os.path.join(td, "accepted.json"))
+        record("tbench CLI: one command writes the packet, the rows and check's verdict",
+               res.returncode == 0 and len(acc) == 35 and "checked=35 accepted=35 rejected=0" in res.stdout,
+               f"rc={res.returncode} stdout={res.stdout!r} stderr={res.stderr!r}")
+except Exception as e:
+    record("tbench CLI: one command writes the packet, the rows and check's verdict", False, repr(e))
 
 
 # One effort list: a row's effort is a lane's effort, or `none`/`unspecified`.

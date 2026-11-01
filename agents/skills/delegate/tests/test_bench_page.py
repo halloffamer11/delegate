@@ -642,12 +642,17 @@ try:
                 rows.extend(json.load(f))
         lanes = catalog.load_json(REAL_LANES)
         data = data_of(bench_page.render(None, lanes, rows))
-        runs = run_layout([{"board": b, "state": {"labels": "all", "frontier": mode}}
-                           for b in data["boards"] for mode in ("lanes", "shown")])
+        cases = [{"board": b, "state": {"labels": "all", "frontier": mode}}
+                 for b in data["boards"] for mode in ("lanes", "shown")]
+        runs = run_layout(cases)
         clashes = [overlaps(r["labels"]) for r in runs["out"]]
+        # a board that scores no catalog model (an Artificial Analysis board
+        # run on open-weight models only) has no lane frontier to draw
+        laned = [any(p.get("lanes") for p in b["points"]) for b in data["boards"] for _mode in (0, 1)]
         record("the real data draws every board with no overprinted label",
                len(data["boards"]) >= 11 and not any(clashes)
-               and all(r["frontier"] for r in runs["out"]),
+               and all(r["frontier"] for r, c, has in zip(runs["out"], cases, laned)
+                       if has or c["state"]["frontier"] == "shown"),
                f"boards={len(data['boards'])} clashes={[c for c in clashes if c][:2]}")
     else:
         record("the real data draws every board with no overprinted label", True,
@@ -1186,12 +1191,12 @@ try:
         and "not a routing Domain or Class" in about["speaks_to"]
         and "Knowledge relevance" in bench.board_about("aa", "Omniscience")["speaks_to"]
         and "Coding relevance" in tb["speaks_to"]
-        and "composite across reasoning, knowledge, maths and programming" in index["speaks_to"]
+        and "composite across knowledge work, coding, science and general knowledge" in index["speaks_to"]
         and "knowledge-scout" not in about["speaks_to"]
         and about["measures"].startswith("It tests whether models can complete realistic SaaS")
-        and about["fetched"] == "2026-09-12"
-        and index["fetched"] == "2026-09-12"
-        and index["score"].startswith("Intelligence Index is calculated as a weighted average"),
+        and about["fetched"] == "2026-11-01" and about["category"] == "Knowledge Work"
+        and index["fetched"] == "2026-11-01"
+        and index["score"].startswith("The Intelligence Index is calculated as a weighted average"),
         str({"auto": about["speaks_to"], "tb": tb["speaks_to"]}),
     )
     record(
