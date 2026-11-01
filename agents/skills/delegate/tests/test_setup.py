@@ -754,6 +754,48 @@ def case_a_failed_forced_fetch_keeps_the_launch_rows():
         return ok, f"paths={paths} note={note!r}"
 
 
+def case_every_source_refreshes_and_a_failed_one_keeps_its_own_rows():
+    """The wizard refreshes every source, not only Artificial Analysis: each
+    fetch is its own, a leaderboard that is down keeps its own rows and the
+    note says which, and a source the launch was not given (swerb) is
+    replaced when present and never added (refresh-all-benchmarks)."""
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
+        repo_tb = write_rows(os.path.join(td, "repo-tbench.json"), "tbench", "Grok 4.6")
+        root = os.path.join(td, "cache")
+        calls = []
+
+        def fetch_ok(source):
+            def fetch(out_dir, **kwargs):
+                calls.append(source)
+                os.makedirs(out_dir, exist_ok=True)
+                write_rows(os.path.join(out_dir, "accepted.json"), source, "Grok 4.7")
+            return fetch
+
+        def fetch_down(out_dir, **kwargs):
+            calls.append("tbench")
+            raise RuntimeError("the board is down")
+
+        fetchers = {"aa": fetch_ok("aa"), "tbench": fetch_down, "swerb": fetch_ok("swerb")}
+        paths, note = setup.refresh_all_rows([repo_aa, repo_tb], cache_root=root, fetchers=fetchers)
+        rows, _message = setup.load_effort_rows(paths)
+        fresh_aa = os.path.join(root, "aa", "accepted.json")
+        ok = (paths == [fresh_aa, repo_tb]
+              and calls == ["aa", "tbench", "swerb"]
+              and sorted((r["source"], r["model"]) for r in rows)
+              == [("aa", "Grok 4.7"), ("tbench", "Grok 4.6")]
+              and note.startswith("Benchmark rows: Artificial Analysis fetched just now; ")
+              and "Terminal-Bench: repo rows; the fetch failed: the board is down" in note
+              and "SWE Refactor Bench fetched just now" in note)
+        # given the swerb rows, the refresh replaces them with the fresh ones
+        repo_sw = write_rows(os.path.join(td, "repo-swerb.json"), "swerb", "claude-opus-5")
+        again, _note = setup.refresh_all_rows([repo_aa, repo_tb, repo_sw], cache_root=root,
+                                              fetchers=fetchers, force=True)
+        ok = ok and again[2] == os.path.join(root, "swerb", "accepted.json")
+        return ok, f"paths={paths} again={again} calls={calls} note={note!r}"
+
+
 def case_the_save_after_a_rescan_uses_the_rescans_plan():
     """The TUI save writes and removes the agent files from the plan the
     wizard holds, which `r` replaced: launch here found no models, so its
@@ -1059,6 +1101,8 @@ for name, case in (
     ("a failed fetch keeps the repo rows", case_a_failed_fetch_keeps_the_repo_rows),
     ("a forced fetch passes a fresh cache", case_a_forced_fetch_passes_a_fresh_cache),
     ("a failed forced fetch keeps the launch rows", case_a_failed_forced_fetch_keeps_the_launch_rows),
+    ("every source refreshes, and a failed one keeps its own rows",
+     case_every_source_refreshes_and_a_failed_one_keeps_its_own_rows),
     ("the save after a rescan uses the rescan's plan",
      case_the_save_after_a_rescan_uses_the_rescans_plan),
     ("scan and propose are the launch steps", case_scan_and_propose_are_the_launch_steps),

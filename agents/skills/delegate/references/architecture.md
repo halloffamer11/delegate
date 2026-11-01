@@ -406,22 +406,37 @@ template's `tools` line), and the session must restart before it sees a new serv
 ## Benchmark data
 
 `agents/skills/delegate/scripts/effort.py` is a `pack`/`extract`/`check` pipeline;
-`check` is the trust boundary and rejects any number not on the page. Artificial
-Analysis skips the worker: `effort.py aa` reads the rows out of the dataset every
-`/models/<slug>` page embeds and checks them against that payload (ticket 18). Approved
+`check` is the trust boundary and rejects any number not on the page. Every approved
+source now has a page reader that skips the worker: `effort.py aa`, `effort.py tbench`
+and `effort.py swerb` copy the rows out of the page's own data and check them against
+it (ticket 18; readers for Terminal-Bench and SWE Refactor Bench, 2026-11). The AA
+reader takes each Intelligence Index evaluation from the variant's
+`intelligenceIndexEvaluations` list, with that evaluation's own cost and tokens, so a
+board AA adds arrives named by its slug; it also takes the standalone and legacy
+fields listed in `AA_COMPONENTS`. The wizard refreshes all three sources on launch and
+on `r`, each under `~/.cache/delegate/bench/<source>/`, and one source that fails keeps
+its own rows (`setup.refresh_all_rows`). Approved
 sources and their cautions: `agents/skills/delegate/assets/sources.json`; the
 provenance research behind that choice:
 `.scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md`. Accepted
 rows and their packets are kept as evidence in `.scratch/delegate-redesign/_data/`.
 
 Coverage is uneven and the three sources are not interchangeable:
-- swerb reaches only `gpt-5.6-sol` and `gpt-5.6-luna`, but publishes slugs.
+- swerb publishes slugs, but its newest models are `claude-opus-5` and `gpt-5.6-sol`
+  (2026-11-01): the board itself has stopped adding models.
 - Artificial Analysis and Terminal-Bench are wider, but publish display names
-  (ticket 16).
+  (ticket 16). The Terminal-Bench reader writes the slug a row's model link ends in
+  when it spells the label (`Opus 5.5` links to `.../claude-opus-5-5`).
+- Artificial Analysis no longer runs its legacy boards (GPQA Diamond, IFBench,
+  Terminal-Bench 2.1, tau3-Banking) on new models, so those boards stop at the
+  2026-09 generation. `boards.json` gives each board AA's own category (Knowledge
+  Work, Coding, Science, General).
 
 Cost is per task on swerb and on Artificial Analysis, but Terminal-Bench's
 `display_cost` is a whole-run figure. Even the two per-task numbers measure different
-task sets, so never compare costs across sources. AA's cost per task is the
-Intelligence Index's, one figure per variant. AA does not measure Haiku at a Lane's
+task sets, so never compare costs across sources. AA's cost per task on an Index
+evaluation is that evaluation's own; on a standalone board, which the page gives no
+cost, it is the Intelligence Index's, and every AA row carries the Index's as
+`index_cost_usd`, the model-level figure `bench.collect` shows. AA does not measure Haiku at a Lane's
 effort (`sources.json` says why). Nothing reads `~/.config/delegate/aa-key`. If the file
 still exists it must never be stowed or committed, because this repo is public.

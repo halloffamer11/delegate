@@ -5,14 +5,13 @@
     "swerb": {
       "name": "SWE Refactor Bench",
       "url": "https://lab.einsia.ai/swe-refactor-bench/leaderboard/",
-      "reaches": "labels",
+      "reaches": "html-summaries",
       "models": [
-        "gpt-5.6-sol",
-        "gpt-5.6-luna"
+        "every model on the board; newest claude-opus-5 and gpt-5.6-sol on 2026-11-01"
       ],
       "efforts": "none..max (API enum; no ultra row)",
       "cost": "usd_per_task",
-      "caution": "20 tasks per configuration; execution provenance undocumented - nobody states who ran the 520 runs. Scaffold is pinned to exact CLI versions, which is why it stays in despite that."
+      "caution": "20 tasks per configuration; execution provenance undocumented - nobody states who ran the 520 runs. Scaffold is pinned to exact CLI versions, which is why it stays in despite that. `effort.py swerb` reads each bar's summary line (score, runs, cost per task) with no worker. The board has added no model since 2026-09."
     },
     "aa": {
       "name": "Artificial Analysis",
@@ -23,20 +22,18 @@
       ],
       "efforts": "none..max; the page prints none as (Non-reasoning)",
       "cost": "usd_per_task",
-      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published: `effort.py aa` emits the index as its own row flagged `composite`, and the carry page never decides on it. Every /models/<slug> page embeds the whole comparison dataset, one JSON object per model and effort, in its Next.js flight payload, so one page serves every catalog model and no worker reads it. Cost and output tokens are the Intelligence Index's per-task figures, the same on every benchmark row of one variant. AA does not measure Haiku at a lane's effort: the 2026-09-11 payload names Claude 4.5 Haiku only as `Claude 4.5 Haiku (Reasoning)` (slug claude-4-5-haiku-reasoning), which states no effort, and `(Non-reasoning)`, which is none. `effort.py aa` rightly drops the first (no effort word, so no lane can claim it) and writes the second at none, which no lane selects; so aa-accepted.json has no Haiku row and none is owed. Claude Code runs Haiku with no effort level at all (code.claude.com/docs/en/model-config, 2026-09-12)."
+      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published: `effort.py aa` emits the index as its own row flagged `composite`, and the carry page never decides on it. Every /models/<slug> page embeds the whole comparison dataset, one JSON object per model and effort, in its Next.js flight payload, so one page serves every catalog model and no worker reads it. Each Intelligence Index evaluation comes from the variant's `intelligenceIndexEvaluations` list with its own cost and output tokens per task; a standalone or legacy board (fields in effort.py AA_COMPONENTS) carries the Index's per-task figures, and every row keeps those as `index_cost_usd`. Field names change between Index versions (2026-11-01: terminalbenchV21 and gdpvalNormalized were renamed, which silently stopped those rows until the reader learnt the new names); `effort.py aa` reports how many boards it read, so a drop shows. Legacy boards (GPQA Diamond, IFBench, Terminal-Bench 2.1, tau3-Banking) are no longer run on new models. AA does not measure Haiku at a lane's effort: the 2026-09-11 payload names Claude 4.5 Haiku only as `Claude 4.5 Haiku (Reasoning)` (slug claude-4-5-haiku-reasoning), which states no effort, and `(Non-reasoning)`, which is none. `effort.py aa` rightly drops the first (no effort word, so no lane can claim it) and writes the second at none, which no lane selects; so aa-accepted.json has no Haiku row and none is owed. Claude Code runs Haiku with no effort level at all (code.claude.com/docs/en/model-config, 2026-09-12)."
     },
     "tbench": {
       "name": "Terminal-Bench 4.0",
       "url": "https://www.tbench.ai/leaderboard/terminal-bench/4-0-0",
       "reaches": "embedded-json",
       "models": [
-        "gpt-6-astra",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna"
+        "every agent-model-effort run on the board (35 on 2026-11-01)"
       ],
-      "efforts": "astra low..max; others at max only",
+      "efforts": "as each run states it; most runs at max",
       "cost": "display_cost plus total/output tokens",
-      "caution": "Scores an AGENT-MODEL PAIR, never a model alone. Public, internet-accessible task set with documented reward-hacking incidents. Rows live in the Next.js streaming payload, not the DOM - pack reaches them via the embedded extractor. The /2.1 path serves the same 4.0 payload; use the 4-0-0 URL. Earlier research citing 'Terminal-Bench 2.1' was reading a board that no longer serves its own data."
+      "caution": "Scores an AGENT-MODEL PAIR, never a model alone. Public, internet-accessible task set with documented reward-hacking incidents. Rows live in the Next.js streaming payload, not the DOM; `effort.py tbench` reads them with no worker and keeps each row's agent and submission date. The model is the slug the row's model link ends in when it spells the label, else the label. Where two agents ran one model at one effort the higher-ranked row is kept. The 4-0-0 URL now redirects to the home page, which embeds the same 4.0 board. Earlier research citing 'Terminal-Bench 2.1' was reading a board that no longer serves its own data."
     }
   },
   "cross_check_only": {

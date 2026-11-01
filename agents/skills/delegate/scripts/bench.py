@@ -81,7 +81,7 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ass
 BOARDS_PATH = os.path.join(ASSETS_DIR, "boards.json")
 SOURCES_PATH = os.path.join(ASSETS_DIR, "sources.json")
 ABOUT_FIELDS = ("url", "fetched", "measures", "tasks", "score", "scale", "cost",
-                "speaks_to", "direction")
+                "speaks_to", "direction", "category")
 DIRECTION_HIGHER = "higher-is-better"
 DIRECTION_LOWER = "lower-is-better"
 DIRECTION_UNKNOWN = "unknown"
@@ -494,7 +494,9 @@ def aa_component_rows(effort_rows, lanes_doc):
                 "effort": effort_cell_key(effort),
                 "benchmark": benchmark,
                 "score": score,
-                "cost_usd": as_number(row.get("cost_usd")),
+                # the model-level cost is the whole Index's per task; a row
+                # from an older fetch has only that, as its cost_usd
+                "cost_usd": as_number(row.get("index_cost_usd", row.get("cost_usd"))),
             })
     return out
 

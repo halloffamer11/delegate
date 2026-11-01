@@ -32,7 +32,9 @@
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 SKILLS := $(notdir $(wildcard $(CURDIR)/agents/skills/*))
 # Accepted benchmark rows the wizard reads (repo-relative). The pre-screen and the
-# benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
+# benchmark page use AA and Terminal-Bench; swerb rows are evidence only. These are
+# the fallback: the wizard fetches each source again on launch (24 h cache in
+# ~/.cache/delegate/bench/<source>/) and keeps these when a fetch fails.
 DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
 DELEGATE_DASHBOARD_PLACEMENT ?= split
 # The interpreter `make test` runs. Every entry point calls plain `python3`, so the
