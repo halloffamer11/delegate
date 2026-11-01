@@ -91,7 +91,12 @@ body.resizing{cursor:col-resize;user-select:none}
 
 /* board picker and caption */
 .boardbar{flex:none;display:flex;align-items:center;gap:8px;padding:12px 0 0}
-.boardbar select{height:30px;min-width:0;max-width:min(520px,100%);padding:0 28px 0 10px;border:1px solid var(--line-2);border-radius:7px;background:var(--surface);color:var(--ink);font:600 13px/1 var(--sans);cursor:pointer}
+/* the picker is as wide as the board it names, with its own chevron a few
+   places after the name: the native arrow sat at the far end of a box sized
+   for the longest board, away from the name it belongs to */
+.boardbar .pick{position:relative;display:inline-flex;min-width:0;max-width:min(520px,100%)}
+.boardbar select{appearance:none;-webkit-appearance:none;height:30px;min-width:0;max-width:100%;padding:0 30px 0 11px;border:1px solid var(--line-2);border-radius:7px;background:var(--surface);color:var(--ink);font:600 13px/1 var(--sans);cursor:pointer;text-overflow:ellipsis}
+.boardbar .pick::after{content:"";position:absolute;right:12px;top:50%;width:6px;height:6px;margin-top:-5px;border-right:1.5px solid var(--ink-2);border-bottom:1.5px solid var(--ink-2);transform:rotate(45deg);pointer-events:none}
 .boardbar .step{width:30px;height:30px;padding:0;border:1px solid var(--line-2);border-radius:7px;background:var(--surface);color:var(--ink-2);cursor:pointer;font-size:14px}
 .boardbar .step:hover,.boardbar select:hover{border-color:var(--ink-2)}
 .boardbar .cat{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.07em}
@@ -252,8 +257,8 @@ details.lines pre{margin:0;max-height:300px;overflow:auto;padding:4px 14px 12px;
   <main class="main">
     <div class="boardbar">
       <button type="button" class="step" id="prevBoard" aria-label="Previous board" title="Previous board">‹</button>
-      <select id="board" aria-label="Board"></select>
       <button type="button" class="step" id="nextBoard" aria-label="Next board" title="Next board">›</button>
+      <span class="pick"><select id="board" aria-label="Board"></select></span>
       <span class="pos" id="boardPos"></span>
       <button type="button" class="ghost small zoomreset" id="zoomReset" hidden>Reset zoom</button>
     </div>
@@ -1062,7 +1067,11 @@ details.lines pre{margin:0;max-height:300px;overflow:auto;padding:4px 14px 12px;
     paintBoard();
   }
   function paintBoard() {
-    $("#board").value = S.board;
+    const sel = $("#board");
+    sel.value = S.board;
+    // fit the box to the board shown, not the longest one (11 + 30 padding, 2 border)
+    const shown = sel.options[sel.selectedIndex];
+    if (shown) sel.style.width = Math.ceil(textW(shown.textContent, 13, 600) + 43) + "px";
     const i = PICK.findIndex(b => b.id === S.board);
     $("#boardPos").textContent = `${i + 1} of ${PICK.length}`;
   }
