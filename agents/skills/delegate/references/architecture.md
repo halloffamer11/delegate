@@ -164,16 +164,19 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   identity, board/version standing, cost basis and uncertainty with HTML. Family evidence stays
   separate from exact-effort Lane attribution; ambiguous candidates remain visible.
 - `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY,
-  prompt-driven under `--plain` or pipes). Each page makes one decision per line: with the same
-  `[x]`/`[ ]` box, the carry page selects a model at an effort and the four tier pages assign a
-  tier; the review page after tier 1 orders the carried lanes inside each tier (ticket 28). It lists
+  prompt-driven under `--plain` or pipes). The carry page selects a model at an effort with a
+  `[x]`/`[ ]` box; the tiers page is a matrix, one row per model under its harness (models dearest
+  first by geometric-mean cost per task on the composite board, `scripts/tier_matrix.py`) and one
+  column per effort, where space steps the cursor lane through 1, 2, 3, 4 and off and 0-4 set it
+  outright, so off there switches the lane off as the carry page would; `[`/`]` step through the
+  benchmark boards in the page's category order and the legend describes the cursor cell on the
+  board shown; harnesses with no carried lane start hidden and `h` shows them; the review page after tier 1 orders the carried lanes inside each tier (ticket 28). It lists
   them in sections tier 4 to 1, each numbered in its current order; j/k moves the cursor, J/K or
   shift-up/down moves the lane inside its tier, 1-4 moves it to the end of that tier, and the
   confirm write gives each carried lane `order`, its place from 1 (`catalog.py check` takes `order`
   as a whole number from 1). The starting order is the applied lines' order, then an `order` the
-  catalog already has at that tier, then benchmark order. Tier pages restore the current catalog as
-  their editable defaults: lanes at the current tier are marked, lanes at a lower tier are visible
-  and unmarked, and lanes taken by a higher tier or not carried are hidden. Enter without edits
+  catalog already has at that tier, then benchmark order. The tiers page restores the current catalog as
+  its editable defaults. Enter without edits
   preserves the current tiers and order; a lane not carried keeps its catalog tier. Lines applied by
   `v` or `--tiers-from` become the same editable defaults. The routing page explains the setting
   under the cursor in a panel beside the table. The start page, and `--plain` from the same
@@ -202,63 +205,33 @@ a Class with a Range and no section, or a section with no Range. `check` on a ro
   decision, and a failure is a message. It writes this machine's catalog, `~/.config/delegate`,
   which is never in the repo: each machine keeps its own (the user, 2026-09-29). `make delegate-wizard`
   at the repo root runs it with the accepted AA and Terminal-Bench rows (`DELEGATE_ROWS` in the
-  Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the HTML board the wizard's `o` key
+  Makefile; `WIZARD_ARGS` adds flags). `scripts/bench_page.py`: the benchmark page the wizard's `o` key
   opens, which reads its attribution and its lane order (`bench.lane_order`, `group_lanes`) from
   `bench.py` and its domination rule (`carry.decisions`, `carry.dominating_row`) from `carry.py`
-  rather than deciding any of them again. HTML
-  carries kind/source/competitor; reason prose is display-only. It embeds its plot data as inline
-  JSON; `assets/bench_page.js`, inlined beside it, draws one score-against-cost plot per panel with
-  its own filters and the frontier of what is shown, and only lays out what Python decided. Each
-  board shows what it measures, quoted from its source's methodology page with the URL beside it
-  (`assets/boards.json`; a board with no entry says so and is never described from memory); an open
-  table under the plots compares every board, and every evidence table sits collapsed below that.
-  The wheel zooms a plot about the pointer, a drag pans once zoomed, and the reset button is always
-  on screen. The page is where tiers are drawn (ticket 26): colour is the harness; three draggable
-  horizontal tier lines per benchmark cut its score axis into bands and immediately assign carried
-  lanes, preserving hand-set tiers until cleared; a click on a dot and a digit, or the boxes in the
-  tier panel beside the plots, give a lane a tier; the panel counts lanes per harness per tier and
-  lists them grouped as the wizard does; the panel, the counts and "Copy as lines" read
-  `placeable(data.lanes)` — every lane a board draws, whether or not the catalog carries it, plus a
-  carried lane with no rows, and never an `ultra` lane, which `parse_tier_lines` refuses (ticket
-  35); an uncarried lane says "not carried" on its row, and a band still assigns only the carried
-  lanes, so drawing a line never carries one; "Reset every tier" asks once and then clears
-  everything the page holds for this catalog — every tier and off drawn, every manual mark and every
-  board's tier lines — keeping only the tier view toggle (`page.resetAll`, ticket 36); "Price per
-  model" below the plots is one row per model with the vendor's list price in and out on one shared
-  log axis, efforts collapsed because every effort of a model is charged the same and an agy model's
-  slugs joined through `harnesses.family` (`bench_page.price_rows`, `drawPrices`): an open dot for
-  input, a filled one for output, colour the meter, the value beside each dot, a model with no
-  published price saying so and drawing nothing, two efforts that disagree drawing the range, and
-  the same figures in a table under it; a tier view puts the digit in each dot; the page's tiers
-  live in the browser's `localStorage` under the catalog's key and are written nowhere else, and
-  "Copy as lines" gives them as `lane tier` in the review page's order. Panel hover and selection
-  reveal the exact lane dot and its label; dot selection marks its panel row. The plot fills the
-  height beside its settings. Groups without Epoch figures use their best AA mean rank in the
-  wizard. Every table lists a model's efforts most to least. The page is the first input (ticket
-  27): each lane line offers `off` beside `4 3 2 1` (and `o` on a selected dot), off lanes have
-  their own heading and count, and "Copy as lines" writes `<lane> <1-4|off>` for every decided lane;
-  the review page's `v` reads those lines from `pbpaste` (only on `v`; a missing or failing
-  `pbpaste` changes nothing), and `setup.py --tiers-from <file>` applies them at start, both through
-  `tier_lines.parse_tier_lines` and one summary line
-  (`tier_lines_summary`). A carried lane the lines do not name goes off, and the summary counts it
-  (ticket 28); lines that name no lane in the catalog change nothing. Under `--plain` the lines'
-  order inside a tier is the `order` written. Colour is the meter: `bench_page.meter_shades` gives
-  each meter its harness colour, and a second meter on one harness (`claude-fable`) a shade of it
-  (`--h-<harness>-1`); the panel counts per meter. Under the plots a sensitivity table gives, per
-  placed lane, the tier each board alone would give it at the page's tier proportions, with the
-  composite shown and never counted; a lane another carried lane beats on score for no more cost on
-  a board shown says "beaten by" in its tooltip and panel line. Both are display aids computed in
-  the script (`sensitivity`, `beatenByLane`); the carry rule is unchanged. `--effort-rows` may be
-  repeated to put several sources on one page.
-The tier pages propose a Tier for each carried Lane with a score (ticket 17,
+  rather than deciding any of them again. `render` fills `assets/bench_page.html`'s data script
+  with `plot_data`; the page is one screen with no scrolling: a score-against-cost plot of one
+  board, one line per model through its efforts, beside a resizable matrix panel of models by
+  efforts (the tiers page's matrix), with the lanes no board draws in a strip below. The score axis
+  fits the board's spread; a drag on the plot zooms into a box and "Reset zoom" goes back. Boards
+  are picked from a list grouped by `boards.json`'s `category`, with each board's methodology quote
+  and source URL in the data. Hovering a cell lights its dot and a dot lights its cell; a click
+  steps a lane's tier. Harnesses with no carried lane start hidden. Served by the wizard (below), the
+  page is live; opened as a file it is a copy whose tier lines (`<lane> <1-4|off>`, every lane
+  named) are copied by hand and pasted with the review page's `v` (`pbpaste`, only on `v`) or
+  given to `setup.py --tiers-from <file>`, both through `tier_lines.parse_tier_lines` and one
+  summary line (`tier_lines_summary`). A carried lane the lines do not name goes off, and the
+  summary counts it (ticket 28); lines that name no lane in the catalog change nothing.
+  `price_rows` and `meter_shades` stay as data helpers. `--effort-rows` may be repeated to put
+  several sources on one page.
+The tiers page proposes a Tier for each carried Lane with a score (ticket 17,
 `scripts/tier_proposal.py`): the rule is `routing.json`'s `tier_proposal` (source, benchmark,
 thresholds for Tiers 2-4, diversity; the sample catalog's when a catalog has none,
 `catalog.tier_proposal_settings`, validated by `validate_tier_proposal`, global only). The score is
 the accepted row on that benchmark at the Lane's own effort; cost per task is the second axis. From
 Tier 4 down, a Tier keeps its candidates on the score-and-cost frontier and, with diversity, each
-harness's best candidate; the rest fall a Tier. A `proposed` column shows tier, score and cost, the
-legend names the benchmark and its bands, and `p` takes every proposal into the page's marks and the
-review order; nothing is written before the confirm page's `y`. Switching the benchmark is a
+harness's best candidate; the rest fall a Tier. The cursor cell names a lane's proposed tier, the
+legend names the benchmark and how many lanes it proposes for, and `p` takes every proposal into the
+tiers and the review order; nothing is written before the confirm page's `y`. Switching the benchmark is a
 `routing.json` edit.
 
 At start the wizard refreshes itself, so one command is one command (ticket 33).
@@ -287,12 +260,15 @@ takes no place in its Tier, and only a save refuses it —
 A new lane starts carried, `ultra` apart, so every effort of every current model
 reaches the screening page; `enabled` is the one field a successor does not inherit,
 because a predecessor switched off at an effort judged that model, not this one
-(ticket 35, changing ticket 33). `o` writes the page again before opening it, from
+(ticket 35, changing ticket 33). `o` writes the page file again, from
 `Wizard.current_lanes()` — the document the session started from, with the carry and
-Tier decisions made so far — so a lane carried on the carry page reaches the page
-(`Wizard.rewrite_bench_page`). The page's catalog key is its lane names, which no
-screen changes, so tiers already drawn in the browser survive the rewrite.
-Focused setup uses `--screen carry|tier1|tier2|tier3|tier4|review|routing` on a TTY.
+tier decisions made so far — and serves the page live from 127.0.0.1 on a port the
+system picks behind a random key (`scripts/page_link.py`): the page polls the wizard's
+tiers and board and posts each change it makes, and the wizard's loop applies them
+between keys (`Wizard.apply_page_changes`), so a tier or board set on either side is
+the same on both. Nothing is written to disk by the link, a request without the key
+or from another host name is refused, and the link ends with the wizard.
+Focused setup uses `--screen carry|tiers|review|routing` on a TTY (`tier1`-`tier4` still open the tiers page).
 It restores current choices and shows only changed fields before confirmation.
 Untouched records and documents retain their bytes; changed sources use a revision
 check and symlink-preserving writes. The full `start` wizard keeps its bulk save

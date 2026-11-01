@@ -29,6 +29,7 @@ from bench import (
 )
 import harnesses as harness_registry  # noqa: E402
 import catalog  # noqa: E402
+import tier_matrix  # noqa: E402
 import tier_proposal  # noqa: E402
 from catalog import CLASSES, meter_dependency_lines, meters_enabled
 from harnesses import NAMES as HARNESSES
@@ -44,7 +45,11 @@ TIER_ONELINER = "Tier: capability 1-4; a class takes lanes from its floor up to 
 # something different on each screen — the column header says which — but the
 # key that moves it never changes.
 FLIP_KEYS = "space/x: flip"
-TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  q: quit"
+# The tiers page is one matrix, a model per row and an effort per column, so
+# its keys are a cursor in two directions, space to step the tier and the
+# board the cells describe. 79 places, the most an 80-column line shows.
+TIERS_FOOTER = "←↑↓→: move  space/0-4: tier  [ ]: board  h: all  o: page  enter: next  q: quit"
+TIERS_BACK = "b goes back to carry; p takes the proposed tiers."
 # The review page orders lanes inside each tier (ticket 28). Its footer is 79
 # places, the most an 80-column line shows; the key help under the table
 # spells the keys out, apart from the explanation and the warning.
@@ -119,20 +124,6 @@ def class_descriptions(path=None, extra=()):
             head = line.split(". ", 1)[0]
             out[current] = head[:-1] if head.endswith(".") else head
     return out
-
-
-def hidden_legend(taken, off):
-    """One line naming what a tier page left out, or "" when it left out nothing.
-
-    A tier page lists only the lanes still open to it (ticket 25). A lane that
-    vanished with no word would read as a lane lost, so the page counts them.
-    """
-    parts = []
-    if taken:
-        parts.append(f"{taken} taken at a higher tier")
-    if off:
-        parts.append(f"{off} not carried")
-    return f"Not listed: {', '.join(parts)}." if parts else ""
 
 
 # --- tier lines: catalog owns the parser; these names stay for callers ------
@@ -304,10 +295,7 @@ STEPS = (
     ("start", "start"),
     ("discovery", "harnesses"),
     ("prescreen", "carry"),
-    ("tier4", "T4"),
-    ("tier3", "T3"),
-    ("tier2", "T2"),
-    ("tier1", "T1"),
+    ("tiers", "tiers"),
     ("review", "review"),
     ("routing", "routing"),
     ("confirm", "confirm"),
@@ -337,6 +325,9 @@ class Wizard:
         # the `--tiers-from` lines, applied again after a rescan as at launch
         self.tier_lines = tier_lines
         self._clock = clock or (lambda: time.strftime("%H:%M"))
+        # what the live link to the benchmark page says, "" when there is none
+        self.link_note = ""
+        self._view_proposals = {}
         self.scanned = "at launch"
         # the routing page's class descriptions, from the Class guide
         self.class_guide = (class_descriptions(extra=[os.path.join(os.path.dirname(routing_path), "classes.md")])
@@ -399,7 +390,25 @@ class Wizard:
             }
             for tier in range(1, 5)
         }
+        self._load_matrix()
         self._settle()
+
+    def _load_matrix(self):
+        """The tiers page's matrix and the boards its cells describe, from the
+        same data the benchmark page draws, so the two show one order and one
+        board (see `tier_matrix`)."""
+        try:
+            self._plot = bench_page.plot_data(self.effort_rows or [], self.lanes_doc, self._proposals, self.bench)
+        except Exception:  # the page's data is evidence; the matrix still works without it
+            self._plot = {"boards": [], "lanes": bench_page._lane_list(
+                self.lanes_doc, self.bench, [], self._proposals)}
+        self._families = tier_matrix.families(self._plot)
+        self._boards = self._plot.get("boards") or []
+        defaults = self._plot.get("defaults") or []
+        self.board = next((i for i, b in enumerate(self._boards) if b.get("id") in defaults[:1]), 0)
+        self._used = tier_matrix.used_harnesses(self._plot)
+        self.show_all = False
+        self.col = tier_matrix.COLUMNS.index("high")
 
     def _choices(self):
         """The carry and Tier decisions as a value to compare. An order the
@@ -516,22 +525,6 @@ class Wizard:
             return f"benchmark page: {e}"
         return ""
 
-    def _tier_names(self):
-        """The lanes open on this tier page: carried, and not placed higher.
-
-        Current assignments at this tier stay visible and marked. Assignments
-        below it stay visible and unmarked, so a rerun can move a lane up.
-        A lane placed higher is hidden, not dimmed (ticket 25): a grey row that
-        space still toggled was a decision offered twice.
-        Benchmark order places each model's group; inside it the efforts run
-        from most to least (ticket 26)."""
-        active = [
-            name for name in self._carried()
-            if name not in self._assigned or self._assigned[name] <= self.tier
-        ]
-        active.sort(key=self._bench_order)
-        return group_lanes(active, self.lanes_doc)
-
     def _meter_coverage(self):
         """The lanes as this session holds them, for the one-Meter warning.
 
@@ -555,16 +548,135 @@ class Wizard:
             return self._assigned[name]
         return self._original_lanes["lanes"][name]["tier"]
 
-    def _enter_tier(self, tier):
-        self.screen = "tier"
-        self.tier = tier
+    def _enter_tiers(self):
+        self.screen = "tiers"
+        self.tier = None
         self.cursor = 0
         self.message = ""
-        active = self._tier_names()
-        if tier == 1:
-            # Whatever is still open must take tier 1, including a lane removed
-            # from a higher tier during this run.
-            self._marks[1].update(active)
+
+    # --- the tiers page: models by efforts ---------------------------------
+
+    def _shown_harnesses(self):
+        return [h for h, _f in self._families if self.show_all or h in self._used]
+
+    def _matrix_rows(self):
+        """The families the tiers page lists, harness by harness."""
+        shown = set(self._shown_harnesses())
+        return [f for h, fams in self._families if h in shown for f in fams]
+
+    def lane_tier(self, name):
+        """A lane's tier as this session holds it: 1-4, or 0 for off."""
+        if not self._enabled.get(name):
+            return 0
+        return self._assigned.get(name) or self._original_lanes["lanes"][name]["tier"]
+
+    def tiers(self):
+        """{lane: 0-4} for every lane, the state the benchmark page shows."""
+        return {name: self.lane_tier(name) for name in self.lanes_doc["lanes"]}
+
+    def set_tier(self, name, tier):
+        """Give a lane a tier (1-4) or switch it off (0): the one decision the
+        tiers page makes, and the one the benchmark page sends. An ultra lane
+        is never carried, so a tier for it is refused. Returns "" or why not."""
+        lanes = self.lanes_doc["lanes"]
+        if name not in lanes:
+            return f"{name}: no such lane"
+        if tier and lanes[name].get("effort") == "ultra":
+            return f"{name}: an ultra lane is never carried, so it stays off"
+        for marks in self._marks.values():
+            marks.discard(name)
+        if tier:
+            self._enabled[name] = True
+            self._assigned[name] = tier
+            self._marks[tier].add(name)
+        else:
+            self._enabled[name] = False
+        return ""
+
+    def board_id(self):
+        return self._boards[self.board].get("id") if self._boards else None
+
+    def apply_page_changes(self, changes):
+        """What the linked benchmark page sent (`page_link.PageLink.take`):
+        each tier and board change, applied as if made here. Returns whether
+        anything changed. The last change is the message, so a click on the
+        page is answered on this screen."""
+        changed = False
+        for change in changes:
+            if "lane" in change:
+                name, tier = change["lane"], change["tier"]
+                if name in self.lanes_doc["lanes"] and self.lane_tier(name) != tier:
+                    refused = self.set_tier(name, tier)
+                    self.message = refused or f"page: {name} {'T' + str(tier) if tier else 'off'}"
+                    changed = changed or not refused
+            elif "board" in change:
+                changed = self.set_board(change["board"]) or changed
+        return changed
+
+    def page_html(self):
+        """The benchmark page as this session holds it, for the live link."""
+        return bench_page.render(self.bench, self.current_lanes(), self.effort_rows,
+                                 live=True, board=self.board_id())
+
+    def board_label(self):
+        if not self._boards:
+            return "no benchmark data"
+        return tier_matrix.board_label(self._boards[self.board])
+
+    def set_board(self, ref):
+        """Show the board with this id (or at this index). Returns whether it
+        changed."""
+        for i, board in enumerate(self._boards):
+            if ref in (board.get("id"), i) and i != self.board:
+                self.board = i
+                return True
+        return False
+
+    def _cell(self, family, effort):
+        """(text, style, lane or None) for one cell of the matrix."""
+        name = family["by_effort"].get(effort)
+        if name:
+            tier = self.lane_tier(name)
+            return (f"T{tier}" if tier else "off"), (f"tier-{tier}" if tier else "row-dim"), name
+        board = self._boards[self.board] if self._boards else None
+        if board and effort in (tier_matrix.own_others(board, [family]).get(family["key"]) or {}):
+            return "○", "row-dim", None
+        return "", None, None
+
+    def _cursor_family(self):
+        rows = self._matrix_rows()
+        if not rows:
+            return None
+        self.cursor = min(self.cursor, len(rows) - 1)
+        return rows[self.cursor]
+
+    def _describe_cell(self):
+        """The cursor's cell in words: the lane, its tier, and what the board
+        shown says of it."""
+        family = self._cursor_family()
+        if family is None:
+            return "No harness is shown; h shows them all."
+        effort = tier_matrix.COLUMNS[self.col]
+        name = family["by_effort"].get(effort)
+        board = self._boards[self.board] if self._boards else None
+        point = None
+        if board is not None:
+            point = (tier_matrix.lane_points(board).get(name) if name else
+                     (tier_matrix.own_others(board, [family]).get(family["key"]) or {}).get(effort))
+        figure = "not measured on this board"
+        if point and isinstance(point.get("score"), (int, float)):
+            score = point["score"]
+            figure = (f"{score:.2f}" if abs(score) < 2 else f"{score:.1f}")
+            if isinstance(point.get("cost"), (int, float)):
+                figure += f" for {fmt_cost(point['cost'])} {'per task' if 'task' in (board.get('basis') or '') else 'per run'}"
+        if name:
+            tier = self.lane_tier(name)
+            proposal = self._view_proposals.get(name) if self._view_proposals else None
+            proposed = f" · proposed T{proposal['tier']}" if proposal else ""
+            return f"{name} · {f'T{tier}' if tier else 'off'}{proposed} · {figure}"
+        if point:
+            return f"{family['group']} {effort} · measured {figure} · no lane runs it"
+        return f"{family['group']} · no lane at {effort}"
 
     def _enter_review(self):
         self.screen = "review"
@@ -582,8 +694,8 @@ class Wizard:
         """Open the named focused screen on current catalog decisions."""
         if self.focus == "carry":
             self._enter_prescreen()
-        elif self.focus in ("tier1", "tier2", "tier3", "tier4"):
-            self._enter_tier(int(self.focus[-1]))
+        elif self.focus in ("tiers", "tier1", "tier2", "tier3", "tier4"):
+            self._enter_tiers()
         elif self.focus == "review":
             self._enter_review()
         elif self.focus == "routing":
@@ -595,8 +707,8 @@ class Wizard:
     def _back_from_confirm(self):
         if self.focus == "carry":
             self._enter_prescreen()
-        elif self.focus in ("tier1", "tier2", "tier3", "tier4"):
-            self._enter_tier(int(self.focus[-1]))
+        elif self.focus in ("tiers", "tier1", "tier2", "tier3", "tier4"):
+            self._enter_tiers()
         elif self.focus == "review":
             self._enter_review()
         else:
@@ -778,13 +890,6 @@ class Wizard:
                 )
                 self._marks[tier].add(name)
 
-    def _active_name(self):
-        active = self._tier_names()
-        if not active:
-            return None
-        self.cursor = min(self.cursor, len(active) - 1)
-        return active[self.cursor]
-
     def handle(self, key):
         if self.screen in ("done", "quit"):
             return
@@ -792,7 +897,7 @@ class Wizard:
             self.screen = "quit"
             self._result = None
             return
-        if key == "o" and self.screen in ("start", "tier", "prescreen", "review"):
+        if key == "o" and self.screen in ("start", "tiers", "prescreen", "review"):
             return
         if self.screen == "start":
             self.screen = "discovery"
@@ -821,7 +926,7 @@ class Wizard:
                 if self.focus:
                     self._go_confirm()
                 else:
-                    self._enter_tier(4)
+                    self._enter_tiers()
             elif key == "b":
                 if self.focus:
                     return
@@ -829,57 +934,45 @@ class Wizard:
                 self.cursor = 0
                 self.message = ""
             return
-        if self.screen == "tier":
-            active = self._tier_names()
-            if key == "up" and active:
-                self.cursor = (self.cursor - 1) % len(active)
-            elif key == "down" and active:
-                self.cursor = (self.cursor + 1) % len(active)
-            elif key in ("space", "x"):
-                # The only decision this screen makes. Carrying a lane is the
-                # carry screen's decision, and `b` from tier 4 goes back to it;
-                # making it here as well asked the human the same question twice
-                # and gave the box on this line two meanings.
-                name = self._active_name()
-                if name:
-                    if name in self._marks[self.tier]:
-                        if self.focus and self.tier == 1:
-                            self.message = "Tier 1 is the lowest Tier; use carry to turn a Lane off."
-                            return
-                        self._marks[self.tier].remove(name)
-                    else:
-                        self._marks[self.tier].add(name)
-            elif key == "enter":
-                if (self.tier == 1 and not self.focus
-                        and any(name not in self._marks[1] for name in active)):
-                    self.message = "every lane needs a tier"
+        if self.screen == "tiers":
+            rows = self._matrix_rows()
+            if key == "up" and rows:
+                self.cursor = (self.cursor - 1) % len(rows)
+            elif key == "down" and rows:
+                self.cursor = (self.cursor + 1) % len(rows)
+            elif key == "left":
+                self.col = max(0, self.col - 1)
+            elif key == "right":
+                self.col = min(len(tier_matrix.COLUMNS) - 1, self.col + 1)
+            elif key in ("space", "x", "0", "1", "2", "3", "4"):
+                family = self._cursor_family()
+                effort = tier_matrix.COLUMNS[self.col]
+                name = family["by_effort"].get(effort) if family else None
+                if not name:
+                    self.message = (f"{family['group']} has no lane at {effort}, so there is no tier to set"
+                                    if family else "")
                     return
-                # A marked lane takes this tier. An unmarked lane that used to
-                # be here becomes open for the next lower page. Existing lower
-                # assignments remain as that lane's editable default.
-                for name in active:
-                    if self._assigned.get(name) == self.tier:
-                        if self.focus:
-                            self._assigned[name] = max(1, self.tier - 1)
-                        else:
-                            del self._assigned[name]
-                for name in active:
-                    if name in self._marks[self.tier]:
-                        self._assigned[name] = self.tier
+                # space steps off, 1, 2, 3, 4 and back to off: one key walks
+                # every tier, and 0-4 jump straight to one
+                tier = (self.lane_tier(name) + 1) % 5 if key in ("space", "x") else int(key)
+                self.message = self.set_tier(name, tier)
+            elif key in ("[", "]") and self._boards:
+                order = tier_matrix.board_order(self._boards)
+                at = order.index(self.board)
+                self.board = order[(at + (1 if key == "]" else -1)) % len(order)]
+            elif key == "h":
+                here = self._cursor_family()
+                self.show_all = not self.show_all
+                rows = self._matrix_rows()
+                self.cursor = rows.index(here) if here in rows else 0
+            elif key == "enter":
                 if self.focus:
                     self._go_confirm()
-                elif self.tier > 1:
-                    self._enter_tier(self.tier - 1)
                 else:
                     self._enter_review()
             elif key == "p":
                 self.take_proposals()
-            elif key == "b" and self.focus:
-                return
-            elif key == "b" and self.tier < 4:
-                previous = self.tier + 1
-                self._enter_tier(previous)
-            elif key == "b" and self.tier == 4:
+            elif key == "b" and not self.focus:
                 self._enter_prescreen()
             return
         if self.screen == "review":
@@ -904,7 +997,7 @@ class Wizard:
             elif key == "b":
                 if self.focus:
                     return
-                self._enter_tier(1)
+                self._enter_tiers()
             return
         if self.screen == "routing":
             count = len(self.classes) * 2 + 3
@@ -1144,28 +1237,6 @@ class Wizard:
                                     f"{'has' if count == 1 else 'have'} no lane"))
         return defs, legend
 
-    def _tier_legend(self):
-        """Say what this page left out, then the tier definition.
-
-        A lane taken at a higher tier and a lane not carried are both hidden
-        (ticket 25), so the count of each is the one trace they leave; the line
-        is earned only when something was left out.
-        """
-        lines = []
-        taken = sum(
-            1 for name in self._carried()
-            if self._assigned.get(name, 0) > self.tier
-        )
-        off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
-        hidden = hidden_legend(taken, off)
-        if hidden:
-            lines.append(hidden)
-        # The tier definition is reference, so it goes last: last renders
-        # directly above the footer, where it reads as a second footer line, and
-        # it is the first line a short window gives up.
-        lines.append(TIER_ONELINER)
-        return lines
-
     def _lanes_at(self, tier):
         return sorted(name for name in self._carried() if self._assigned.get(name) == tier)
 
@@ -1334,10 +1405,11 @@ class Wizard:
         """
         if self.screen in ("done", "quit"):
             return ""
-        here = f"tier{self.tier}" if self.screen == "tier" else self.screen
+        here = self.screen
         steps = STEPS
         if self.focus:
-            focus_key = "prescreen" if self.focus == "carry" else self.focus
+            focus_key = ("prescreen" if self.focus == "carry" else
+                         "tiers" if self.focus.startswith("tier") else self.focus)
             steps = tuple((key, label) for key, label in STEPS if key in (focus_key, "confirm"))
         parts = [f"[{label}]" if key == here else label for key, label in steps]
         return " · ".join(parts)
@@ -1460,40 +1532,60 @@ class Wizard:
                 legend=legend,
                 elastic="why",
             )
-        if self.screen == "tier":
-            epoch_names, aa_names = self._bench_columns()
-            columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
-            if aa_names:
-                columns.extend([*aa_names, "AA $/task", "AA mean rank"])
-            active = self._tier_names()
-            proposals = self.tier_proposals()
-            if proposals:
-                columns.insert(4, "proposed")
+        if self.screen == "tiers":
+            columns = ["model", *(tier_matrix.SHORT[e] for e in tier_matrix.COLUMNS)]
             rows = []
-            for index, name in enumerate(active):
-                lane = self.lanes_doc["lanes"][name]
-                marked = name in self._marks[self.tier]
-                proposed = ([tier_proposal.describe(proposals[name]) if name in proposals else ""]
-                            if proposals else [])
-                rows.append({
-                    "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
-                              *proposed, *self._bench_cells(name, epoch_names, aa_names)],
-                    "marked": marked, "dimmed": False,
-                    "cursor": index == self.cursor,
-                    "tag": "", "harness": lane.get("harness"),
-                })
+            here = self._cursor_family()
+            shown = set(self._shown_harnesses())
+            for harness, fams in self._families:
+                if harness not in shown:
+                    continue
+                on = sum(1 for f in fams for n in f["lanes"] if self.lane_tier(n))
+                rows.append(section_row(f"{harness}  {plural(len(fams), 'model')} · {on} on", len(columns)))
+                for family in fams:
+                    cells, styles = [family["group"]], {}
+                    live = any(self.lane_tier(n) for n in family["lanes"])
+                    for effort in tier_matrix.COLUMNS:
+                        text, style, _name = self._cell(family, effort)
+                        cells.append(text)
+                        if style:
+                            styles[tier_matrix.SHORT[effort]] = style
+                    cursor = family is here
+                    rows.append({
+                        "cells": cells, "styles": styles, "marked": False,
+                        "dimmed": not live, "cursor": cursor,
+                        "cursor_col": tier_matrix.SHORT[tier_matrix.COLUMNS[self.col]] if cursor else None,
+                        "tag": "", "harness": harness,
+                    })
+            hidden = [h for h, _f in self._families if h not in shown]
+            counts = "  ".join(f"T{t} {sum(1 for n in self.lanes_doc['lanes'] if self.lane_tier(n) == t)}"
+                               for t in (4, 3, 2, 1))
+            if self._boards:
+                order = tier_matrix.board_order(self._boards)
+                current = self._boards[self.board]
+                board = (f"board {order.index(self.board) + 1}/{len(order)}  "
+                         f"{tier_matrix.board_category(current)}: {self.board_label()}")
+            else:
+                board = "no benchmark data: the cells still take a tier"
+            # the proposals (ticket 17) are shown, never applied, until `p`
+            self._view_proposals = self.tier_proposals() if self.effort_rows else {}
+            # a cell is T1-T4, off, ○ (measured, no lane) or blank (no lane);
+            # the cursor's cell is spelled out on the first line, so the
+            # symbols need no line of their own at 24 rows
+            legend = [self._fit(self._describe_cell()),
+                      self._fit(f"{counts}  ·  " + (f"hidden: {', '.join(hidden)} (h)" if hidden else TIERS_BACK))]
+            if self._view_proposals:
+                benchmark = catalog.tier_proposal_settings(self.routing_doc).get("benchmark")
+                legend.append(self._fit(f"p: take {len(self._view_proposals)} proposed tiers ({benchmark})"))
+            legend.append(TIER_ONELINER)
+            if self.link_note:
+                legend.insert(1, self._fit(self.link_note))
             return self._frame(
-                "tier", f"Assign tier {self.tier}", tier=self.tier,
+                "tiers", "Tiers: one row per model, dearest first",
+                body=[self._fit(board)],
                 columns=columns, rows=rows,
-                footer=TIER_FOOTER,
-                # The tier definition belongs where the decision is made, but it
-                # and the key hints together overflow an 80-column footer, and a
-                # truncated footer loses the keys.
-                legend=[*(tier_proposal.legend(catalog.tier_proposal_settings(self.routing_doc), proposals)
-                          if proposals else []),
-                        *self._tier_legend(), *(
-                    ["Unmarking moves a Lane down one Tier; Enter reviews the changes."]
-                    if self.focus and self.tier > 1 else [])],
+                footer=TIERS_FOOTER,
+                legend=legend,
             )
         if self.screen == "review":
             epoch_names, aa_names = self._bench_columns()
@@ -1733,6 +1825,11 @@ STYLES = {
     "row-cursor": ("reverse", None),      # one bar, readable on any background
     "row-cursor-dim": ("reverse", None),
     "mark-on": ("bold", "green"),         # a ticked box
+    # a tier on the tiers page: weight says the tier, no colour judges it
+    "tier-4": ("bold reverse", None),
+    "tier-3": ("bold", None),
+    "tier-2": ("", None),
+    "tier-1": ("", None),
     "why-data": ("", "yellow"),           # a reason the data gave, not the human
     "section": ("bold", None),            # a heading inside a table
     "desc": ("dim", None),                # a description beside a heading
@@ -1947,16 +2044,21 @@ def layout_lines(view, width, height):
                 continue
             cells, spans, x = [], [], gutter
             styles = row.get("styles") or {}
+            # a matrix row's cursor is one cell, not the row: the row keeps its
+            # styles and the cell under the cursor is drawn as the bar
+            cell_cursor = row.get("cursor_col") if row["cursor"] else None
             for i, w in zip(chosen, widths):
                 cell = row["cells"][i] if i < len(row["cells"]) else ""
                 # a ticked box and a cell the frame styles are drawn in their
                 # own style; the cursor row is one bar, so it takes none
-                if not row["cursor"]:
+                if not row["cursor"] or cell_cursor:
                     if cell.startswith("[x]"):
                         spans.append((x, x + min(3, w), "mark-on"))
                     style = styles.get(view["columns"][i])
                     if style and cell:
                         spans.append((x, x + min(len(cell), w), style))
+                if cell_cursor and view["columns"][i] == cell_cursor:
+                    spans.append((x, x + w, "row-cursor"))
                 cells.append(_clip(cell, w).ljust(w))
                 x += w + 2
             line = "  ".join(cells)
@@ -1965,12 +2067,12 @@ def layout_lines(view, width, height):
                 line = (HARNESS_BAR if bar else " ").ljust(gutter) + line
                 if bar:
                     spans.insert(0, (0, len(HARNESS_BAR), bar))
-                if row["cursor"]:
+                if row["cursor"] and not cell_cursor:
                     # the cursor's bar starts after the gutter, not on its gap
                     spans.insert(1 if bar else 0, (len(HARNESS_BAR), gutter, "body"))
             if row["tag"]:
                 line += "  " + row["tag"]
-            role = "row-cursor" if row["cursor"] else "row"
+            role = "row-cursor" if row["cursor"] and not cell_cursor else "row"
             if row["dimmed"]:
                 role += "-dim"
             lines.append((y, line, role, spans))
@@ -2059,6 +2161,36 @@ def _palette(curses):
         return mono
 
 
+def open_page(wizard, link):
+    """`o`: open the benchmark page live, served by a `page_link.PageLink` this
+    session keeps, so its clicks and the tiers page stay one state. The file
+    is written as well, as the copy that outlives the session; if the link
+    cannot start, the file is what opens. Returns the link, or None."""
+    import pathlib
+    import webbrowser
+    message = wizard.rewrite_bench_page()
+    try:
+        if link is None:
+            import page_link
+            link = page_link.PageLink()
+            link.start()
+        link.set_page(wizard.page_html())
+        link.publish(wizard.tiers(), wizard.board_id())
+        url = link.url()
+        wizard.link_note = "Benchmark page open and live: a click there sets the tier here."
+    except Exception as e:  # no loopback port: the file still opens
+        link, url = None, (pathlib.Path(wizard.bench_page_path).as_uri() if wizard.bench_page_path else None)
+        message = message or f"live page: {e}"
+    if message:
+        wizard.message = message
+    if url:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    return link
+
+
 def run_curses(wizard):
     """Run the curses renderer until the wizard is done or quit."""
     import curses
@@ -2069,7 +2201,11 @@ def run_curses(wizard):
         except curses.error:
             pass
         stdscr.keypad(True)
+        # a key or a third of a second, so what the linked page sends shows
+        # promptly and an idle wizard still costs nothing to speak of
+        stdscr.timeout(300)
         palette = _palette(curses)
+        link = None
 
         def draw(width, height):
             stdscr.erase()
@@ -2109,8 +2245,17 @@ def run_curses(wizard):
                     wizard.handle("q")
                 continue
             draw(width, height)
+            if link is not None:
+                link.publish(wizard.tiers(), wizard.board_id())
             code = stdscr.getch()
+            if code == -1:
+                # no key within the timeout: take what the linked page sent
+                if link is not None and wizard.apply_page_changes(link.take()):
+                    link.publish(wizard.tiers(), wizard.board_id())
+                continue
             mapping = {curses.KEY_UP: "up", curses.KEY_DOWN: "down",
+                       curses.KEY_LEFT: "left", curses.KEY_RIGHT: "right",
+                       ord("["): "[", ord("]"): "]", ord("h"): "h", ord("H"): "h",
                        ord("k"): "up", ord("j"): "down", ord(" "): "space",
                        10: "enter", 13: "enter", curses.KEY_ENTER: "enter",
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
@@ -2120,7 +2265,7 @@ def run_curses(wizard):
                        # the review page moves the lane itself (ticket 28)
                        ord("J"): "lane-down", ord("K"): "lane-up",
                        curses.KEY_SF: "lane-down", curses.KEY_SR: "lane-up"}
-            if ord("1") <= code <= ord("5"):
+            if ord("0") <= code <= ord("5"):
                 key = chr(code)
             elif code in (ord("r"), ord("R")) and wizard.rescan_ready():
                 # the scrub shells out and fetches, so the page says what it
@@ -2133,19 +2278,11 @@ def run_curses(wizard):
                     stdscr.clear()
             else:
                 key = mapping.get(code, "other")
-            if key == "o" and wizard.bench_page_path:
-                # the page is written again first, so it opens on this session's
-                # carry and Tier decisions and not the ones it started with
-                message = wizard.rewrite_bench_page()
-                if message:
-                    wizard.message = message
-                try:
-                    import pathlib
-                    import webbrowser
-                    webbrowser.open(pathlib.Path(wizard.bench_page_path).as_uri())
-                except Exception:
-                    pass
+            if key == "o":
+                link = open_page(wizard, link)
             wizard.handle(key)
+        if link is not None:
+            link.stop()
         return wizard.result()
 
     return curses.wrapper(app)

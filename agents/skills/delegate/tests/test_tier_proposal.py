@@ -138,7 +138,7 @@ def test_switching_the_benchmark():
 def walk_to_tier_four(w):
     w.handle("enter")      # start -> harnesses
     w.handle("enter")      # harnesses -> carry
-    w.handle("enter")      # carry -> tier 4
+    w.handle("enter")      # carry -> tiers
 
 
 def test_order_is_a_list():
@@ -170,12 +170,11 @@ def test_wizard_confirm_and_quit():
     walk_to_tier_four(w)
     shown = w.view()
     record("the tier page shows each proposal and names the benchmark",
-           w.screen == "tier" and "proposed" in shown["columns"]
-           and any(AA_INDEX in line for line in shown.get("legend", [])),
+           w.screen == "tiers"
+           and any(AA_INDEX in line and "proposed tiers" in line for line in shown.get("legend", [])),
            repr(shown.get("columns")) + repr(shown.get("legend")))
     w.handle("p")
-    for _ in range(4):     # tiers 4..1 -> review
-        w.handle("enter")
+    w.handle("enter")      # tiers -> review
     w.handle("enter")      # review -> routing
     w.handle("enter")      # routing -> confirm
     w.handle("y")

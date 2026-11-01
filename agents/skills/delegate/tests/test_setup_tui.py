@@ -38,6 +38,7 @@ import tier_lines
 import discover
 import effort
 import setup_tui
+import tier_matrix
 from setup_tui import Wizard
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
@@ -74,7 +75,32 @@ def start(w):
     w.handle("enter")
 
 
+def matrix_cell(w, lane):
+    """(row, column) of a lane on the tiers page, or None when it is not listed."""
+    for i, family in enumerate(w._matrix_rows()):
+        for effort, name in family["by_effort"].items():
+            if name == lane:
+                return i, tier_matrix.COLUMNS.index(effort)
+    return None
+
+
 def move_to(w, lane):
+    if w.screen == "tiers":
+        cell = matrix_cell(w, lane)
+        if cell is None and not w.show_all:
+            w.handle("h")
+            cell = matrix_cell(w, lane)
+        if cell is None:
+            raise AssertionError(f"{lane} is not on the tiers page")
+        for _ in range(len(w._matrix_rows()) + 1):
+            if w.cursor == cell[0]:
+                break
+            w.handle("down")
+        while w.col != cell[1]:
+            w.handle("right" if w.col < cell[1] else "left")
+        if w.cursor != cell[0]:
+            raise AssertionError(f"could not move to {lane}")
+        return
     for _ in range(len(w.view()["rows"]) + 1):
         row = next((r for r in w.view()["rows"] if r["cursor"]), None)
         if row and row["cells"][1] == lane:
@@ -84,7 +110,7 @@ def move_to(w, lane):
 
 
 def finish(w):
-    while w.screen == "tier":
+    while w.screen == "tiers":
         w.handle("enter")
     if w.screen == "review":
         w.handle("enter")
@@ -95,15 +121,22 @@ def finish(w):
 
 
 def mark_as(w, tiers):
-    """On each tier page from the one on screen down, mark the lanes `tiers`
-    gives that tier, then enter."""
-    while w.screen == "tier":
-        for row in w.view()["rows"]:
-            name = row["cells"][1]
-            if (tiers.get(name) == w.tier) != row["marked"]:
+    """On the tiers page, give each lane in `tiers` its tier with a digit key,
+    then enter."""
+    if w.screen == "tiers":
+        for name, tier in tiers.items():
+            if w.lane_tier(name) != tier:
                 move_to(w, name)
-                w.handle("space")
+                w.handle(str(tier))
         w.handle("enter")
+
+
+def cell_text(w, lane):
+    """What the tiers page shows in a lane's cell."""
+    row, col = matrix_cell(w, lane)
+    view = w.view()
+    family_rows = [r for r in view["rows"] if not r.get("section")]
+    return family_rows[row]["cells"][col + 1]
 
 
 def incoming_tiers(doc):
@@ -166,69 +199,34 @@ try:
     w = wizard()
     start(w)
     v = w.view()
-    active = [r for r in v["rows"] if not r["dimmed"]]
-    models = [r["cells"][2] for r in active]
-    fable = next(r for r in active if r["cells"][1] == "fable-xhigh@claude")
-    sol = next(r for r in active if r["cells"][1] == "sol-high@codex")
-    flash = next(r for r in active if r["cells"][1] == "flash-high@agy")
-    # a lane is ranked on its own figures: sol runs high and was measured at
-    # high, so it leads; fable runs xhigh and its model was only measured at
-    # max, so it has no figure here at all, the same as flash, which nobody
-    # measured. The old screen showed fable the max figure (ticket 17).
-    record("1 tier 4 opens with current marks, in benchmark order",
-           v["tier"] == 4
-           and {r["cells"][1] for r in v["rows"] if r["marked"]} == {"fable-xhigh@claude"}
-           and fable["marked"]
-           and models[:2] == ["gpt-5.6-sol", "gpt-5.6-terra"]
-           and models[-2:] == ["claude-fable-5-1", "gemini-3.8-flash-high"]
-           and "90.0" in sol["cells"] and sol["cells"][9] == "1.0 (n=5)"
-           and all(x == "—" for x in fable["cells"][4:9])
-           and fable["cells"][9] == "— (n=0)"
-           and all(x == "—" for x in flash["cells"][4:9])
-           and flash["cells"][9].startswith("—"), str(v))
+    families = [r["cells"][0] for r in v["rows"] if not r.get("section")]
+    sections = [r["section"].split()[0] for r in v["rows"] if r.get("section")]
+    record("1 the tiers page lists one row per model under its harness, each lane in its effort's column",
+           w.screen == "tiers" and v["columns"] == ["model", "n", "L", "M", "H", "XH", "MX", "U"]
+           and sections == ["agy", "claude", "codex", "grok"]
+           and "gpt-5.6-sol" in families and "gpt-5.6-luna" in families
+           and cell_text(w, "fable-xhigh@claude") == "T4"
+           and cell_text(w, "sol-high@codex") == "T3"
+           and cell_text(w, "luna-low@codex") == "T1"
+           and "[tiers]" in v["steps"], repr(v["rows"]))
 except Exception as e:
-    record("1 tier 4 opens with current marks, in benchmark order", False, repr(e))
+    record("1 the tiers page lists one row per model under its harness, each lane in its effort's column",
+           False, repr(e))
 
 try:
     w = wizard()
     start(w)
-    restored = []
-    while w.screen == "tier":
-        expected = {
-            name for name, lane in LANES["lanes"].items()
-            if lane.get("enabled", True) and lane["tier"] == w.tier
-        }
-        marked = {row["cells"][1] for row in w.view()["rows"] if row["marked"]}
-        restored.append(marked == expected)
-        w.handle("enter")
+    shown = {name: cell_text(w, name) for name in LANES["lanes"]}
+    expected = {name: (f"T{lane['tier']}" if lane.get("enabled", True) else "off")
+                for name, lane in LANES["lanes"].items()}
     finish(w)
     record("1a the TUI restores the current catalog tiers and enter preserves them",
-           restored == [True, True, True, True]
+           shown == expected
            and strip_order(w.result()[0]) == LANES
            and w.result()[1] == ROUTING,
-           repr((restored, w.result())))
+           repr((shown, w.result())))
 except Exception as e:
     record("1a the TUI restores the current catalog tiers and enter preserves them", False, repr(e))
-
-try:
-    # Whatever lanes.json holds is the editable starting state. Here every lane
-    # is already tier 4, so tier 4 starts fully marked and lower pages are empty.
-    every_four = copy.deepcopy(LANES)
-    for lane in every_four["lanes"].values():
-        lane["tier"] = 4
-    w = wizard(lanes=every_four)
-    start(w)
-    pages = []
-    while w.screen == "tier":
-        rows = w.view()["rows"]
-        pages.append((w.tier, len(rows), sum(1 for row in rows if row["marked"])))
-        w.handle("enter")
-    record("1b every tier page restores lanes.json",
-           pages == [(4, len(every_four["lanes"]), len(every_four["lanes"])),
-                     (3, 0, 0), (2, 0, 0), (1, 0, 0)]
-           and w.screen == "review", repr(pages))
-except Exception as e:
-    record("1b every tier page restores lanes.json", False, repr(e))
 
 try:
     w = wizard()
@@ -252,57 +250,57 @@ try:
     w = wizard()
     start(w)
     move_to(w, "sol-high@codex")
-    w.handle("space")
-    w.handle("enter")
-    below = []
-    while w.screen == "tier":
-        below.append("sol-high@codex" not in [r["cells"][1] for r in w.view()["rows"]])
-        w.handle("enter")
+    w.handle("4")
+    shown = cell_text(w, "sol-high@codex")
     finish(w)
     lanes, _ = w.result()
-    record("3 a lane assigned at tier N shows on no page below N, and keeps N",
-           below == [True, True, True]
+    record("3 a digit key sets the cursor lane's tier, and the catalog takes it",
+           shown == "T4"
            and lanes["lanes"]["sol-high@codex"]["tier"] == 4
-           and lanes["lanes"]["terra-high@codex"]["tier"] == 2, repr(below))
+           and lanes["lanes"]["terra-high@codex"]["tier"] == 2, repr(shown))
 except Exception as e:
-    record("3 a lane assigned at tier N shows on no page below N, and keeps N", False, repr(e))
+    record("3 a digit key sets the cursor lane's tier, and the catalog takes it", False, repr(e))
 
 try:
-    plain, pressed = wizard(), wizard()
-    for w in (plain, pressed):
-        start(w)
-        w.handle("enter")
-        w.handle("enter")
-        move_to(w, "grok46-high@grok")
-    pressed.handle("4")
-    same_page = pressed.view()["rows"] == plain.view()["rows"]
-    finish(plain)
-    finish(pressed)
-    record("4 digit keys are inert on the tier screen",
-           same_page and pressed.result() == plain.result())
+    # space walks the tiers, so one key reaches every one of them: from T3 to
+    # T4, off, T1, T2 and back to T3. x is the same key.
+    w = wizard()
+    start(w)
+    move_to(w, "sol-high@codex")
+    walk = []
+    for key in ("space", "x", "space", "space", "space"):
+        w.handle(key)
+        walk.append(cell_text(w, "sol-high@codex"))
+    w.handle("0")
+    zero = cell_text(w, "sol-high@codex")
+    off_carried = w._enabled["sol-high@codex"]
+    w.handle("2")
+    record("4 space steps a lane through 4, off, 1, 2 and 3; 0-4 set it outright",
+           walk == ["T4", "off", "T1", "T2", "T3"]
+           and zero == "off" and off_carried is False
+           and cell_text(w, "sol-high@codex") == "T2" and w._enabled["sol-high@codex"],
+           repr(walk))
 except Exception as e:
-    record("4 digit keys are inert on the tier screen", False, repr(e))
+    record("4 space steps a lane through 4, off, 1, 2 and 3; 0-4 set it outright", False, repr(e))
+
+try:
+    # a cell with no lane takes no tier: the key says so and changes nothing
+    w = wizard()
+    start(w)
+    move_to(w, "sol-high@codex")
+    w.handle("left")
+    before = w.tiers()
+    w.handle("space")
+    record("5 a cell with no lane takes no tier",
+           w.tiers() == before and "no lane at medium" in w.view()["message"],
+           repr(w.view()["message"]))
+except Exception as e:
+    record("5 a cell with no lane takes no tier", False, repr(e))
 
 try:
     w = wizard()
     start(w)
-    w.handle("enter")
-    w.handle("enter")
-    w.handle("enter")
-    move_to(w, "luna-low@codex")
-    w.handle("space")
-    w.handle("enter")
-    blocked = w.screen == "tier" and w.tier == 1 and w.view()["message"] == "every lane needs a tier"
-    w.handle("space")
-    w.handle("enter")
-    record("5 tier 1 requires every lane", blocked and w.screen == "review")
-except Exception as e:
-    record("5 tier 1 requires every lane", False, repr(e))
-
-try:
-    w = wizard()
-    start(w)
-    for _ in range(5):
+    for _ in range(2):
         w.handle("enter")
     assert w.screen == "routing", w.screen
     for _ in range(3):
@@ -325,7 +323,7 @@ try:
     w1 = wizard(); start(w1); finish(w1)
     # finish accepts, so use a fresh wizard stopped at confirm for decline.
     w1 = wizard(); start(w1)
-    for _ in range(6): w1.handle("enter")
+    for _ in range(3): w1.handle("enter")
     assert w1.screen == "confirm", w1.screen
     w1.handle("n")
     w2 = wizard(); start(w2); w2.handle("q")
@@ -336,37 +334,28 @@ except Exception as e:
     record("7 decline and early quit return no result", False, repr(e))
 
 try:
-    w = wizard(); start(w); move_to(w, "sol-high@codex"); w.handle("space")
-    w.handle("enter"); w.handle("b")
-    sol = next(r for r in w.view()["rows"] if r["cells"][1] == "sol-high@codex")
-    record("8 back restores prior tier marks",
-           w.tier == 4 and sol["marked"] and not sol["dimmed"])
-except Exception as e:
-    record("8 back restores prior tier marks", False, repr(e))
-
-try:
-    w = wizard()
-    start(w)
+    w = wizard(); start(w); move_to(w, "sol-high@codex"); w.handle("4")
     w.handle("enter")
-    move_to(w, "terra-high@codex")
-    w.handle("space")
+    at_review = w.screen == "review"
     w.handle("b")
-    w.handle("enter")
-    terra = next(row for row in w.view()["rows"] if row["cells"][1] == "terra-high@codex")
-    record("8b back and forward preserve edits on a tier not yet submitted",
-           w.tier == 3 and terra["marked"])
+    record("8 back from review returns to the tiers page with its tiers",
+           at_review and w.screen == "tiers" and cell_text(w, "sol-high@codex") == "T4")
 except Exception as e:
-    record("8b back and forward preserve edits on a tier not yet submitted", False, repr(e))
+    record("8 back from review returns to the tiers page with its tiers", False, repr(e))
 
 try:
     w = wizard(False, "fixture unavailable")
     initial = w.view()["message"] == "fixture unavailable"
     start(w)
-    row = w.view()["rows"][0]
-    record("9 absent benchmarks render em dashes",
-           initial and all(value == "—" for value in row["cells"][5:11]))
+    move_to(w, "sol-high@codex")
+    w.handle("1")
+    v = w.view()
+    record("9 with no benchmark data the tiers page says so and still takes a tier",
+           initial and any("no benchmark data" in line for line in v["body"])
+           and cell_text(w, "sol-high@codex") == "T1"
+           and "not measured" in v["legend"][0], repr(v["body"]))
 except Exception as e:
-    record("9 absent benchmarks render em dashes", False, repr(e))
+    record("9 with no benchmark data the tiers page says so and still takes a tier", False, repr(e))
 
 try:
     w = wizard()
@@ -466,46 +455,39 @@ except Exception as e:
 try:
     w = wizard()
     start(w)
-    # the tier definition renders as the last legend line, directly above the
-    # key hints, so the two together are the footer block the human reads
-    footer = w.view()["footer"] + "  " + "  ".join(w.view().get("legend") or [])
-    record("12 tier footer carries the tier one-liner",
-           w.screen == "tier"
-           and "ceiling" in footer
-           # One decision per line, so one gesture, named once. The tier screen
-           # used to advertise `x: on/off` beside `space: mark`, which was the
-           # carry screen's decision offered a second time.
-           and "space/x: flip" in w.view()["footer"]
-           and "on/off" not in footer
-           and "o: bench" in footer)
+    footer = w.view()["footer"]
+    legend = w.view()["legend"]
+    record("12 the tiers footer names its keys, and the legend ends with the tier one-liner",
+           w.screen == "tiers"
+           and legend[-1] == setup_tui.TIER_ONELINER and "ceiling" in legend[-1]
+           and "space/0-4: tier" in footer and "[ ]: board" in footer
+           and "o: page" in footer and "h: all" in footer, repr((footer, legend)))
 
-    before_cursor = w.cursor
+    before = (w.cursor, w.col, w.tiers(), w.board)
     w.handle("d")
-    record("12b d is unbound on tier",
-           w.screen == "tier" and w.cursor == before_cursor and w.tier == 4)
+    record("12b d is unbound on tiers",
+           w.screen == "tiers" and (w.cursor, w.col, w.tiers(), w.board) == before)
 
     w2 = wizard()
     w2.handle("enter")
     w2.handle("enter")
     carry_footer = w2.view()["footer"]
-    record("12c one gesture flips the box, and both screens name that one",
+    record("12c the carry page flips a box; the tiers page steps a tier",
            w2.screen == "prescreen"
            and "space/x: flip" in carry_footer
            and carry_footer.count("flip") == 1
-           and w.view()["footer"].count("flip") == 1,
-           repr(carry_footer) + repr(w.view()["footer"]))
+           and "flip" not in footer,
+           repr(carry_footer) + repr(footer))
 except Exception as e:
-    record("12 tier footer carries the tier one-liner", False, repr(e))
+    record("12 the tiers footer names its keys, and the legend ends with the tier one-liner", False, repr(e))
 
 try:
     w = wizard()
     start(w)
     incoming_sol = LANES["lanes"]["sol-high@codex"]["tier"]
     move_to(w, "sol-high@codex")
-    w.handle("space")
+    w.handle("4")
     w.handle("enter")
-    while w.screen == "tier":
-        w.handle("enter")
     w.handle("enter")
     legend = w.view().get("legend") or []
     tier_map = next(line for line in legend if line.startswith("Lanes carried: "))
@@ -580,7 +562,7 @@ def why_of(row):
 
 
 def to_confirm(w):
-    while w.screen == "tier":
+    while w.screen == "tiers":
         w.handle("enter")
     if w.screen == "review":
         w.handle("enter")
@@ -602,42 +584,9 @@ def not_carried(w, *lanes):
         w.handle("x")
         assert not w._enabled[lane], lane
     w.handle("enter")
-    assert w.screen == "tier" and w.tier == 4, (w.screen, w.tier)
+    assert w.screen == "tiers", w.screen
 
 
-try:
-    # The tier screen makes one decision: does this lane take the tier on
-    # screen. `x` used to switch the lane off here as well, which asked the
-    # carry screen's question a second time and gave this line's box two
-    # meanings. Both keys now do the one thing, and neither touches carry.
-    w = wizard()
-    start(w)
-    cursor_name = next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
-    enabled_before = dict(w._enabled)
-    assigned_before = dict(w._assigned)
-    others = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
-              for r in w.view()["rows"] if r["cells"][1] != cursor_name}
-    marked_before = row_for(w.view(), cursor_name)["marked"]
-    w.handle("x")
-    after_x = row_for(w.view(), cursor_name)
-    others_after = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
-                    for r in w.view()["rows"] if r["cells"][1] != cursor_name}
-    w.handle("space")
-    after_space = row_for(w.view(), cursor_name)
-    record("16 space and x are one mark gesture, and neither switches a lane off",
-           w.screen == "tier" and w.tier == 4
-           and w._assigned == assigned_before
-           and after_x["marked"] is not marked_before
-           and after_x["cells"][0] == ("[x]" if after_x["marked"] else "[ ]")
-           # space undoes what x did, so the two are the same control
-           and after_space["marked"] is marked_before
-           and w._enabled == enabled_before
-           and after_x["tag"] == "" and after_space["tag"] == ""
-           and others_after == others,
-           repr((marked_before, after_x["cells"][0], after_space["cells"][0])))
-except Exception as e:
-    record("16 space and x are one mark gesture, and neither switches a lane off",
-           False, repr(e))
 
 
 try:
@@ -673,28 +622,20 @@ except Exception as e:
 
 
 try:
-    # A lane switched off on the carry page is asked about nowhere else: it is
-    # on no tier page, so no key there can mark it (ticket 25).
+    # A lane switched off on the carry page shows off on the tiers page, and a
+    # tier given there carries it again: one matrix holds both decisions.
     w = wizard()
     not_carried(w, "flash-high@agy")
-    listed, marked_ever = [], False
-    while w.screen == "tier":
-        listed.append("flash-high@agy" in [r["cells"][1] for r in w.view()["rows"]])
-        for _ in range(len(w.view()["rows"]) + 1):
-            w.handle("space")
-            w.handle("x")
-            w.handle("space")
-            w.handle("down")
-        marked_ever = marked_ever or any("flash-high@agy" in marks for marks in w._marks.values())
-        w.handle("enter")
-    review = [r["cells"][4] for r in w.view()["rows"]]
-    record("17 a lane switched off on the carry page shows on no tier page, and space cannot mark it",
-           listed == [False, False, False, False] and not marked_ever
-           and w.screen == "review" and "flash-high@agy" not in review
-           and w._assigned["flash-high@agy"] == LANES["lanes"]["flash-high@agy"]["tier"],
-           repr((listed, review)))
+    shown = cell_text(w, "flash-high@agy")
+    move_to(w, "flash-high@agy")
+    w.handle("2")
+    finish(w)
+    lanes, _ = w.result()
+    record("17 a lane switched off on the carry page shows off on the tiers page, and a tier there carries it",
+           shown == "off" and lanes["lanes"]["flash-high@agy"]["tier"] == 2
+           and "enabled" not in lanes["lanes"]["flash-high@agy"], repr(shown))
 except Exception as e:
-    record("17 a lane switched off on the carry page shows on no tier page, and space cannot mark it",
+    record("17 a lane switched off on the carry page shows off on the tiers page, and a tier there carries it",
            False, repr(e))
 
 
@@ -705,16 +646,6 @@ try:
     incoming["lanes"]["flash-high@agy"]["tier"] = 3
     w = wizard(lanes=incoming)
     not_carried(w, "flash-high@agy")
-    while w.tier != 1:
-        w.handle("enter")
-    move_to(w, "luna-low@codex")
-    w.handle("space")
-    w.handle("enter")
-    blocked = w.screen == "tier" and w.tier == 1 and w.view()["message"] == "every lane needs a tier"
-    w.handle("space")
-    w.handle("enter")
-    record("18 the tier-1 rule covers only the lanes still open",
-           blocked and w.screen == "review")
     to_confirm(w)
     w.handle("y")
     lanes, _ = w.result()
@@ -723,7 +654,7 @@ try:
            and lanes["lanes"]["flash-high@agy"]["enabled"] is False
            and lanes["lanes"]["luna-low@codex"]["tier"] == 1)
 except Exception as e:
-    record("18 the tier-1 rule covers only the lanes still open", False, repr(e))
+    record("18b a lane not carried is written off, with the tier the catalog had", False, repr(e))
 
 
 try:
@@ -732,13 +663,10 @@ try:
     w = wizard()
     not_carried(w, "flash-high@agy")
     move_to(w, "sol-high@codex")
-    w.handle("space")
-    w.handle("enter")          # sol takes tier 4
+    w.handle("4")              # sol takes tier 4
     move_to(w, "terra-high@codex")
-    w.handle("space")
-    w.handle("enter")          # terra takes tier 3
-    w.handle("enter")          # tier 2 takes nothing
-    w.handle("enter")          # tier 1 takes the rest
+    w.handle("3")              # terra takes tier 3
+    w.handle("enter")
     v = w.view()
     layout = review_layout(v)
     names = review_names(v)
@@ -781,12 +709,10 @@ try:
            repr((layout, after, v["legend"])))
     w2 = wizard()
     start(w2)
-    for _ in range(4):
-        w2.handle("enter")
+    w2.handle("enter")
     w2.handle("b")
-    record("39b b on the review page returns to tier 1, with every open lane ticked",
-           w2.screen == "tier" and w2.tier == 1
-           and all(r["marked"] for r in w2.view()["rows"]) and w2.view()["rows"])
+    record("39b b on the review page returns to the tiers page",
+           w2.screen == "tiers" and w2.view()["rows"])
 except Exception as e:
     record("39 after tier 1 a review page lists every carried lane with its tier; j/k move, 1-4 set it, "
            "enter goes to routing and b from routing returns to it", False, repr(e))
@@ -1230,7 +1156,7 @@ try:
     screens.append(w.view())
     w.handle("enter")
     screens.append(w.view())
-    while w.screen == "tier":
+    while w.screen == "tiers":
         w.handle("enter")
     screens.append(w.view())
     w.handle("enter")
@@ -1341,7 +1267,7 @@ try:
     back_to_discovery = w.screen == "discovery"
 
     w.handle("enter"); w.handle("enter")
-    assert w.screen == "tier" and w.tier == 4, (w.screen, w.tier)
+    assert w.screen == "tiers", w.screen
     w.handle("b")
     back_to_prescreen = w.screen == "prescreen"
 
@@ -1371,8 +1297,7 @@ try:
     for screen, m in marks:
         if screen in expected:
             ok = ok and expected[screen] in m
-    tier_marks = [m for sc, m in marks if sc == "tier"]
-    ok = ok and ["[T4]" in tier_marks[0], "[T3]" in tier_marks[1]] == [True, True]
+    ok = ok and any(sc == "tiers" and "[tiers]" in m for sc, m in marks)
     # the terminal screens have no step to be at
     w2 = wizard(); w2.handle("q")
     ok = ok and w2.view()["steps"] == ""
@@ -1386,8 +1311,8 @@ except Exception as e:
 # Every fault below was invisible to a test that read only the frame dict. The
 # pre-screen at 80 places dropped its reason column outright, a tier tag reached
 # the eye as `ti`, and eight of eleven lanes could scroll away in silence.
-from setup_tui import (ROW_FLOOR, TIER_ONELINER, _clip, _fit_table,  # noqa: E402
-                       hidden_legend, layout_lines, overlay)
+from setup_tui import (ROW_FLOOR, _clip, _fit_table,  # noqa: E402
+                       layout_lines, overlay)
 
 
 def screen(view, width=80, height=24):
@@ -1433,24 +1358,6 @@ except Exception as e:
     record("30 the reason column is narrowed, never dropped", False, repr(e))
 
 
-try:
-    # A lane taken above and a lane not carried are both hidden now, and the
-    # one trace they leave is a count, which has to reach the screen whole.
-    w = wizard(lanes=astra_lanes())
-    not_carried(w, "terra-high@codex")
-    move_to(w, "sol-high@codex")
-    w.handle("space")
-    w.handle("enter")
-    seen = []
-    for width in (80, 100, 140):
-        grid = screen(w.view(width), width, 30)
-        seen.append(not any("sol-high@codex" in line or "terra-high@codex" in line for line in grid)
-                    and hidden_legend(2, 1) in grid)
-    record("31 hidden lanes are off the grid, and the page counts them in a whole line",
-           all(seen) and hidden_legend(2, 1) == "Not listed: 2 taken at a higher tier, 1 not carried."
-           and hidden_legend(0, 0) == "", repr(seen))
-except Exception as e:
-    record("31 hidden lanes are off the grid, and the page counts them in a whole line", False, repr(e))
 
 
 try:
@@ -1495,12 +1402,7 @@ try:
     # 80, where it was cut after a comma.
     w = wizard(lanes=astra_lanes())
     start(w)
-    for _ in range(len(w.view()["rows"])):
-        if not next(r for r in w.view()["rows"] if r["cursor"])["marked"]:
-            w.handle("space")
-        w.handle("down")
-    while w.screen == "tier":
-        w.handle("enter")
+    mark_as(w, {name: 4 for name, lane in w.lanes_doc["lanes"].items() if lane.get("effort") != "ultra"})
     w.handle("enter")
     assert w.screen == "routing", w.screen
     routing_view = w.view()
@@ -1528,72 +1430,10 @@ except Exception as e:
     record("35 a shortened cell says it was shortened", False, repr(e))
 
 
-try:
-    # a column skipped over while a narrower one behind it is drawn reads as
-    # data nobody gathered
-    w = wizard()
-    start(w)
-    view = w.view()
-    chosen, _widths = _fit_table(view, 100)
-    names = [view["columns"][i] for i in chosen]
-    benchmarks = [n for n in view["columns"] if n in (w.bench or {}).get("epoch_benchmarks", [])]
-    visible = [n for n in names if n in benchmarks]
-    record("36 the benchmark columns shown are a prefix of the ones asked for",
-           visible == benchmarks[:len(visible)] and visible, repr(names))
-except Exception as e:
-    record("36 the benchmark columns shown are a prefix of the ones asked for", False, repr(e))
 
 
-try:
-    # The tier screen exists to read a tier off the scores. `model` and `effort`
-    # are both spelled out in the lane name, so at 80 places they were 27 places
-    # of restatement drawn ahead of the scores, and the scores fell off the end.
-    w = wizard()
-    start(w)
-    view = w.view()
-    chosen, _widths = _fit_table(view, 80)
-    names = [view["columns"][i] for i in chosen]
-    benchmarks = [n for n in view["columns"]
-                  if n in (w.bench or {}).get("epoch_benchmarks", [])]
-    visible = [n for n in names if n in benchmarks]
-    grid = screen(view, 80, 24)
-    record("37 at 80 places the tier screen shows scores, not the lane name twice",
-           visible and visible == benchmarks[:len(visible)]
-           and "Epoch mean rank" in names
-           and "model" not in names and "effort" not in names
-           and "90.0" in grid[setup_tui.TOP + 1] and "1.0 (n=5)" in grid[setup_tui.TOP + 1],
-           repr(names) + "\n" + repr(grid[setup_tui.TOP:setup_tui.TOP + 2]))
-except Exception as e:
-    record("37 at 80 places the tier screen shows scores, not the lane name twice",
-           False, repr(e))
 
 
-try:
-    # `[n]` and `off` are state arriving from an earlier screen, not controls.
-    # Each legend line is earned by such a row being on screen: a standing line
-    # explaining a case that is not there costs the rows their room.
-    w = wizard()
-    start(w)
-    clean = w.view()["legend"]
-    w2 = wizard()
-    not_carried(w2, "flash-high@agy")
-    off_only = w2.view()["legend"]
-    move_to(w2, "sol-high@codex")
-    w2.handle("space")
-    w2.handle("enter")
-    both = w2.view()["legend"]
-    record("38 a tier legend line appears only when its state is on screen",
-           # nothing off and nothing assigned: the tier definition alone
-           clean == [TIER_ONELINER]
-           and off_only == [hidden_legend(0, 1), TIER_ONELINER]
-           and both == [hidden_legend(2, 1), TIER_ONELINER]
-           # the reference line renders last, directly above the footer
-           and all(lines[-1] == TIER_ONELINER for lines in (clean, off_only, both))
-           and all(len(line) <= 79 for line in both),
-           repr((clean, off_only, both)))
-except Exception as e:
-    record("38 a tier legend line appears only when its state is on screen",
-           False, repr(e))
 
 
 # --- ticket 25: every page at 80x24 and at a wide terminal ---------------------
@@ -1604,7 +1444,7 @@ def every_page(effort_rows=None, lanes=None):
     w.routing_path = "/Users/someone/dotfiles/stow/delegate/.config/delegate/routing.json"
     pages = []
     while w.screen not in ("confirm", "done", "quit"):
-        name = f"tier{w.tier}" if w.screen == "tier" else w.screen
+        name = w.screen
         pages.append((name, copy.deepcopy(w)))
         w.handle("enter")
     pages.append(("confirm", copy.deepcopy(w)))
@@ -1621,7 +1461,8 @@ try:
             entries = layout_lines(view, width, height)
             grid = overlay(entries, width, height)
             too_long = [text for _y, text, _r, _s in entries if len(text) > width - 1]
-            cursor = [text for _y, text, role, _s in entries if role.startswith("row-cursor")]
+            cursor = [text for _y, text, role, spans in entries
+                      if role.startswith("row-cursor") or any(sp[2] == "row-cursor" for sp in spans)]
             if too_long:
                 faults.append((name, width, "wider than the terminal", too_long[:1]))
             if (grid[0] != view["steps"] or not grid[2].startswith(view["title"])
@@ -1632,7 +1473,7 @@ try:
             if view["legend"] and not all(line[: width - 1].rstrip() in grid for line in view["legend"][:1]):
                 faults.append((name, width, "first legend line not whole"))
     record("40 every page lays out at 80x24 and at 200x50",
-           not faults and {"start", "discovery", "prescreen", "tier4", "tier1", "review",
+           not faults and {"start", "discovery", "prescreen", "tiers", "review",
                            "routing", "confirm"} <= set(names), repr(faults))
 except Exception as e:
     record("40 every page lays out at 80x24 and at 200x50", False, repr(e))
@@ -1740,36 +1581,22 @@ try:
     carry_rows = [r["cells"][1] for r in w.view()["rows"]]
     carry_groups = groups_of(carry_rows, doc)
     w.handle("enter")
-    t4 = [r["cells"][1] for r in w.view()["rows"]]
-    t4_groups = groups_of(t4, doc)
-    # sol-high leads the benchmark order and fable's measured lane is fable-max,
-    # so the sol group comes first and every group is whole, most effort first
-    sol, flash, fable = (carry.model_of(doc["lanes"][n])
-                         for n in ("sol-high@codex", "flash-high@agy", "fable-max@claude"))
-    record("44 the carry page and the tier pages group by model, efforts most to least",
+    # every group is whole, most effort first
+    sol, flash = (carry.model_of(doc["lanes"][n]) for n in ("sol-high@codex", "flash-high@agy"))
+    record("44 the carry page groups by model, efforts most to least",
            carry_rows[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"]
            and len({g for g, _ in carry_groups}) == len(carry_groups)
            and dict(carry_groups)[sol] == ["ultra", "high", "low"]
-           and dict(carry_groups)[flash] == ["high", "low"]
-           and t4[:2] == ["sol-high@codex", "sol-low@codex"]
-           and len({g for g, _ in t4_groups}) == len(t4_groups)
-           and dict(t4_groups)[fable] == ["max", "xhigh", "high", "medium", "low"]
-           and "sol-ultra@codex" not in t4
-           and all(eff == sorted(eff, key=setup_tui.effort_rank) for _g, eff in t4_groups),
-           repr((carry_rows, t4)))
+           and dict(carry_groups)[flash] == ["high", "low"],
+           repr(carry_rows))
     # the review page is by tier and in the user's order, so the model grouping
     # does not apply there (ticket 28): with no lines and no catalog order a
     # tier starts in benchmark order
-    move_to(w, "fable-low@claude")
-    w.handle("space")            # remove its current tier-4 default
     move_to(w, "sol-high@codex")
-    w.handle("space")
-    w.handle("enter")            # sol-high takes tier 4
+    w.handle("4")                # sol-high takes tier 4
     move_to(w, "fable-low@claude")
-    w.handle("space")
-    w.handle("enter")            # fable-low takes tier 3
+    w.handle("3")                # fable-low takes tier 3
     w.handle("enter")
-    w.handle("enter")            # the rest take tier 1
     review = dict(review_layout(w.view()))
     tier1 = review[1]
     record("44b the review page lists tiers 4 to 1, each starting in benchmark order without model grouping",
@@ -1787,16 +1614,17 @@ try:
     # by, so they must agree with the tier page
     doc = sweep_lanes()
     w = wizard(lanes=doc)
-    start(w)
-    t4 = [r["cells"][1] for r in w.view()["rows"]]
-    listed = [n for n in setup_tui.lane_order(doc, w.bench) if w._enabled[n]]
-    record("45 lane_order is the tier page's order over the whole catalog",
-           listed == t4 and setup_tui.bench_order_key(None, "x") == (True, 0, "x")
+    order = setup_tui.lane_order(doc, w.bench)
+    groups = groups_of(order, doc)
+    record("45 lane_order runs each model's efforts together, most to least",
+           sorted(order) == sorted(doc["lanes"])
+           and len({g for g, _ in groups}) == len(groups)
+           and setup_tui.bench_order_key(None, "x") == (True, 0, "x")
            # with no benchmark, the order is by name, still grouped
            and setup_tui.lane_order(doc, None)[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"],
-           repr((listed, t4)))
+           repr(order))
 except Exception as e:
-    record("45 lane_order is the tier page's order over the whole catalog", False, repr(e))
+    record("45 lane_order runs each model's efforts together, most to least", False, repr(e))
 
 
 try:
@@ -1882,7 +1710,7 @@ def at_review(clipboard, lanes=None):
     w = Wizard(copy.deepcopy(lanes or LANES), copy.deepcopy(ROUTING), data(), DISCOVERED,
                "/tmp/lanes.json", "/tmp/routing.json", clipboard=clipboard)
     start(w)
-    while w.screen == "tier":
+    while w.screen == "tiers":
         w.handle("enter")
     assert w.screen == "review", w.screen
     return w
@@ -1942,18 +1770,11 @@ try:
 
     second = wizard(lanes=pasted)
     start(second)
-    restored = []
-    while second.screen == "tier":
-        expected = {
-            name for name, lane in pasted["lanes"].items()
-            if lane.get("enabled", True) and lane["tier"] == second.tier
-        }
-        marked = {row["cells"][1] for row in second.view()["rows"] if row["marked"]}
-        restored.append(marked == expected)
-        second.handle("enter")
+    restored = [second.tiers() == {name: (lane["tier"] if lane.get("enabled", True) else 0)
+                                   for name, lane in pasted["lanes"].items()}]
     finish(second)
     record("48b a catalog first created with v restores its tiers and order on the next run",
-           restored == [True, True, True, True]
+           restored == [True]
            and second.result()[0] == pasted,
            repr((restored, second.result()[0])))
 except Exception as e:
@@ -2009,17 +1830,14 @@ try:
     summary = w.apply_tier_lines("fable-xhigh@claude 4\nsol-high@codex off\n")
     start_message = w.view()["message"]
     start(w)
-    t4 = [r["cells"][1] for r in w.view()["rows"]]
-    t4_marked = [r["cells"][1] for r in w.view()["rows"] if r["marked"]]
-    legend = w.view()["legend"]
-    while w.screen == "tier":
+    shown = {name: cell_text(w, name) for name in LANES["lanes"]}
+    while w.screen == "tiers":
         w.handle("enter")
     record("50 lines applied at start become editable tier defaults and say so on the start page",
            start_message == summary == "Lines: 1 took a tier; 1 went off; 4 not named, so off."
-           and t4 == ["fable-xhigh@claude"] and t4_marked == t4
-           and legend[0] == "Not listed: 5 not carried."
+           and shown == {name: ("T4" if name == "fable-xhigh@claude" else "off") for name in LANES["lanes"]}
            and w.screen == "review" and review_layout(w.view())[0] == (4, ["fable-xhigh@claude"]),
-           repr((start_message, t4, legend)))
+           repr((start_message, shown)))
 except Exception as e:
     record("50 lines applied at start become editable tier defaults", False, repr(e))
 
@@ -2030,7 +1848,7 @@ def through_lines(text, lanes=None):
     w = wizard(lanes=lanes)
     w.apply_tier_lines(text)
     start(w)
-    while w.screen == "tier":
+    while w.screen == "tiers":
         w.handle("enter")
     assert w.screen == "review", w.screen
     return w
@@ -2111,7 +1929,7 @@ try:
     doc["lanes"]["sol-high@codex"]["order"] = 7   # a gap in the catalog closes up when written
     w = wizard(lanes=doc)
     start(w)
-    while w.screen == "tier":
+    while w.screen == "tiers":
         w.handle("enter")
     tier1 = dict(review_layout(w.view()))[1]
     rest = tier1[3:]
@@ -2197,8 +2015,8 @@ except Exception as e:
 
 try:
     w = wizard(focus="tier3")
-    record("56 focused tier3 opens that page on current assignments",
-           w.screen == "tier" and w.tier == 3, (w.screen, w.tier))
+    record("56 focused tier3 opens the tiers page on current assignments",
+           w.screen == "tiers" and w.tiers()["sol-high@codex"] == 3, (w.screen, w.tier))
     before = dict(w._assigned)
     w.handle("enter")
     record("56b focused tier enter goes to confirm", w.screen == "confirm", w.screen)
@@ -2274,11 +2092,11 @@ try:
     name = next(n for n, lane in LANES["lanes"].items()
                 if lane["tier"] == 3 and lane.get("enabled", True))
     move_to(w, name)
-    w.handle("space")
+    w.handle("2")
     w.handle("enter")
     w.handle("y")
     result = w.result()[0]
-    record("61 focused Tier unmark demotes one Tier and appends at its end",
+    record("61 focused tier change moves one lane down a tier and appends it at that tier's end",
            result["lanes"][name]["tier"] == 2
            and catalog_edit._carried_in_tier(result["lanes"], 2)[-1] == name, result)
     record("61 untouched Tiers keep their original records",
@@ -2657,7 +2475,7 @@ try:
     carry_view = w.view()
     carried = [r["cells"][1] for r in carry_view["rows"] if r["marked"]]
     w.handle("enter")
-    tier4 = [r["cells"][1] for r in w.view()["rows"] if r["marked"]]
+    tier4 = [n for n, t in w.tiers().items() if t == 4]
     # a scrub that fails is a message and changes nothing
     def broken():
         raise RuntimeError("codex would not answer")
@@ -2687,7 +2505,7 @@ try:
            # still the harnesses page, so r is still on offer
            and w.scanned == "at 14:07" and ready_after is True
            and "extra-high@grok" in w.lanes_doc["lanes"] and carried == ["extra-high@grok"]
-           and tier4 == ["extra-high@grok"] and w.tier == 4
+           and tier4 == ["extra-high@grok"] and w.screen == "tiers"
            and w2.message == "rescan failed: codex would not answer" and unchanged
            and w3.screen == "prescreen"
            and w4.screen == "prescreen" and len(calls) == calls_before,
@@ -2858,7 +2676,8 @@ try:
     # a Tier choice: a lane unmarked on the tier 4 page
     tier, _r, _p = scanned_wizard(rescan=counted)
     tier.handle("enter"); tier.handle("enter"); tier.handle("enter")
-    assert tier.screen == "tier" and tier.tier == 4, (tier.screen, tier.tier)
+    assert tier.screen == "tiers", tier.screen
+    move_to(tier, tier._matrix_rows()[0]["lanes"][0])
     tier.handle("x")
     tier.handle("b"); tier.handle("b")
     tier.handle("r")
@@ -2875,10 +2694,10 @@ try:
 
     trip, _r, _p = scanned_wizard(rescan=fine)
     trip.handle("enter")
-    for _ in range(7):
+    for _ in range(4):
         trip.handle("enter")
     trip_screen = trip.screen
-    for _ in range(7):
+    for _ in range(4):
         trip.handle("b")
     trip_back = trip.screen
     trip.handle("r")
@@ -3041,5 +2860,73 @@ try:
            f"{bare_w.classes} {headings} {w.routing_doc['classes'].get('triage')}")
 except Exception as e:
     record("80 the wizard shows the shipped Classes by default", False, repr(e))
+
+
+# --- the tiers page and the benchmark page it links to ------------------------
+try:
+    w = wizard()
+    start(w)
+    changed = w.apply_page_changes([{"lane": "sol-high@codex", "tier": 4},
+                                    {"lane": "nobody@nowhere", "tier": 1},
+                                    {"lane": "luna-low@codex", "tier": 0}])
+    message = w.view()["message"]
+    finish(w)
+    lanes, _ = w.result()
+    record("81 a tier the linked page sends is set on the tiers page and written",
+           changed and message == "page: luna-low@codex off"
+           and lanes["lanes"]["sol-high@codex"]["tier"] == 4
+           and lanes["lanes"]["luna-low@codex"]["enabled"] is False, repr(message))
+except Exception as e:
+    record("81 a tier the linked page sends is set on the tiers page and written", False, repr(e))
+
+try:
+    # a harness with no carried lane starts hidden; h shows it, and the
+    # cursor stays on its model
+    incoming = copy.deepcopy(LANES)
+    incoming["lanes"]["grok46-high@grok"]["enabled"] = False
+    w = wizard(lanes=incoming)
+    start(w)
+    hidden = "grok" not in [r["section"].split()[0] for r in w.view()["rows"] if r.get("section")]
+    said = any("hidden: grok (h)" in line for line in w.view()["legend"])
+    move_to(w, "sol-high@codex")
+    w.handle("h")
+    shown = "grok" in [r["section"].split()[0] for r in w.view()["rows"] if r.get("section")]
+    record("82 harnesses with no carried lane start hidden, and h shows them",
+           hidden and said and shown and w._cursor_family()["group"] == "gpt-5.6-sol",
+           repr(w.view()["legend"]))
+except Exception as e:
+    record("82 harnesses with no carried lane start hidden, and h shows them", False, repr(e))
+
+try:
+    rows = TBENCH + [dict(r, benchmark="Second board") for r in TBENCH] \
+        + [dict(r, benchmark="Third board") for r in TBENCH]
+    w = wizard(lanes=astra_lanes(), effort_rows=rows)
+    start(w)
+    order = tier_matrix.board_order(w._boards)
+    first = w.board_id()
+    w.handle("]")
+    second = w.board
+    w.handle("[")
+    back = w.board_id()
+    w.handle("[")
+    last = w.board
+    moved = w.apply_page_changes([{"board": w._boards[order[0]]["id"]}])
+    record("83 [ and ] step through the boards in the page's order, and the page's board is the wizard's",
+           len(order) > 1 and first == w._boards[order[0]]["id"]
+           and second == order[1] and back == first and last == order[-1]
+           and moved and w.board == order[0]
+           and w.view()["body"][0].startswith(f"board 1/{len(order)}"), repr(w.view()["body"]))
+except Exception as e:
+    record("83 [ and ] step through the boards in the page's order", False, repr(e))
+
+try:
+    w = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
+    start(w)
+    html = w.page_html()
+    record("84 the page the link serves carries the wizard's board and its tiers",
+           f'"board":"{w.board_id()}"' in html and '"live":true' in html
+           and "/*DATA*/null" not in html, html[:200])
+except Exception as e:
+    record("84 the page the link serves carries the wizard's board", False, repr(e))
 
 sys.exit(1 if fails else 0)

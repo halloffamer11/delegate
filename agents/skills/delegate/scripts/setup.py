@@ -700,7 +700,7 @@ def main(argv=None):
     parser.add_argument(
         "--screen",
         default="start",
-        choices=("start", "carry", "tier1", "tier2", "tier3", "tier4", "review", "routing"),
+        choices=("start", "carry", "tiers", "tier1", "tier2", "tier3", "tier4", "review", "routing"),
         help="enter one setup screen; start is the full wizard",
     )
     args = parser.parse_args(argv)
